@@ -1,0 +1,1376 @@
+openapi: 3.0.3
+info:
+ title: NOVA API
+ description: Voice and Visual Companion platform REST API — Admin Console, Audit, and Observability
+ version: 0.1.0
+ contact:
+ name: Leadup Technologies
+ license:
+ name: Proprietary
+
+servers:
+ - url: http://localhost:3004
+ description: Admin service (local development)
+
+paths:
+ /health:
+ get:
+ tags:
+ - Health
+ summary: Health check (no auth)
+ operationId: getHealth
+ responses:
+ '200':
+ description: Service is healthy
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/HealthResponse'
+
+ /health/ready:
+ get:
+ tags:
+ - Health
+ summary: Readiness probe
+ operationId: getReadiness
+ responses:
+ '200':
+ description: Service is ready
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ status:
+ type: string
+ example: ready
+ timestamp:
+ type: string
+ format: date-time
+
+ /health/live:
+ get:
+ tags:
+ - Health
+ summary: Liveness probe
+ operationId: getLiveness
+ responses:
+ '200':
+ description: Service is alive
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ status:
+ type: string
+ example: alive
+ timestamp:
+ type: string
+ format: date-time
+
+ /metrics:
+ get:
+ tags:
+ - Observability
+ summary: Prometheus metrics
+ operationId: getMetrics
+ responses:
+ '200':
+ description: Prometheus format metrics
+ content:
+ text/plain:
+ schema:
+ type: string
+
+ /admin/organizations:
+ get:
+ tags:
+ - Admin Console
+ summary: List organizations for the current user
+ operationId: listOrganizations
+ security:
+ - bearerAuth: []
+ responses:
+ '200':
+ description: Organizations list
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/PaginatedOrganizations'
+ '401':
+ $ref: '#/components/responses/Unauthorized'
+ '403':
+ $ref: '#/components/responses/Forbidden'
+
+ /admin/organizations/{id}:
+ get:
+ tags:
+ - Admin Console
+ summary: Get a single organization
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema:
+ type: string
+ format: uuid
+ responses:
+ '200':
+ description: Organization details
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/Organization'
+ '401':
+ $ref: '#/components/responses/Unauthorized'
+ '403':
+ $ref: '#/components/responses/Forbidden'
+ '404':
+ $ref: '#/components/responses/NotFound'
+
+ patch:
+ tags:
+ - Admin Console
+ summary: Update an organization
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema:
+ type: string
+ format: uuid
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/UpdateOrganization'
+ responses:
+ '200':
+ description: Updated organization
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/Organization'
+ '401':
+ $ref: '#/components/responses/Unauthorized'
+ '403':
+ $ref: '#/components/responses/Forbidden'
+ '404':
+ $ref: '#/components/responses/NotFound'
+
+ /admin/organizations/{id}/users:
+ get:
+ tags:
+ - Admin Console
+ summary: List users in an organization
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema:
+ type: string
+ format: uuid
+ - name: page
+ in: query
+ schema:
+ type: integer
+ default: 1
+ - name: pageSize
+ in: query
+ schema:
+ type: integer
+ default: 20
+ responses:
+ '200':
+ description: Users list
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/PaginatedUsers'
+ '401':
+ $ref: '#/components/responses/Unauthorized'
+ '403':
+ $ref: '#/components/responses/Forbidden'
+
+ /admin/organizations/{id}/users/{userId}/role:
+ patch:
+ tags:
+ - Admin Console
+ summary: Change a user's role
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema:
+ type: string
+ format: uuid
+ - name: userId
+ in: path
+ required: true
+ schema:
+ type: string
+ format: uuid
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/ChangeUserRole'
+ responses:
+ '200':
+ description: Updated role binding
+ '401':
+ $ref: '#/components/responses/Unauthorized'
+ '403':
+ $ref: '#/components/responses/Forbidden'
+
+ /admin/organizations/{id}/workspaces:
+ get:
+ tags:
+ - Admin Console
+ summary: List workspaces in an organization
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema:
+ type: string
+ format: uuid
+ responses:
+ '200':
+ description: Workspaces list
+ content:
+ application/json:
+ schema:
+ type: array
+ items:
+ $ref: '#/components/schemas/Workspace'
+ '401':
+ $ref: '#/components/responses/Unauthorized'
+ '403':
+ $ref: '#/components/responses/Forbidden'
+
+ post:
+ tags:
+ - Admin Console
+ summary: Create a workspace
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema:
+ type: string
+ format: uuid
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/CreateWorkspace'
+ responses:
+ '201':
+ description: Created workspace
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/Workspace'
+ '401':
+ $ref: '#/components/responses/Unauthorized'
+ '403':
+ $ref: '#/components/responses/Forbidden'
+
+ /admin/workspaces/{id}:
+ patch:
+ tags:
+ - Admin Console
+ summary: Update a workspace
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema:
+ type: string
+ format: uuid
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/UpdateWorkspace'
+ responses:
+ '200':
+ description: Updated workspace
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/Workspace'
+ '401':
+ $ref: '#/components/responses/Unauthorized'
+ '403':
+ $ref: '#/components/responses/Forbidden'
+ '404':
+ $ref: '#/components/responses/NotFound'
+
+ delete:
+ tags:
+ - Admin Console
+ summary: Soft-delete a workspace
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema:
+ type: string
+ format: uuid
+ responses:
+ '204':
+ description: Workspace deleted
+ '401':
+ $ref: '#/components/responses/Unauthorized'
+ '403':
+ $ref: '#/components/responses/Forbidden'
+ '404':
+ $ref: '#/components/responses/NotFound'
+
+ /admin/roles:
+ get:
+ tags:
+ - Admin Console
+ summary: List all system roles
+ responses:
+ '200':
+ description: Roles list
+ content:
+ application/json:
+ schema:
+ type: array
+ items:
+ $ref: '#/components/schemas/Role'
+ '401':
+ $ref: '#/components/responses/Unauthorized'
+ '403':
+ $ref: '#/components/responses/Forbidden'
+
+ /admin/audit-log/events:
+ post:
+ tags:
+ - Audit
+ summary: Emit an audit event (service-to-service)
+ description: Creates an immutable audit log entry. Used by other services to record actions.
+ security:
+ - bearerAuth: []
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/CreateAuditEvent'
+ responses:
+ '201':
+ description: Audit event created
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/AuditEvent'
+
+ /admin/audit-log:
+ get:
+ tags:
+ - Audit
+ summary: Query audit log with filters
+ security:
+ - bearerAuth: []
+ parameters:
+ - name: actorUserId
+ in: query
+ schema:
+ type: string
+ format: uuid
+ - name: resourceType
+ in: query
+ schema:
+ type: string
+ - name: action
+ in: query
+ schema:
+ type: string
+ - name: toolName
+ in: query
+ schema:
+ type: string
+ - name: decision
+ in: query
+ schema:
+ type: string
+ enum: [allowed, denied, escalated]
+ - name: from
+ in: query
+ schema:
+ type: string
+ format: date-time
+ - name: to
+ in: query
+ schema:
+ type: string
+ format: date-time
+ - name: page
+ in: query
+ schema:
+ type: integer
+ default: 1
+ - name: pageSize
+ in: query
+ schema:
+ type: integer
+ default: 20
+ responses:
+ '200':
+ description: Paginated audit events
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/PaginatedAuditEvents'
+ '401':
+ $ref: '#/components/responses/Unauthorized'
+ '403':
+ $ref: '#/components/responses/Forbidden'
+
+ /admin/audit-log/stats:
+ get:
+ tags:
+ - Audit
+ summary: Get audit log aggregate stats
+ security:
+ - bearerAuth: []
+ parameters:
+ - name: from
+ in: query
+ schema:
+ type: string
+ format: date-time
+ - name: to
+ in: query
+ schema:
+ type: string
+ format: date-time
+ responses:
+ '200':
+ description: Aggregate stats
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/AuditStats'
+ '401':
+ $ref: '#/components/responses/Unauthorized'
+ '403':
+ $ref: '#/components/responses/Forbidden'
+
+ /admin/audit-log/{id}:
+ get:
+ tags:
+ - Audit
+ summary: Get a single audit event
+ security:
+ - bearerAuth: []
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema:
+ type: string
+ format: uuid
+ responses:
+ '200':
+ description: Audit event
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/AuditEvent'
+ '401':
+ $ref: '#/components/responses/Unauthorized'
+ '403':
+ $ref: '#/components/responses/Forbidden'
+ '404':
+ $ref: '#/components/responses/NotFound'
+
+ /admin/feature-flags:
+ get:
+ tags:
+ - Feature Flags
+ summary: List all feature flags
+ security:
+ - bearerAuth: []
+ responses:
+ '200':
+ description: Feature flags list
+ content:
+ application/json:
+ schema:
+ type: array
+ items:
+ $ref: '#/components/schemas/FeatureFlag'
+
+ patch:
+ tags:
+ - Feature Flags
+ summary: Update a feature flag
+ security:
+ - bearerAuth: []
+ parameters:
+ - name: key
+ in: path
+ required: true
+ schema:
+ type: string
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/UpdateFeatureFlag'
+ responses:
+ '200':
+ description: Updated feature flag
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/FeatureFlag'
+ '404':
+ $ref: '#/components/responses/NotFound'
+
+ /admin/cost-usage:
+ get:
+ tags:
+ - Observability
+ summary: List cost/usage records
+ security:
+ - bearerAuth: []
+ parameters:
+ - name: metric
+ in: query
+ schema:
+ type: string
+ - name: from
+ in: query
+ schema:
+ type: string
+ format: date-time
+ - name: to
+ in: query
+ schema:
+ type: string
+ format: date-time
+ - name: page
+ in: query
+ schema:
+ type: integer
+ default: 1
+ - name: pageSize
+ in: query
+ schema:
+ type: integer
+ default: 20
+ responses:
+ '200':
+ description: Paginated cost/usage records
+
+ /admin/cost-usage/summary:
+ get:
+ tags:
+ - Observability
+ summary: Aggregate cost summary by metric
+ security:
+ - bearerAuth: []
+ responses:
+ '200':
+ description: Cost summary
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ data:
+ type: array
+ items:
+ type: object
+ totalMetrics:
+ type: integer
+
+ /admin/incidents:
+ get:
+ tags:
+ - Observability
+ summary: List incident events
+ security:
+ - bearerAuth: []
+ parameters:
+ - name: severity
+ in: query
+ schema:
+ type: string
+ enum: [info, warning, error, critical]
+ - name: category
+ in: query
+ schema:
+ type: string
+ - name: page
+ in: query
+ schema:
+ type: integer
+ default: 1
+ - name: pageSize
+ in: query
+ schema:
+ type: integer
+ default: 20
+ responses:
+ '200':
+ description: Paginated incidents
+
+ post:
+ tags:
+ - Observability
+ summary: Create an incident event
+ security:
+ - bearerAuth: []
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/CreateIncident'
+ responses:
+ '201':
+ description: Incident created
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/IncidentEvent'
+
+ /admin/incidents/{id}/acknowledge:
+ patch:
+ tags:
+ - Observability
+ summary: Acknowledge an incident
+ security:
+ - bearerAuth: []
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema:
+ type: string
+ format: uuid
+ responses:
+ '200':
+ description: Incident acknowledged
+ '404':
+ $ref: '#/components/responses/NotFound'
+
+ /admin/incidents/{id}/resolve:
+ patch:
+ tags:
+ - Observability
+ summary: Resolve an incident
+ security:
+ - bearerAuth: []
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema:
+ type: string
+ format: uuid
+ responses:
+ '200':
+ description: Incident resolved
+ '404':
+ $ref: '#/components/responses/NotFound'
+
+ /admin/policy-rules:
+ get:
+ tags:
+ - Admin Policy
+ summary: List admin policy rules
+ security:
+ - bearerAuth: []
+ responses:
+ '200':
+ description: Policy rules list
+ content:
+ application/json:
+ schema:
+ type: array
+ items:
+ $ref: '#/components/schemas/PolicyRule'
+
+ post:
+ tags:
+ - Admin Policy
+ summary: Create a policy rule
+ security:
+ - bearerAuth: []
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/CreatePolicyRule'
+ responses:
+ '201':
+ description: Policy rule created
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/PolicyRule'
+
+ patch:
+ tags:
+ - Admin Policy
+ summary: Update a policy rule
+ security:
+ - bearerAuth: []
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema:
+ type: string
+ format: uuid
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/UpdatePolicyRule'
+ responses:
+ '200':
+ description: Updated policy rule
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/PolicyRule'
+ '404':
+ $ref: '#/components/responses/NotFound'
+
+ delete:
+ tags:
+ - Admin Policy
+ summary: Soft-delete a policy rule
+ security:
+ - bearerAuth: []
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema:
+ type: string
+ format: uuid
+ responses:
+ '204':
+ description: Policy rule deleted
+ '404':
+ $ref: '#/components/responses/NotFound'
+
+ /admin/health:
+ get:
+ tags:
+ - Observability
+ summary: Full system health check
+ security:
+ - bearerAuth: []
+ responses:
+ '200':
+ description: Full health status
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ status:
+ type: string
+ timestamp:
+ type: string
+ format: date-time
+ dependencies:
+ type: object
+ checks:
+ type: array
+ items:
+ type: object
+
+ /admin/health/checks:
+ post:
+ tags:
+ - Observability
+ summary: Update a health check (service-to-service)
+ security:
+ - bearerAuth: []
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema:
+ $ref: '#/components/schemas/UpdateHealthCheck'
+ responses:
+ '200':
+ description: Health check updated
+
+components:
+ securitySchemes:
+ bearerAuth:
+ type: http
+ scheme: bearer
+ bearerFormat: JWT
+
+ schemas:
+ HealthResponse:
+ type: object
+ properties:
+ status:
+ type: string
+ enum: [healthy, degraded, unhealthy]
+ timestamp:
+ type: string
+ format: date-time
+ version:
+ type: string
+ dependencies:
+ type: object
+ properties:
+ database:
+ $ref: '#/components/schemas/DependencyCheck'
+ redis:
+ $ref: '#/components/schemas/DependencyCheck'
+ storage:
+ $ref: '#/components/schemas/DependencyCheck'
+
+ DependencyCheck:
+ type: object
+ properties:
+ status:
+ type: string
+ enum: [up, down]
+ latencyMs:
+ type: number
+
+ Organization:
+ type: object
+ properties:
+ id:
+ type: string
+ format: uuid
+ name:
+ type: string
+ slug:
+ type: string
+ plan:
+ type: string
+ created_at:
+ type: string
+ format: date-time
+
+ PaginatedOrganizations:
+ type: object
+ properties:
+ data:
+ type: array
+ items:
+ $ref: '#/components/schemas/Organization'
+ page:
+ type: integer
+ pageSize:
+ type: integer
+ totalItems:
+ type: integer
+ totalPages:
+ type: integer
+
+ UpdateOrganization:
+ type: object
+ properties:
+ name:
+ type: string
+ maxLength: 255
+ plan:
+ type: string
+ enum: [free, pro, enterprise]
+
+ PaginatedUsers:
+ type: object
+ properties:
+ data:
+ type: array
+ items:
+ type: object
+ properties:
+ id:
+ type: string
+ format: uuid
+ email:
+ type: string
+ display_name:
+ type: string
+ role:
+ type: string
+ created_at:
+ type: string
+ format: date-time
+ page:
+ type: integer
+ pageSize:
+ type: integer
+ totalItems:
+ type: integer
+ totalPages:
+ type: integer
+
+ ChangeUserRole:
+ type: object
+ required:
+ - role
+ properties:
+ role:
+ type: string
+ enum: [owner, admin, manager, member, auditor, support_limited]
+
+ Workspace:
+ type: object
+ properties:
+ id:
+ type: string
+ format: uuid
+ name:
+ type: string
+ organization_id:
+ type: string
+ format: uuid
+ created_at:
+ type: string
+ format: date-time
+
+ CreateWorkspace:
+ type: object
+ required:
+ - name
+ properties:
+ name:
+ type: string
+ maxLength: 255
+
+ UpdateWorkspace:
+ type: object
+ properties:
+ name:
+ type: string
+ maxLength: 255
+
+ Role:
+ type: object
+ properties:
+ id:
+ type: string
+ format: uuid
+ key:
+ type: string
+ display_name:
+ type: string
+ description:
+ type: string
+
+ CreateAuditEvent:
+ type: object
+ required:
+ - action
+ properties:
+ action:
+ type: string
+ maxLength: 100
+ resource_type:
+ type: string
+ maxLength: 50
+ resource_id:
+ type: string
+ format: uuid
+ changes:
+ type: object
+ additionalProperties: true
+ tool_name:
+ type: string
+ maxLength: 100
+ tool_input:
+ type: object
+ additionalProperties: true
+ tool_output:
+ type: object
+ additionalProperties: true
+ decision:
+ type: string
+ enum: [allowed, denied, escalated]
+ request_id:
+ type: string
+ maxLength: 64
+ actor_session_id:
+ type: string
+ format: uuid
+ actor_device_id:
+ type: string
+ format: uuid
+ correlation_id:
+ type: string
+ maxLength: 64
+ ip_address:
+ type: string
+ user_agent:
+ type: string
+
+ PaginatedAuditEvents:
+ type: object
+ properties:
+ data:
+ type: array
+ items:
+ $ref: '#/components/schemas/AuditEvent'
+ page:
+ type: integer
+ pageSize:
+ type: integer
+ totalItems:
+ type: integer
+ totalPages:
+ type: integer
+
+ AuditEvent:
+ type: object
+ properties:
+ id:
+ type: string
+ format: uuid
+ organization_id:
+ type: string
+ format: uuid
+ actor_user_id:
+ type: string
+ format: uuid
+ action:
+ type: string
+ resource_type:
+ type: string
+ resource_id:
+ type: string
+ format: uuid
+ changes:
+ type: object
+ additionalProperties: true
+ ip_address:
+ type: string
+ user_agent:
+ type: string
+ request_id:
+ type: string
+ tool_name:
+ type: string
+ tool_input:
+ type: object
+ additionalProperties: true
+ tool_output:
+ type: object
+ additionalProperties: true
+ decision:
+ type: string
+ correlation_id:
+ type: string
+ created_at:
+ type: string
+ format: date-time
+
+ AuditStats:
+ type: object
+ properties:
+ totalEvents:
+ type: integer
+ actionCounts:
+ type: object
+ additionalProperties:
+ type: integer
+ toolCounts:
+ type: object
+ additionalProperties:
+ type: integer
+ decisions:
+ type: object
+ additionalProperties:
+ type: integer
+
+ FeatureFlag:
+ type: object
+ properties:
+ id:
+ type: string
+ format: uuid
+ key:
+ type: string
+ description:
+ type: string
+ enabled:
+ type: boolean
+ rollout_percentage:
+ type: integer
+ allowed_org_ids:
+ type: array
+ items:
+ type: string
+ format: uuid
+ allowed_user_ids:
+ type: array
+ items:
+ type: string
+ format: uuid
+ metadata:
+ type: object
+ additionalProperties: true
+ created_at:
+ type: string
+ format: date-time
+ updated_at:
+ type: string
+ format: date-time
+
+ UpdateFeatureFlag:
+ type: object
+ properties:
+ enabled:
+ type: boolean
+ rollout_percentage:
+ type: integer
+ minimum: 0
+ maximum: 100
+ allowed_org_ids:
+ type: array
+ items:
+ type: string
+ format: uuid
+ allowed_user_ids:
+ type: array
+ items:
+ type: string
+ format: uuid
+ metadata:
+ type: object
+ additionalProperties: true
+
+ UpdateHealthCheck:
+ type: object
+ required:
+ - check_name
+ - status
+ properties:
+ check_name:
+ type: string
+ category:
+ type: string
+ status:
+ type: string
+ enum: [healthy, degraded, unhealthy]
+ latency_ms:
+ type: integer
+ minimum: 0
+ message:
+ type: string
+
+ CreateIncident:
+ type: object
+ required:
+ - severity
+ - category
+ - title
+ properties:
+ severity:
+ type: string
+ enum: [info, warning, error, critical]
+ category:
+ type: string
+ maxLength: 50
+ title:
+ type: string
+ maxLength: 255
+ description:
+ type: string
+ source:
+ type: string
+ maxLength: 100
+ metadata:
+ type: object
+ additionalProperties: true
+
+ IncidentEvent:
+ type: object
+ properties:
+ id:
+ type: string
+ format: uuid
+ organization_id:
+ type: string
+ format: uuid
+ severity:
+ type: string
+ category:
+ type: string
+ title:
+ type: string
+ description:
+ type: string
+ source:
+ type: string
+ metadata:
+ type: object
+ additionalProperties: true
+ acknowledged_at:
+ type: string
+ format: date-time
+ acknowledged_by:
+ type: string
+ format: uuid
+ resolved_at:
+ type: string
+ format: date-time
+ resolved_by:
+ type: string
+ format: uuid
+ created_at:
+ type: string
+ format: date-time
+
+ CreatePolicyRule:
+ type: object
+ required:
+ - name
+ properties:
+ name:
+ type: string
+ maxLength: 255
+ description:
+ type: string
+ rule_type:
+ type: string
+ maxLength: 50
+ default: custom
+ priority:
+ type: integer
+ default: 0
+ condition:
+ type: object
+ additionalProperties: true
+ default: {}
+ action:
+ type: object
+ additionalProperties: true
+ default: {}
+
+ UpdatePolicyRule:
+ type: object
+ properties:
+ name:
+ type: string
+ maxLength: 255
+ description:
+ type: string
+ priority:
+ type: integer
+ condition:
+ type: object
+ additionalProperties: true
+ action:
+ type: object
+ additionalProperties: true
+ enabled:
+ type: boolean
+
+ PolicyRule:
+ type: object
+ properties:
+ id:
+ type: string
+ format: uuid
+ organization_id:
+ type: string
+ format: uuid
+ name:
+ type: string
+ description:
+ type: string
+ rule_type:
+ type: string
+ priority:
+ type: integer
+ condition:
+ type: object
+ additionalProperties: true
+ action:
+ type: object
+ additionalProperties: true
+ enabled:
+ type: boolean
+ created_at:
+ type: string
+ format: date-time
+
+responses:
+ Unauthorized:
+ description: Missing or invalid JWT
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ type:
+ type: string
+ example: https://api.nova.leadup.in/problems/unauthorized
+ title:
+ type: string
+ example: Unauthorized
+ status:
+ type: integer
+ example: 401
+ detail:
+ type: string
+
+ Forbidden:
+ description: Insufficient permissions
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ type:
+ type: string
+ example: https://api.nova.leadup.in/problems/forbidden
+ title:
+ type: string
+ example: Forbidden
+ status:
+ type: integer
+ example: 403
+ detail:
+ type: string
+
+ NotFound:
+ description: Resource not found
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ type:
+ type: string
+ example: about:blank
+ title:
+ type: string
+ example: Not Found
+ status:
+ type: integer
+ example: 404
+ detail:
+ type: string

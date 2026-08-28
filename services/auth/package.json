@@ -1,0 +1,44 @@
+{
+  "name": "@nova/auth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NOVA authentication and RBAC service",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint src/",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "clean": "rm -rf dist",
+ "audit": "pnpm audit --audit-level=moderate"
+  },
+  "dependencies": {
+    "@nova/types": "workspace:*",
+    "@nova/utils": "workspace:*",
+    "@nova/auth-types": "workspace:*",
+    "express": "^4.21.0",
+    "zod": "^3.25.76",
+    "pg": "^8.16.0",
+    "ioredis": "^5.6.1",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "nanoid": "^5.0.7"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "typescript": "^5.8.3",
+    "eslint": "^9.27.0",
+    "tsx": "^4.7.0",
+    "vitest": "^3.2.0",
+    "@types/pg": "^8.11.15"
+  }
+}

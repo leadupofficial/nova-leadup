@@ -1,0 +1,40 @@
+{
+  "name": "nova-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NOVA \u2014 Voice and Visual Companion platform monorepo",
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "type-check": "turbo run type-check",
+    "test": "turbo run test",
+    "test:unit": "turbo run test:unit",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,yml,yaml,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,yml,yaml,md}\"",
+    "security:audit": "turbo run audit",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:reset": "docker compose down -v",
+    "db:migrate": "turbo run db:migrate",
+    "db:seed": "turbo run db:seed",
+    "dev:api": "turbo run dev --filter=@nova/api",
+    "dev:auth": "turbo run dev --filter=@nova/auth",
+    "dev:all": "turbo run dev"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.4",
+    "prettier": "^3.5.3"
+  },
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}

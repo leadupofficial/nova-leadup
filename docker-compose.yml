@@ -1,0 +1,175 @@
+services:
+ postgres:
+ image: pgvector/pgvector:pg16
+ container_name: nova-postgres
+ restart: unless-stopped
+ ports:
+ - "5432:5432"
+ environment:
+ POSTGRES_USER: postgres
+ POSTGRES_PASSWORD: postgres
+ POSTGRES_DB: nova
+ POSTGRES_INITDB_ARGS: "-E UTF8 --locale=en_US.UTF-8"
+ volumes:
+ - postgres_data:/var/lib/postgresql/data
+ - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
+ healthcheck:
+ test: ["CMD-SHELL", "pg_isready -U postgres -d nova"]
+ interval: 10s
+ timeout: 5s
+ retries: 5
+ start_period: 30s
+ networks:
+ - nova-network
+
+ redis:
+ image: redis:7-alpine
+ container_name: nova-redis
+ restart: unless-stopped
+ ports:
+ - "6379:6379"
+ volumes:
+ - redis_data:/data
+ command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+ healthcheck:
+ test: ["CMD", "redis-cli", "ping"]
+ interval: 10s
+ timeout: 5s
+ retries: 5
+ start_period: 5s
+ networks:
+ - nova-network
+
+ minio:
+ image: minio/minio:latest
+ container_name: nova-minio
+ restart: unless-stopped
+ ports:
+ - "9000:9000"
+ - "9001:9001"
+ environment:
+ MINIO_ROOT_USER: minioadmin
+ MINIO_ROOT_PASSWORD: minioadmin
+ volumes:
+ - minio_data:/data
+ command: server /data --console-address ":9001"
+ healthcheck:
+ test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+ interval: 10s
+ timeout: 5s
+ retries: 5
+ start_period: 10s
+ networks:
+ - nova-network
+
+ api:
+ build:
+ context: .
+ dockerfile: services/api/Dockerfile
+ container_name: nova-api
+ restart: unless-stopped
+ ports:
+ - "3001:3001"
+ environment:
+ DATABASE_URL: postgres://postgres:postgres@postgres:5432/nova
+ REDIS_URL: redis://redis:6379
+ S3_ENDPOINT: http://minio:9000
+ S3_ACCESS_KEY: minioadmin
+ S3_SECRET_KEY: minioadmin
+ S3_BUCKET: nova-assets
+ NODE_ENV: development
+ PORT: 3001
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+ minio:
+ condition: service_healthy
+ networks:
+ - nova-network
+
+ auth:
+ build:
+ context: .
+ dockerfile: services/auth/Dockerfile
+ container_name: nova-auth
+ restart: unless-stopped
+ ports:
+ - "3003:3003"
+ environment:
+ DATABASE_URL: postgres://postgres:postgres@postgres:5432/nova
+ REDIS_URL: redis://redis:6379
+ JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+ REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:-change-me-in-production}
+ AUTH_ENCRYPTION_KEY: ${AUTH_ENCRYPTION_KEY:-change-me-in-production-32-bytes-long!!}
+ API_KEY_SECRET: ${API_KEY_SECRET:-change-me-in-production}
+ NODE_ENV: development
+ PORT: 3003
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+ networks:
+ - nova-network
+
+ workers:
+ build:
+ context: .
+ dockerfile: services/workers/Dockerfile
+ container_name: nova-workers
+ restart: unless-stopped
+ environment:
+ DATABASE_URL: postgres://postgres:postgres@postgres:5432/nova
+ REDIS_URL: redis://redis:6379
+ S3_ENDPOINT: http://minio:9000
+ S3_ACCESS_KEY: minioadmin
+ S3_SECRET_KEY: minioadmin
+ S3_BUCKET: nova-assets
+ NODE_ENV: development
+ PORT: 3002
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+ minio:
+ condition: service_healthy
+ networks:
+ - nova-network
+
+ admin:
+ build:
+ context: .
+ dockerfile: services/admin/Dockerfile
+ target: builder
+ container_name: nova-admin
+ restart: unless-stopped
+ ports:
+ - "3004:3004"
+ environment:
+ DATABASE_URL: postgres://postgres:postgres@postgres:5432/nova
+ REDIS_URL: redis://redis:6379
+ JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+ NODE_ENV: development
+ PORT: 3004
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+ networks:
+ - nova-network
+
+volumes:
+ postgres_data:
+ driver: local
+ redis_data:
+ driver: local
+ minio_data:
+ driver: local
+
+networks:
+ nova-network:
+ driver: bridge
