@@ -101,6 +101,79 @@ jobs:
  with:
  sarif_file: 'trivy-results.sarif'
 
+ e2e-tests:
+ name: E2E Tests
+ runs-on: ubuntu-latest
+ needs: [lint, type-check, test]
+ services:
+ postgres:
+ image: pgvector/pgvector:pg16
+ ports: ['5433:5432']
+ env:
+ POSTGRES_USER: postgres
+ POSTGRES_PASSWORD: postgres
+ POSTGRES_DB: nova_test
+ options: >-
+ --health-cmd "pg_isready -U postgres -d nova_test"
+ --health-interval 5s
+ --health-timeout 3s
+ --health-retries 5
+ redis:
+ image: redis:7-alpine
+ ports: ['6380:6379']
+ options: >-
+ --health-cmd "redis-cli ping"
+ --health-interval 5s
+ --health-timeout 3s
+ --health-retries 5
+ minio:
+ image: minio/minio:latest
+ ports: ['9001:9000']
+ env:
+ MINIO_ROOT_USER: minioadmin
+ MINIO_ROOT_PASSWORD: minioadmin
+ options: >-
+ --health-cmd "curl -f http://localhost:9000/minio/health/live"
+ --health-interval 5s
+ --health-timeout 3s
+ --health-retries 5
+ steps:
+ - uses: actions/checkout@v4
+ - uses: pnpm/action-setup@v4
+ with:
+ version: 11.24.0
+ - uses: actions/setup-node@v4
+ with:
+ node-version: '22'
+ cache: 'pnpm'
+ - run: pnpm install --frozen-lockfile
+ # Install Playwright browsers and OS deps
+ - run: pnpm exec playwright install --with-deps chromium
+ # Install service dependencies
+ - run: pnpm --filter @nova/auth install
+ - run: pnpm --filter @nova/api install
+ - run: pnpm --filter @nova/admin install
+ # Wait for infra
+ - run: sleep 5
+ # Run migrations
+ - run: DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 pnpm --filter @nova/api run db:migrate
+ - run: DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 pnpm --filter @nova/auth run db:migrate
+ # Start services in background
+ - run: |
+ DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 S3_ENDPOINT=http://localhost:9001 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=minioadmin PORT=3001 pnpm --filter @nova/api run dev &
+ DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-jwt-secret-do-not-use-prod REFRESH_TOKEN_SECRET=e2e-refresh-secret-do-not-use-prod AUTH_ENCRYPTION_KEY=e2lwZW50b2tlcmtleXdlbGx0aGluZzMyYnl0ZXNmb3J0ZXNl API_KEY_SECRET=e2e-api-key-secret-do-not-use-prod PORT=3003 pnpm --filter @nova/auth run dev &
+ DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-jwt-secret-do-not-use-prod PORT=3004 CORS_ORIGIN=http://localhost:3000 pnpm --filter @nova/admin run dev &
+ sleep 8
+ # Run E2E tests
+ - run: API_URL=http://localhost:3001 AUTH_URL=http://localhost:3003 ADMIN_URL=http://localhost:3004 pnpm run test:e2e
+ # Upload Playwright report
+ - uses: actions/upload-artifact@v4
+ if: always()
+ with:
+ name: playwright-report
+ path: playwright-report/
+ retention-days: 7
+
  build:
  name: Build
  runs-on: ubuntu-latest

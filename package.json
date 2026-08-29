@@ -15,6 +15,13 @@
     "type-check": "turbo run type-check",
     "test": "turbo run test",
     "test:unit": "turbo run test:unit",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
+    "e2e:up": "bash scripts/e2e-env.sh up",
+    "e2e:down": "bash scripts/e2e-env.sh down",
+    "e2e:run": "bash scripts/e2e-env.sh test",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,yml,yaml,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,yml,yaml,md}\"",
     "security:audit": "turbo run audit",
@@ -30,7 +37,8 @@
   },
   "devDependencies": {
     "turbo": "^2.5.4",
-    "prettier": "^3.5.3"
+    "prettier": "^3.5.3",
+    "@playwright/test": "^1.52.0"
   },
   "packageManager": "pnpm@11.24.0",
   "engines": {

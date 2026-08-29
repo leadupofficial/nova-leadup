@@ -1,0 +1,106 @@
+version: '3.9'
+
+# Test overlay for docker-compose.dev.yml
+# Spins up a separate network/prefix for E2E tests so they
+# never collide with a developer's local stack.
+
+services:
+ postgres:
+ ports:
+ - "5433:5432"
+ container_name: nova-e2e-postgres
+
+ redis:
+ ports:
+ - "6380:6379"
+ container_name: nova-e2e-redis
+
+ minio:
+ ports:
+ - "9001:9000"
+ - "9002:9001"
+ container_name: nova-e2e-minio
+
+ api:
+ ports:
+ - "3001:3001"
+ container_name: nova-e2e-api
+ command: sh -c "sleep 2 && pnpm run db:migrate && pnpm start"
+ environment:
+ DATABASE_URL: postgres://postgres:postgres@postgres:5432/nova_test
+ REDIS_URL: redis://redis:6379
+ S3_ENDPOINT: http://minio:9000
+ S3_ACCESS_KEY: minioadmin
+ S3_SECRET_KEY: minioadmin
+ S3_BUCKET: nova-assets
+ NODE_ENV: test
+ PORT: 3001
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+ minio:
+ condition: service_healthy
+
+ auth:
+ ports:
+ - "3003:3003"
+ container_name: nova-e2e-auth
+ command: sh -c "sleep 2 && pnpm run db:migrate && pnpm start"
+ environment:
+ DATABASE_URL: postgres://postgres:postgres@postgres:5432/nova_test
+ REDIS_URL: redis://redis:6379
+ JWT_SECRET: e2e-jwt-secret-do-not-use-prod
+ REFRESH_TOKEN_SECRET: e2e-refresh-secret-do-not-use-prod
+ AUTH_ENCRYPTION_KEY: e2lwZW50b2tlcmtleXdlbGx0aGluZzMyYnl0ZXNmb3J0ZXNl
+ API_KEY_SECRET: e2e-api-key-secret-do-not-use-prod
+ NODE_ENV: test
+ PORT: 3003
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+
+ admin:
+ ports:
+ - "3004:3004"
+ container_name: nova-e2e-admin
+ command: sh -c "sleep 2 && pnpm start"
+ environment:
+ DATABASE_URL: postgres://postgres:postgres@postgres:5432/nova_test
+ REDIS_URL: redis://redis:6379
+ JWT_SECRET: e2e-jwt-secret-do-not-use-prod
+ REFRESH_TOKEN_SECRET: e2e-refresh-secret-do-not-use-prod
+ AUTH_ENCRYPTION_KEY: e2lwZW50b2tlcmtleXdlbGx0aGluZzMyYnl0ZXNmb3J0ZXNl
+ API_KEY_SECRET: e2e-api-key-secret-do-not-use-prod
+ NODE_ENV: test
+ PORT: 3004
+ CORS_ORIGIN: http://localhost:3000
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+
+ workers:
+ ports:
+ - "3002:3002"
+ container_name: nova-e2e-workers
+ environment:
+ DATABASE_URL: postgres://postgres:postgres@postgres:5432/nova_test
+ REDIS_URL: redis://redis:6379
+ S3_ENDPOINT: http://minio:9000
+ S3_ACCESS_KEY: minioadmin
+ S3_SECRET_KEY: minioadmin
+ S3_BUCKET: nova-assets
+ NODE_ENV: test
+ PORT: 3002
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+ minio:
+ condition: service_healthy
