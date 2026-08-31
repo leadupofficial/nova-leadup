@@ -14,16 +14,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Node.js
+    - name: Set up Node.js 22
       uses: actions/setup-node@v4
       with:
-        node-version: 20.x
+        node-version: 22.x
         cache: pnpm
         cache-dependency-path: pnpm-lock.yaml
-    - name: Set up pnpm
-      uses: pnpm/action-setup@v4
-      with:
-        version: 9
+    - name: Enable corepack and activate pnpm
+      run: corepack enable && corepack prepare pnpm@9 --activate
+    - name: Verify pnpm
+      run: pnpm --version
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
       env:
