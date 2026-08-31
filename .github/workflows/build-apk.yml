@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       EXPO_UNSTABLE_DISABLE_DEV_LAUNCHER_AUTOLINKING: '1'
+      EXPO_USE_COMMUNITY_AUTOLINKING: '1'
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
     steps:
     - uses: actions/checkout@v4
@@ -46,7 +47,8 @@ jobs:
       working-directory: apps/mobile
       run: 'mkdir -p assets
 
-        echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 -d > assets/icon.png
+        echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        | base64 -d > assets/icon.png
 
         cp assets/icon.png assets/adaptive-icon.png
 
@@ -57,9 +59,19 @@ jobs:
       working-directory: apps/mobile
       env:
         EXPO_UNSTABLE_DISABLE_DEV_LAUNCHER_AUTOLINKING: '1'
+        EXPO_USE_COMMUNITY_AUTOLINKING: '1'
       run: 'npx expo prebuild --platform android --clean
 
         echo "Generated Android project"'
+    - name: Fix generated Android files
+      working-directory: apps/mobile/android
+      run: 'sed -i.bak ''s/kotlinVersion = .*/kotlinVersion = ''2.0.21''/'' build.gradle
+
+        sed -i.bak ''/expo-dev-launcher/d'' app/build.gradle
+
+        sed -i.bak ''/expo-dev-launcher/d'' settings.gradle
+
+        echo "Applied post-prebuild fixes"'
     - name: Build release APK
       working-directory: apps/mobile/android
       run: 'chmod +x gradlew
