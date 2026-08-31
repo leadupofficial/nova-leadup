@@ -1,12 +1,7 @@
 {
  "extends": "../../tsconfig.json",
  "compilerOptions": {
-<<<<<<< HEAD:packages/auth-types/tsconfig.json
- "outDir": "./dist",
- "rootDir": "./src"
-=======
  "outDir": "dist",
->>>>>>> f0688da (feat: complete mobile app source files and add GitHub Actions APK build workflow):packages/shared-types/tsconfig.json
  },
  "include": ["src/**/*"],
  "exclude": ["node_modules", "dist"]

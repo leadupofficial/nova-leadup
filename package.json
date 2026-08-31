@@ -1,90 +1,33 @@
 {
-  "name": "nova-monorepo",
-  "version": "0.1.0",
-  "private": true,
-<<<<<<< HEAD
-  "description": "NOVA \u2014 Voice and Visual Companion platform monorepo",
-=======
-  "description": "NOVA — Voice-first personal AI companion (Leadup Technologies)",
->>>>>>> f0688da (feat: complete mobile app source files and add GitHub Actions APK build workflow)
-  "workspaces": [
-    "apps/*",
-    "services/*",
-    "packages/*"
-  ],
-  "scripts": {
-    "build": "turbo run build",
-<<<<<<< HEAD
-    "dev": "turbo run dev",
-    "lint": "turbo run lint",
-    "type-check": "turbo run type-check",
-    "test": "turbo run test",
-    "test:unit": "turbo run test:unit",
-    "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed",
-    "test:e2e:ui": "playwright test --ui",
-    "test:e2e:debug": "playwright test --debug",
-    "e2e:up": "bash scripts/e2e-env.sh up",
-    "e2e:down": "bash scripts/e2e-env.sh down",
-    "e2e:run": "bash scripts/e2e-env.sh test",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,yml,yaml,md}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,yml,yaml,md}\"",
-    "security:audit": "turbo run audit",
-    "clean": "turbo run clean && rm -rf node_modules",
-    "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down",
-    "docker:reset": "docker compose down -v",
-    "db:migrate": "turbo run db:migrate",
-    "db:seed": "turbo run db:seed",
-    "dev:api": "turbo run dev --filter=@nova/api",
-    "dev:auth": "turbo run dev --filter=@nova/auth",
-    "dev:all": "turbo run dev"
-  },
-  "devDependencies": {
-    "turbo": "^2.5.4",
-    "prettier": "^3.5.3",
-    "@playwright/test": "^1.52.0"
-  },
-  "packageManager": "pnpm@11.24.0",
-  "engines": {
-    "node": ">=20.0.0",
-    "npm": ">=10.0.0"
-  }
+ "name": "nova-monorepo",
+ "version": "0.1.0",
+ "private": true,
+ "description": "NOVA — Voice-first personal AI companion (Leadup Technologies)",
+ "workspaces": [
+ "apps/*",
+ "services/*",
+ "packages/*"
+ ],
+ "scripts": {
+ "build": "turbo run build",
+ "dev": "turbo run dev --parallel",
+ "lint": "turbo run lint",
+ "typecheck": "turbo run typecheck",
+ "test": "turbo run test",
+ "clean": "turbo run clean && rm -rf node_modules .turbo"
+ },
+ "devDependencies": {
+ "@types/node": "^22.0.0",
+ "@types/react": "^19.2.18",
+ "@types/react-dom": "^19.0.0",
+ "eslint": "^9.17.0",
+ "prettier": "^3.4.0",
+ "turbo": "^2.5.0",
+ "typescript": "^5.7.0"
+ },
+ "packageManager": "pnpm@9.15.0",
+ "engines": {
+ "node": ">=20.0.0",
+ "pnpm": ">=9.0.0"
+ }
 }
-=======
-    "dev": "turbo run dev --parallel",
-    "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
-    "clean": "turbo run clean && rm -rf node_modules .turbo"
-  },
-  "devDependencies": {
-    "@types/node": "^22.0.0",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.0.0",
-    "eslint": "^9.17.0",
-    "expo": "~52.0.0",
-    "expo-application": "^57.0.2",
-    "expo-asset": "^11.0.5",
-    "expo-constants": "^57.0.16",
-    "expo-dev-client": "~5.0.20",
-    "expo-device": "^57.0.1",
-    "expo-file-system": "^57.0.6",
-    "expo-font": "^57.0.2",
-    "expo-haptics": "^57.0.2",
-    "expo-image": "~2.0.7",
-    "expo-notifications": "^57.0.15",
-    "expo-secure-store": "^57.0.2",
-    "expo-status-bar": "~2.0.1",
-    "expo-system-ui": "^57.0.3",
-    "prettier": "^3.4.0",
-    "turbo": "^2.5.0",
-    "typescript": "^5.7.0"
-  },
-  "packageManager": "pnpm@9.15.0",
-  "engines": {
-    "node": ">=20.0.0",
-    "pnpm": ">=9.0.0"
-  }
-}
->>>>>>> f0688da (feat: complete mobile app source files and add GitHub Actions APK build workflow)

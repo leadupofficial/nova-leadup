@@ -1,33 +1,4 @@
 {
-<<<<<<< HEAD
- "compilerOptions": {
- "target": "ES2022",
- "lib": ["dom", "dom.iterable", "esnext"],
- "allowJs": true,
- "skipLibCheck": true,
- "strict": true,
- "noEmit": true,
- "esModuleInterop": true,
- "module": "esnext",
- "moduleResolution": "bundler",
- "resolveJsonModule": true,
- "isolatedModules": true,
- "jsx": "preserve",
- "incremental": true,
- "plugins": [
- {
- "name": "next"
- }
- ],
- "paths": {
- "@/*": ["./src/*"],
- "@nova/types": ["../../packages/types/src/index.ts"],
- "@nova/utils": ["../../packages/utils/src/index.ts"]
- }
- },
- "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
- "exclude": ["node_modules"]
-=======
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
@@ -59,5 +30,4 @@
     "node_modules",
     "dist"
   ]
->>>>>>> f0688da (feat: complete mobile app source files and add GitHub Actions APK build workflow)
 }

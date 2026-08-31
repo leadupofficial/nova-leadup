@@ -4,15 +4,6 @@
  "private": true,
  "description": "NOVA web application — Voice and Visual Companion frontend",
  "scripts": {
-<<<<<<< HEAD
- "dev": "next dev -p 3000",
- "build": "next build",
- "start": "next start",
- "lint": "next lint",
- "type-check": "tsc --noEmit",
- "test": "vitest run",
- "clean": "rm -rf .next dist"
-=======
   "dev": "next dev --port 3000 --hostname 0.0.0.0",
   "build": "next build",
   "start": "next start --port 3000 --hostname 0.0.0.0",
@@ -37,6 +28,5 @@
   "eslint-config-next": "^15.0.0",
   "typescript": "^5.7.0",
   "vitest": "^2.1.0"
->>>>>>> f0688da (feat: complete mobile app source files and add GitHub Actions APK build workflow)
  }
 }
