@@ -1,7 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const androidDir = path.join(__dirname, '..', 'apps', 'mobile', 'android');
+// When running from apps/mobile/android (via CI working-directory),
+// __dirname is apps/mobile/android/.github/workflows
+// So we need to go up: ../../.. to reach repo root
+const androidDir = path.join(__dirname, '..', '..', '..');
 
 // Fix build.gradle - remove the rootproject plugin and bump Kotlin
 const buildGradle = path.join(androidDir, 'build.gradle');
