@@ -65,7 +65,7 @@ jobs:
         echo "Generated Android project"'
     - name: Fix generated Android files
       working-directory: apps/mobile/android
-      run: 'sed -i.bak ''s/kotlinVersion = .*/kotlinVersion = ''2.0.21''/'' build.gradle
+      run: 'sed -i.bak ''s/kotlinVersion = .*/kotlinVersion = ''2.2.21''/'' build.gradle
 
         sed -i.bak ''/expo-dev-launcher/d'' app/build.gradle
 
