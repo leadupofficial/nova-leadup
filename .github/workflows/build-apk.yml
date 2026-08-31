@@ -29,13 +29,21 @@ jobs:
       with:
         distribution: temurin
         java-version: '17'
+    - name: Accept Android SDK licenses
+      run: 'mkdir -p /usr/local/lib/android/sdk/licenses
+
+        echo "\nd243215ed4a640bd90b24baca47b2e39\n\n84831b9409646a918e30573bab4c9c91\n\nd56f5187479451eabf01fb78af6dfcb6"
+        > /usr/local/lib/android/sdk/licenses/android-sdk-license
+
+        echo "\n84831b9409646a918e30573bab4c9c91\n\nd56f5187479451eabf01fb78af6dfcb6"
+        > /usr/local/lib/android/sdk/licenses/android-sdk-preview-license
+
+        echo "Accepted licenses"'
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
     - name: Create placeholder app assets
       working-directory: apps/mobile
       run: 'mkdir -p assets
-
-        # Create 1x1 transparent PNG as placeholder icon
 
         printf ''\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\xad\xb8\x00\x00\x00\x00IEND\xae\x42\x60\x82''
         > assets/icon.png
