@@ -76,7 +76,7 @@ jobs:
       working-directory: apps/mobile/android
       run: 'chmod +x gradlew
 
-        ./gradlew assembleRelease --no-daemon
+        ./gradlew assembleRelease --no-daemon --warning-mode=none
 
         echo "Built APK"'
     - name: Upload APK artifact
