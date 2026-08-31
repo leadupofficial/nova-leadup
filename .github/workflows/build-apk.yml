@@ -46,7 +46,7 @@ jobs:
       working-directory: apps/mobile
       run: 'mkdir -p assets
 
-        python3 make_icon.py
+        echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 -d > assets/icon.png
 
         cp assets/icon.png assets/adaptive-icon.png
 
