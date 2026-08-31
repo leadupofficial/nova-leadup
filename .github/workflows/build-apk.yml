@@ -1,5 +1,5 @@
 name: Build Android APK
-'on':
+on:
   push:
     branches:
     - main
@@ -8,7 +8,7 @@ name: Build Android APK
     branches:
     - main
     - develop
-  workflow_dispatch: null
+  workflow_dispatch:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
@@ -39,46 +39,20 @@ jobs:
         echo -e "\n84831b9409646a918e30573bab4c9c91\n\nd56f5187479451eabf01fb78af6dfcb6"
         > /usr/local/lib/android/sdk/licenses/android-sdk-preview-license
 
-        echo "Accepted licenses"
-
-        '
+        echo "Accepted licenses"'
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
     - name: Create placeholder app assets
       working-directory: apps/mobile
       run: 'mkdir -p assets
 
-        python3 -c "
-
-        import struct, zlib
-
-        def chunk(ctype, data):
-
-        c = ctype + data
-
-        return struct.pack(''>I'', len(data)) + c + struct.pack(''>I'', zlib.crc32(c)
-        & 0xffffffff)
-
-        ihdr = struct.pack(''>IIBBBBB'', 1, 1, 8, 6, 0, 0, 0)
-
-        raw = b''\x00'' * 5
-
-        idat = zlib.compress(raw)
-
-        png = b''\x89PNG\r\n\x1a\n'' + chunk(b''IHDR'', ihdr) + chunk(b''IDAT'', idat)
-        + chunk(b''IEND'', b'''')
-
-        with open(''assets/icon.png'', ''wb'') as f: f.write(png)
-
-        "
+        python3 make_icon.py
 
         cp assets/icon.png assets/adaptive-icon.png
 
         cp assets/icon.png assets/splash.png
 
-        echo "Created valid placeholder assets"
-
-        '
+        echo "Created valid placeholder assets"'
     - name: Generate native Android project
       working-directory: apps/mobile
       env:
@@ -107,5 +81,8 @@ jobs:
         if-no-files-found: error
     - name: APK Info
       run: 'APK_SIZE=$(find apps/mobile/android/app/build/outputs/apk/release -name
-        "*.apk" -exec ls -lh {} \; | awk ''{print $5}'')\necho "APK built successfully!"\necho
-        "Size: $APK_SIZE"'
+        ''*.apk'' -exec ls -lh {} \; | awk ''{print $5}'')
+
+        echo ''APK built successfully!''
+
+        echo "Size: $APK_SIZE"'
