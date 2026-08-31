@@ -1,151 +1,230 @@
-"use client";
+'use client';
 
-import { useState, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Search, Plus, MoreHorizontal, Eye, Edit3, Trash2 } from "lucide-react";
-import { GlassPanel } from "../../../components/ui/GlassPanel";
-import { Badge } from "../../../components/ui/Badge";
-import { mockMemories, categoryMeta } from "../../../lib/mock-data";
-import type { Memory } from "../../../lib/mock-data";
+import { useState, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Search, Plus, MoreHorizontal, Eye, Edit3, Trash2, Tag } from 'lucide-react';
+import { GlassPanel, GlassButton } from '../../components/glass';
+import { Badge } from '../../components/ui/Badge';
+import { useMemoryStore } from '../../stores/memory-store';
+import { MemoryType } from '../../stores/memory-store';
+import { animations } from '../../lib/animations';
 
-const categories = ["all", ...Object.keys(categoryMeta)];
+const MEMORY_TYPE_CONFIG: Record<MemoryType, { emoji: string; label: string; color: string }> = {
+ preference: { emoji: '⚙️', label: 'Preference', color: '#6366f1' },
+ fact: { emoji: 'ℹ️', label: 'Fact', color: '#64748b' },
+ event: { emoji: '📅', label: 'Event', color: '#22d3ee' },
+ task: { emoji: '📝', label: 'Task', color: '#f59e0b' },
+ reminder: { emoji: '🔔', label: 'Reminder', color: '#8b5cf6' },
+ person: { emoji: '👤', label: 'Person', color: '#10b981' },
+ company: { emoji: '🏢', label: 'Company', color: '#6366f1' },
+ project: { emoji: '🎯', label: 'Project', color: '#22d3ee' },
+ decision: { emoji: '✅', label: 'Decision', color: '#10b981' },
+ conversation: { emoji: '💬', label: 'Conversation', color: '#8b5cf6' },
+};
+
+const CATEGORIES: (MemoryType | 'all')[] = [
+ 'all',
+ 'preference',
+ 'person',
+ 'project',
+ 'event',
+ 'decision',
+ 'conversation',
+];
 
 export default function MemoryScreen() {
- const [searchQuery, setSearchQuery] = useState("");
- const [activeCategory, setActiveCategory] = useState("all");
+ const { memories, removeMemory } = useMemoryStore();
+ const [searchQuery, setSearchQuery] = useState('');
+ const [activeCategory, setActiveCategory] = useState<MemoryType | 'all'>('all');
 
  const filtered = useMemo(() => {
- let result = mockMemories;
+ let result = memories;
 
  if (searchQuery.trim()) {
  const q = searchQuery.toLowerCase();
  result = result.filter(
  (m) =>
- m.title.toLowerCase().includes(q) ||
- m.description.toLowerCase().includes(q) ||
+ m.content.toLowerCase().includes(q) ||
+ m.type.toLowerCase().includes(q) ||
  m.tags?.some((t) => t.toLowerCase().includes(q)),
  );
  }
 
- if (activeCategory !== "all") {
- result = result.filter((m) => m.category === activeCategory);
+ if (activeCategory !== 'all') {
+ result = result.filter((m) => m.type === activeCategory);
  }
 
  return result.sort((a, b) => b.importance - a.importance);
- }, [searchQuery, activeCategory]);
+ }, [memories, searchQuery, activeCategory]);
 
- const confidenceLabel = (c: number) => {
- if (c >= 0.9) return { text: "High", variant: "success" as const };
- if (c >= 0.75) return { text: "Medium", variant: "warning" as const };
- return { text: "Low", variant: "danger" as const };
- };
+ const categoryStats = useMemo(() => {
+ const stats: Record<string, number> = {};
+ memories.forEach((m) => {
+ stats[m.type] = (stats[m.type] || 0) + 1;
+ });
+ return stats;
+ }, [memories]);
 
  return (
- <div>
+ <div className="min-h-screen">
  {/* Header */}
- <div style={{paddingLeft: '16px', paddingRight: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}>
- <h1 style={{fontSize: '24px', fontWeight: 'bold', color: '#f8fafc'}}>
- Your Memories ({mockMemories.length})
- </h1>
- <button
- style={{width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6366f1'}}
+ <div className="px-5 pt-6 pb-4">
+ <div className="flex items-center justify-between">
+ <div>
+ <h1 className="text-xl font-bold text-white">Memory</h1>
+ <p className="text-xs text-slate-500 mt-0.5">
+ {memories.length} memories stored
+ </p>
+ </div>
+ <motion.button
+ whileTap={{ scale: 0.92 }}
+ className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-400/20
+ flex items-center justify-center text-indigo-400 hover:bg-indigo-500/25 transition-colors"
  aria-label="Add memory"
  >
  <Plus size={18} />
- </button>
+ </motion.button>
+ </div>
  </div>
 
  {/* Search */}
- <div style={{paddingLeft: '16px', paddingRight: '16px'}}>
- <div>
- <Search size={16} style={{color: '#64748b'}} />
+ <div className="px-5 mb-4">
+ <div className="relative">
+ <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
  <input
  type="text"
  value={searchQuery}
  onChange={(e) => setSearchQuery(e.target.value)}
  placeholder="Search memories..."
- style={{width: '100%', borderRadius: '12px', fontSize: '14px', color: '#f8fafc'}}
+ className="w-full pl-9 pr-4 py-2.5 rounded-xl text-sm text-white placeholder-slate-500
+ bg-white/[0.04] border border-white/[0.08]
+ focus:outline-none focus:border-indigo-400/40 focus:bg-white/[0.07] transition-colors"
  />
  </div>
  </div>
 
- {/* Filter chips */}
- <div style={{paddingLeft: '16px', paddingRight: '16px', display: 'flex', gap: '8px'}}>
- {categories.map((cat) => {
+ {/* Category chips */}
+ <div className="px-5 mb-4 overflow-x-auto scrollbar-hide">
+ <div className="flex gap-2">
+ {CATEGORIES.map((cat) => {
  const isActive = activeCategory === cat;
- const label = cat === "all" ? "All" : categoryMeta[cat]?.label || cat;
+ const label = cat === 'all' ? 'All' : MEMORY_TYPE_CONFIG[cat]?.label || cat;
+ const count = cat === 'all' ? memories.length : categoryStats[cat] || 0;
 
  return (
  <button
  key={cat}
  onClick={() => setActiveCategory(cat)}
  className={`
- px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap cursor-pointer
- transition-all duration-200
- ${isActive
- ? "bg-nova-primary/20 text-nova-primary border border-nova-primary/30"
- : "bg-nova-surface/60 text-nova-text-muted border border-transparent hover:text-nova-text"
+ px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all duration-200 cursor-pointer
+ ${
+ isActive
+ ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-400/30'
+ : 'bg-white/[0.04] text-slate-400 border border-white/[0.06] hover:bg-white/[0.08]'
  }
  `}
  >
  {label}
+ <span className="ml-1 text-[10px] opacity-60">{count}</span>
  </button>
  );
  })}
  </div>
+ </div>
 
- {/* Memory list */}
- <div style={{paddingLeft: '16px', paddingRight: '16px'}}>
+ {/* Memory Stats */}
+ <div className="px-5 mb-4">
+ <GlassPanel padding="sm">
+ <div className="flex items-center justify-between">
+ <div>
+ <p className="text-xs text-slate-500">Memory Health</p>
+ <p className="text-lg font-bold text-white mt-0.5">{memories.length} total</p>
+ </div>
+ <div className="flex items-center gap-3 text-xs">
+ <div>
+ <p className="text-emerald-400 font-medium">
+ {memories.filter((m) => m.importance > 0.7).length}
+ </p>
+ <p className="text-slate-600">High</p>
+ </div>
+ <div>
+ <p className="text-amber-400 font-medium">
+ {memories.filter((m) => m.importance > 0.4 && m.importance <= 0.7).length}
+ </p>
+ <p className="text-slate-600">Medium</p>
+ </div>
+ <div>
+ <p className="text-slate-500 font-medium">
+ {memories.filter((m) => m.importance <= 0.4).length}
+ </p>
+ <p className="text-slate-600">Low</p>
+ </div>
+ </div>
+ </div>
+ </GlassPanel>
+ </div>
+
+ {/* Memory List */}
+ <div className="px-5 space-y-2">
  <AnimatePresence mode="popLayout">
  {filtered.map((memory, index) => {
- const meta = categoryMeta[memory.category] || { emoji: "📄", label: memory.category, color: "text-nova-text-muted" };
- const conf = confidenceLabel(memory.confidence);
+ const config = MEMORY_TYPE_CONFIG[memory.type] || {
+ emoji: '📄',
+ label: memory.type,
+ color: '#64748b',
+ };
 
  return (
  <motion.div
  key={memory.id}
- initial={{ opacity: 0, y: 12 }}
+ initial={{ opacity: 0, y: 8 }}
  animate={{ opacity: 1, y: 0 }}
- exit={{ opacity: 0, y: -8 }}
+ exit={{ opacity: 0, y: -4 }}
  transition={{ delay: index * 0.04 }}
  >
- <GlassPanel padding="md">
- <div style={{display: 'flex', gap: '12px'}}>
- <span style={{fontSize: '24px', fontWeight: 'bold'}}>{meta.emoji}</span>
- <div>
- <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
- <h3 style={{fontSize: '14px', fontWeight: '600', color: '#f8fafc'}}>{memory.title}</h3>
- <Badge variant={conf.variant} size="sm" dot>
- {conf.text}
- </Badge>
- </div>
- <p style={{fontSize: '12px', color: '#94a3b8', marginTop: '4px'}}>
- {memory.description}
- </p>
- <div style={{display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px'}}>
- <span style={{color: '#64748b'}}>
- {memory.sourceType} · {memory.createdAt}
- </span>
- {memory.tags?.map((tag) => (
- <span
- key={tag}
- style={{color: '#64748b'}}
+ <GlassPanel padding="md" hoverable>
+ <div className="flex gap-3">
+ <div
+ className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-lg"
+ style={{ background: `${config.color}15` }}
  >
- #{tag}
- </span>
- ))}
+ {config.emoji}
  </div>
+ <div className="flex-1 min-w-0">
+ <div className="flex items-start justify-between gap-2">
+ <div>
+ <h3 className="text-sm font-semibold text-white">{memory.type}</h3>
+ <p className="text-xs text-slate-400 mt-0.5 line-clamp-2 leading-relaxed">
+ {memory.content}
+ </p>
  </div>
- <div style={{display: 'flex', alignItems: 'center'}}>
+ <div className="flex items-center gap-1 flex-shrink-0">
  {[Eye, Edit3, Trash2].map((Icon, i) => (
- <button
+ <motion.button
  key={i}
- style={{borderRadius: '8px', color: '#64748b'}}
- aria-label={["View", "Edit", "Delete"][i]}
+ whileTap={{ scale: 0.85 }}
+ onClick={() => i === 2 && removeMemory(memory.id)}
+ className="p-1.5 rounded-lg text-slate-600 hover:text-slate-400 hover:bg-white/[0.04] transition-colors"
+ aria-label={['View', 'Edit', 'Delete'][i]}
  >
  <Icon size={14} />
- </button>
+ </motion.button>
  ))}
+ </div>
+ </div>
+ <div className="flex items-center gap-2 mt-2">
+ <span className="text-[10px] text-slate-600">
+ {new Date(memory.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+ </span>
+ {memory.tags?.slice(0, 2).map((tag) => (
+ <span
+ key={tag}
+ className="text-[10px] px-1.5 py-0.5 rounded-md bg-white/[0.04] text-slate-500"
+ >
+ {tag}
+ </span>
+ ))}
+ </div>
  </div>
  </div>
  </GlassPanel>
@@ -158,9 +237,12 @@ export default function MemoryScreen() {
  <motion.div
  initial={{ opacity: 0 }}
  animate={{ opacity: 1 }}
- style={{color: '#64748b', fontSize: '14px'}}
+ className="text-center py-12"
  >
- No memories match your search.
+ <div className="text-4xl mb-3">🔍</div>
+ <p className="text-sm text-slate-500">
+ {searchQuery ? 'No memories match your search.' : 'No memories yet.'}
+ </p>
  </motion.div>
  )}
  </div>
