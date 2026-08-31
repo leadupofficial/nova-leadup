@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
  Mic,
@@ -16,14 +16,15 @@ import {
  FileText,
  MessageSquare,
 } from 'lucide-react';
-import { Avatar } from '../../components/avatar/Avatar';
-import { GlassPanel, GlassButton, VoiceWaveform } from '../../components/glass';
-import { useAssistantStore } from '../../stores/assistant-store';
-import { useConversationStore } from '../../stores/conversation-store';
-import { useVoice } from '../../hooks/use-voice';
-import { useAssistant } from '../../hooks/use-assistant';
-import { animations } from '../../lib/animations';
-import { cn } from '../../lib/utils';
+import { Avatar } from '../../../components/avatar/Avatar';
+import { GlassPanel, GlassButton } from '../../../components/ui/GlassPanel';
+import { VoiceWaveform } from '../../../components/voice/VoiceWaveform';
+import { useAssistantStore } from '../../../stores/assistant-store';
+import { useConversationStore } from '../../../stores/conversation-store';
+import { useVoice } from '../../../hooks/use-voice';
+import { useAssistant } from '../../../hooks/use-assistant';
+import { animations } from '../../../lib/animations';
+import { cn } from '../../../lib/utils';
 
 const QUICK_ACTIONS = [
  { label: 'Create Task', icon: CalendarPlus, color: '#6366f1' },
