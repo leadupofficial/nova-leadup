@@ -3,17 +3,18 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Plus, MoreHorizontal, Eye, Edit3, Trash2, Tag } from 'lucide-react';
-import { GlassPanel, GlassButton } from '../../components/glass';
-import { Badge } from '../../components/ui/Badge';
-import { useMemoryStore } from '../../stores/memory-store';
-import { MemoryType } from '../../stores/memory-store';
-import { animations } from '../../lib/animations';
+import { GlassPanel, GlassButton } from '../../../components/glass';
+import { Badge } from '../../../components/ui/Badge';
+import { useMemoryStore } from '../../../stores/memory-store';
+import { MemoryType } from '../../../stores/memory-store';
+import { animations } from '../../../lib/animations';
 
 const MEMORY_TYPE_CONFIG: Record<MemoryType, { emoji: string; label: string; color: string }> = {
  preference: { emoji: '⚙️', label: 'Preference', color: '#6366f1' },
  fact: { emoji: 'ℹ️', label: 'Fact', color: '#64748b' },
  event: { emoji: '📅', label: 'Event', color: '#22d3ee' },
  task: { emoji: '📝', label: 'Task', color: '#f59e0b' },
+ relationship: { emoji: '🔗', label: 'Relationship', color: '#ec4899' },
  reminder: { emoji: '🔔', label: 'Reminder', color: '#8b5cf6' },
  person: { emoji: '👤', label: 'Person', color: '#10b981' },
  company: { emoji: '🏢', label: 'Company', color: '#6366f1' },

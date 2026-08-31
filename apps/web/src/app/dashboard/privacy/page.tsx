@@ -17,8 +17,8 @@ import {
  BarChart3,
  FileText,
 } from 'lucide-react';
-import { GlassPanel, GlassButton } from '../../components/glass';
-import { cn } from '../../lib/utils';
+import { GlassPanel, GlassButton } from '../../../components/glass';
+import { cn } from '../../../lib/utils';
 
 interface PrivacyCategory {
  id: string;

@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import { MessageSquare, Search, Mic, Play, Clock, Trash2, Download } from 'lucide-react';
 import { useState } from 'react';
-import { COLORS, ANIMATION_DURATION } from '../../lib/design-tokens';
+import { COLORS, ANIMATION_DURATION } from '../../../lib/design-tokens';
 
 interface Conversation {
  id: string;

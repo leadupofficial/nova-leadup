@@ -3,11 +3,11 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, ChevronRight, Plus, Calendar, Clock, Repeat } from 'lucide-react';
-import { GlassPanel, GlassButton } from '../../components/glass';
-import { Badge } from '../../components/ui/Badge';
-import { useTaskStore } from '../../stores/task-store';
-import { animations } from '../../lib/animations';
-import { cn } from '../../lib/utils';
+import { GlassPanel, GlassButton } from '../../../components/glass';
+import { Badge } from '../../../components/ui/Badge';
+import { useTaskStore } from '../../../stores/task-store';
+import { animations } from '../../../lib/animations';
+import { cn, formatDate } from '../../../lib/utils';
 
 type TabType = 'tasks' | 'reminders';
 type TaskFilter = 'all' | 'active' | 'completed';
@@ -19,7 +19,7 @@ const PRIORITY_CONFIG = {
 };
 
 export default function TasksScreen() {
- const { tasks, reminders, addTask, toggleTask, deleteTask, addReminder } = useTaskStore();
+ const { tasks, reminders, addTask, toggleTask, deleteTask } = useTaskStore();
  const [activeTab, setActiveTab] = useState<TabType>('tasks');
  const [taskFilter, setTaskFilter] = useState<TaskFilter>('active');
  const [newTaskTitle, setNewTaskTitle] = useState('');
@@ -217,9 +217,9 @@ export default function TasksScreen() {
  </span>
  <span className="text-[10px] text-slate-600 flex items-center gap-0.5">
  <Clock size={10} />
- {task.dueDate}
+ {task.dueDate ? formatDate(task.dueDate) : 'No date'}
  </span>
- {task.tags.map((tag) => (
+ {(task.tags || []).map((tag) => (
  <span
  key={tag}
  className="text-[10px] px-1.5 py-0.5 rounded-md bg-white/[0.04] text-slate-500"

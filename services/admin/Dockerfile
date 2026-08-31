@@ -1,33 +1,16 @@
-# @nova/admin — multi-stage production Dockerfile
-
-FROM node:22-alpine AS base
-RUN apk add --no-cache libc6-compat
+FROM node:20-alpine AS builder
 WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+COPY tsconfig.base.json ./
+COPY services/admin/tsconfig.json ./services/admin/
+COPY services/admin/src ./services/admin/src/
+RUN cd services/admin && npx tsc --build ../tsconfig.base.json
 
-# Install pnpm via corepack
-RUN corepack enable && corepack prepare pnpm@11.24.0 --activate
-
-# Install only production dependencies
-COPY pnpm-workspace.yaml pnpm-lock.yaml turbo.json package.json ./
-COPY packages/config/package.json packages/config/
-COPY packages/types/package.json packages/types/
-COPY packages/utils/package.json packages/utils/
-COPY packages/auth-types/package.json packages/auth-types/
-COPY services/admin/package.json services/admin/
-RUN pnpm install --frozen-lockfile --filter=@nova/admin --prod
-
-# Build
-COPY . .
-RUN pnpm run build --filter=@nova/admin
-
-# Production image
-FROM node:22-alpine-slim AS runner
-RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 expressjs
+FROM node:20-alpine
 WORKDIR /app
-ENV NODE_ENV=production
-COPY --from=base /app/node_modules ./node_modules
-COPY --from=base /app/services/admin/dist ./dist
-COPY services/admin/package.json ./package.json
-USER expressjs
+COPY --from=builder /app/services/admin/dist ./dist
+COPY package.json ./
+RUN corepack enable && pnpm install --production --frozen-lockfile
 EXPOSE 3004
 CMD ["node", "dist/index.js"]

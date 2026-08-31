@@ -17,8 +17,9 @@ import {
  MessageSquare,
 } from 'lucide-react';
 import { Avatar } from '../../../components/avatar/Avatar';
-import { GlassPanel, GlassButton } from '../../../components/ui/GlassPanel';
-import { VoiceWaveform } from '../../../components/voice/VoiceWaveform';
+import { GlassPanel } from '../../../components/glass/GlassPanel';
+import { GlassButton } from '../../../components/glass/GlassButton';
+import { VoiceWaveform } from '../../../components/glass/VoiceWaveform';
 import { useAssistantStore } from '../../../stores/assistant-store';
 import { useConversationStore } from '../../../stores/conversation-store';
 import { useVoice } from '../../../hooks/use-voice';

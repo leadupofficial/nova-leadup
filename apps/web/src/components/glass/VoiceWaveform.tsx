@@ -2,8 +2,9 @@
 
 import { useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { cn } from '../../lib/utils';
 
-export type VoiceState = 'idle' | 'listening' | 'thinking' | 'speaking';
+export type VoiceState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error';
 
 interface VoiceWaveformProps {
  state?: VoiceState;
@@ -33,6 +34,11 @@ const STATE_CONFIG: Record<VoiceState, { variant: string; gradient: string; minS
  gradient: 'rgb(16, 185, 129)',
  minScale: 0.2,
  },
+ error: {
+ variant: 'error',
+ gradient: 'rgb(239, 68, 68)',
+ minScale: 0.1,
+ },
 };
 
 function getBarDelay(index: number, total: number, state: VoiceState): number {
@@ -47,6 +53,8 @@ function getBarDelay(index: number, total: number, state: VoiceState): number {
  return baseDelay + index * 0.025;
  case 'speaking':
  return baseDelay + index * 0.01;
+ case 'error':
+ return baseDelay + index * 0.02;
  default:
  return 0;
  }
@@ -93,6 +101,16 @@ export function VoiceWaveform({
  repeat: Infinity,
  ease: 'easeInOut',
  delay,
+ },
+ };
+ case 'error':
+ return {
+ animate: { scaleY: [0.1, 0.4, 0.1, 0.6, 0.1] },
+ transition: {
+ duration: 0.5,
+ repeat: Infinity,
+ ease: 'easeInOut',
+ delay: getBarDelay(index, barCount, state),
  },
  };
  default:

@@ -4,6 +4,8 @@ import { motion, useAnimation } from 'framer-motion';
 import { useAssistantStore } from '../../stores/assistant-store';
 import { COLORS, ANIMATION_DURATION } from '../../lib/design-tokens';
 
+import { useState, useEffect } from 'react';
+
 interface VoiceWaveformProps {
  isActive?: boolean;
  state?: 'idle' | 'listening' | 'thinking' | 'speaking';

@@ -20,7 +20,7 @@
  "paths": {
  "@/*": ["./apps/web/src/*"]
  },
- "types": ["node", "jest"]
+ "types": ["node"]
  },
  "include": ["apps/web/src/**/*"],
  "exclude": ["node_modules", "apps/web/.next", "apps/web/out"]

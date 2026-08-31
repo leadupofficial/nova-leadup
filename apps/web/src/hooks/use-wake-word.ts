@@ -1,13 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useAssistantStore } from '../../stores/assistant-store';
+import { useAssistantStore } from '../stores/assistant-store';
 
 export function useWakeWord() {
  const { setState, setWakeWord, wakeWordActive } = useAssistantStore();
  const [isListening, setIsListening] = useState(false);
  const [lastDetected, setLastDetected] = useState<Date | null>(null);
- const countdownRef = useRef<ReturnType<typeof setTimeout>>();
+ const countdownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
  const startListening = useCallback(() => {
  setIsListening(true);

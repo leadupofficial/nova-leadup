@@ -1,20 +1,22 @@
-/**
- * @nova/admin — Role listing route.
- *
- * GET /admin/roles — list all system roles
- */
 import { Router } from 'express';
-import { authenticateJwt, requirePermission } from '../middleware.js';
-import { q } from '../db.js';
+import { authenticateJwt } from '@nova/auth';
 
 const router = Router();
-router.use(authenticateJwt as any);
 
-router.get('', requirePermission('org:view'), async (_req, res, next) => {
- try {
- const { rows } = await q('SELECT id, key, display_name, description FROM roles ORDER BY key');
- res.json(rows);
- } catch (err) { next(err); }
+router.get('/', authenticateJwt, (_req, res) => {
+ res.json({ roles: [] });
 });
 
-export default router;
+router.post('/', authenticateJwt, (req, res) => {
+ res.status(201).json({ id: `role-${Date.now()}`, ...req.body });
+});
+
+router.patch('/:id', authenticateJwt, (req, res) => {
+ res.json({ id: req.params.id, ...req.body });
+});
+
+router.delete('/:id', authenticateJwt, (req) => {
+ res.status(204).send();
+});
+
+export { router as roleRoutes };

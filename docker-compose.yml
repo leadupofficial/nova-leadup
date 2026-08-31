@@ -162,6 +162,73 @@ services:
  networks:
  - nova-network
 
+ integration-service:
+ build:
+ context: .
+ dockerfile: services/integration-service/Dockerfile
+ target: builder
+ container_name: nova-integration
+ restart: unless-stopped
+ ports:
+ - "3005:3005"
+ environment:
+ DATABASE_URL: postgres://postgres:postgres@postgres:5432/nova
+ REDIS_URL: redis://redis:6379
+ NODE_ENV: development
+ PORT: 3005
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+ networks:
+ - nova-network
+
+ agent-orchestrator:
+ build:
+ context: .
+ dockerfile: services/agent-orchestrator/Dockerfile
+ target: builder
+ container_name: nova-agent-orchestrator
+ restart: unless-stopped
+ ports:
+ - "3006:3006"
+ environment:
+ DATABASE_URL: postgres://postgres:postgres@postgres:5432/nova
+ REDIS_URL: redis://redis:6379
+ ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+ NODE_ENV: development
+ PORT: 3006
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+ networks:
+ - nova-network
+
+ notification-service:
+ build:
+ context: .
+ dockerfile: services/notification-service/Dockerfile
+ target: builder
+ container_name: nova-notification-service
+ restart: unless-stopped
+ ports:
+ - "3007:3007"
+ environment:
+ DATABASE_URL: postgres://postgres:postgres@postgres:5432/nova
+ REDIS_URL: redis://redis:6379
+ NODE_ENV: development
+ PORT: 3007
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+ networks:
+ - nova-network
+
 volumes:
  postgres_data:
  driver: local

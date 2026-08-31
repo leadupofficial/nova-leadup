@@ -1,39 +1,53 @@
-/**
- * PostgreSQL connection pool singleton.
- */
-import pg from 'pg';
-const { Pool } = pg;
+import 'dotenv/config';
+import { Pool, PoolClient } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { logger } from '../utils/logger';
+import { config } from '../config';
 
-function getPool(): Pool {
- const url = process.env.DATABASE_URL;
- if (!url) {
- throw new Error('DATABASE_URL is not set');
- }
- // Reuse a module-level pool to avoid leaking connections
- const globalForPool = globalThis as unknown as { __novaPool?: Pool };
- if (!globalForPool.__novaPool) {
- globalForPool.__novaPool = new Pool({
- connectionString: url,
+let pool: Pool | null = null;
+let db: ReturnType<typeof drizzle> | null = null;
+
+export function getDbPool(): Pool {
+ if (!pool) {
+ pool = new Pool({
+ host: config.database.host,
+ port: config.database.port,
+ database: config.database.database,
+ user: config.database.user,
+ password: config.database.password,
  max: 20,
- idleTimeoutMillis: 30_000,
- connectionTimeoutMillis: 5_000,
+ idleTimeoutMillis: 30000,
+ connectionTimeoutMillis: 2000,
  });
+
+ pool.on('error', (err) => {
+ logger.error(err, 'Database pool error');
+ });
+
+ logger.info('PostgreSQL pool initialized');
  }
- return globalForPool.__novaPool;
+ return pool;
 }
 
-export async function query<T = unknown>(
- text: string,
- params?: unknown[]
- ): Promise<{ rows: T[]; rowCount: number }> {
- const pool = getPool();
- const result = await pool.query(text, params);
- return { rows: result.rows, rowCount: result.rowCount ?? 0 };
+export function getDb() {
+ if (!db) {
+ const poolInstance = getDbPool();
+ db = drizzle(poolInstance);
+ logger.info('Drizzle ORM initialized');
+ }
+ return db;
 }
 
-export async function closePool(): Promise<void> {
- const pool = getPool();
+export async function getClient(): Promise<PoolClient> {
+ const poolInstance = getDbPool();
+ return poolInstance.connect();
+}
+
+export async function closeDb(): Promise<void> {
+ if (pool) {
  await pool.end();
+ pool = null;
+ db = null;
+ logger.info('Database connection closed');
+ }
 }
-
-export { getPool };

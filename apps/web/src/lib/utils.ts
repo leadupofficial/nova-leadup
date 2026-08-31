@@ -13,6 +13,17 @@ export function formatTime(date: Date | number): string {
  });
 }
 
+export function formatDate(date: Date | number): string {
+ const d = date instanceof Date ? date : new Date(date);
+ const now = new Date();
+ const isToday = d.toDateString() === now.toDateString();
+ if (isToday) return 'Today';
+ const yesterday = new Date(now);
+ yesterday.setDate(yesterday.getDate() - 1);
+ if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+ return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 export function formatDuration(seconds: number): string {
  const mins = Math.floor(seconds / 60);
  const secs = seconds % 60;

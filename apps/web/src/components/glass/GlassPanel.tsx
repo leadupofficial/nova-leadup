@@ -5,11 +5,10 @@ import { motion } from 'framer-motion';
 import { cn } from '../../lib/utils';
 
 interface GlassPanelProps extends HTMLAttributes<HTMLDivElement> {
- children: ReactNode;
+ children?: ReactNode;
  padding?: 'none' | 'sm' | 'md' | 'lg';
  glow?: boolean;
  hoverable?: boolean;
- asChild?: boolean;
 }
 
 const paddingStyles: Record<string, string> = {
@@ -29,8 +28,9 @@ export function GlassPanel({
 }: GlassPanelProps) {
  return (
  <motion.div
- whileHover={hoverable ? { y: -2, scale: 1.005 } : undefined}
+ {...(hoverable ? { whileHover: { y: -2, scale: 1.005 } } : {})}
  transition={{ duration: 0.2, ease: 'easeOut' }}
+ {...(props as any)}
  className={cn(
  'rounded-2xl',
  'bg-white/[0.03]',
@@ -46,7 +46,6 @@ export function GlassPanel({
  style={{
  background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)',
  }}
- {...props}
  >
  {children}
  </motion.div>

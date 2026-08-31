@@ -2,14 +2,10 @@
 
 import { Variants } from 'framer-motion';
 
-export const animations = {
- staggerContainer: {
- staggerChildren: 0.08,
- delayChildren: 0.1,
- },
+export const animations: Record<string, any> = {
  fadeIn: {
  hidden: { opacity: 0 },
- visible: { opacity: 1 },
+ visible: { opacity: 1, y: 0 },
  },
  slideUp: {
  hidden: { opacity: 0, y: 20 },
@@ -26,6 +22,13 @@ export const animations = {
  scaleIn: {
  hidden: { opacity: 0, scale: 0.9 },
  visible: { opacity: 1, scale: 1 },
+ },
+ staggerContainer: {
+ hidden: {},
+ visible: {
+ staggerChildren: 0.08,
+ delayChildren: 0.1,
+ },
  },
  pulse: {
  scale: [1, 1.05, 1],

@@ -5,7 +5,7 @@ import { persist } from 'zustand/middleware';
 
 export interface Memory {
  id: string;
- type: 'preference' | 'fact' | 'event' | 'task' | 'relationship';
+ type: 'preference' | 'fact' | 'event' | 'task' | 'relationship' | 'reminder' | 'person' | 'company' | 'project' | 'decision' | 'conversation';
  content: string;
  context?: string;
  timestamp: Date;
@@ -13,6 +13,8 @@ export interface Memory {
  tags: string[];
  encrypted?: boolean;
 }
+
+export type MemoryType = Memory['type'];
 
 export interface UserPreferences {
  voice: {

@@ -1,6 +1,7 @@
 'use client';
 
-import { motion, useAnimation, useEffect } from 'framer-motion';
+import { motion, useAnimation } from 'framer-motion';
+import { useEffect } from 'react';
 import { AVATAR_STATES, COLORS, ANIMATION_DURATION } from '../../lib/design-tokens';
 
 interface AvatarProps {

@@ -1,4 +1,6 @@
 import { type Server as SocketIOServer } from 'socket.io';
+import { type CorsOptions } from 'cors';
+import { z } from 'zod';
 
 export interface ApiConfig {
  port: number;
@@ -23,6 +25,9 @@ export interface ApiConfig {
  jwt: {
  secret: string;
  expiresIn: string;
+ };
+ cors: {
+ origins: string[];
  };
 }
 
@@ -51,5 +56,33 @@ export function getEnvConfig(): ApiConfig {
  secret: process.env.JWT_SECRET ?? 'change-me-in-production',
  expiresIn: process.env.JWT_EXPIRES_IN ?? '24h',
  },
+ cors: {
+ origins: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:3004', 'http://localhost:3005'],
+ },
  };
 }
+
+export const config = getEnvConfig();
+
+export const validateEnv = (): void => {
+ const schema = z.object({
+ NODE_ENV: z.string().default('development'),
+ PORT: z.string().default('3001'),
+ DB_HOST: z.string().optional(),
+ DB_PORT: z.string().optional(),
+ DB_NAME: z.string().optional(),
+ DB_USER: z.string().optional(),
+ DB_PASSWORD: z.string().optional(),
+ REDIS_HOST: z.string().optional(),
+ REDIS_PORT: z.string().optional(),
+ JWT_SECRET: z.string().min(32),
+ JWT_EXPIRES_IN: z.string().optional(),
+ CORS_ORIGINS: z.string().optional(),
+ });
+
+ const result = schema.safeParse(process.env);
+ if (!result.success) {
+ console.error('Invalid environment:', result.error.format());
+ process.exit(1);
+ }
+};

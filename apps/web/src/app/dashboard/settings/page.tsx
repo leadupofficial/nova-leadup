@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
+import Link from 'next/link';
 import {
  ChevronRight,
  Mic,
@@ -14,11 +15,12 @@ import {
  Trash2,
  Download,
  User,
+ Brain,
 } from 'lucide-react';
-import { GlassPanel, GlassButton } from '../../components/glass';
-import { Badge } from '../../components/ui/Badge';
-import { useAssistantStore } from '../../stores/assistant-store';
-import { useMemoryStore } from '../../stores/memory-store';
+import { GlassPanel, GlassButton } from '../../../components/glass';
+import { Badge } from '../../../components/ui/Badge';
+import { useAssistantStore } from '../../../stores/assistant-store';
+import { useMemoryStore } from '../../../stores/memory-store';
 
 interface ToggleProps {
  label: string;
@@ -65,7 +67,7 @@ const PERSONALITY_OPTIONS = [
 
 export default function SettingsScreen() {
  const { state } = useAssistantStore();
- const { preferences, updatePreference } = useMemoryStore();
+ const { preferences, updatePreferences } = useMemoryStore();
  const [companionName, setCompanionName] = useState('NOVA');
  const [personality, setPersonality] = useState('friendly');
  const [voice, setVoice] = useState(VOICE_OPTIONS[0]);
@@ -191,15 +193,15 @@ export default function SettingsScreen() {
  </div>
  <div>
  <label className="text-xs text-slate-500 block mb-1.5">
- Speech Speed: {preferences.voiceSpeed.toFixed(1)}x
+ Speech Speed: {preferences.voice.speed.toFixed(1)}x
  </label>
  <input
  type="range"
  min="0.5"
  max="2"
  step="0.1"
- value={preferences.voiceSpeed}
- onChange={(e) => updatePreference('voiceSpeed', parseFloat(e.target.value))}
+ value={preferences.voice.speed}
+ onChange={(e) => updatePreferences({voice: {...preferences.voice, speed: parseFloat(e.target.value)}})}
  className="w-full accent-indigo-500"
  />
  </div>
@@ -253,14 +255,14 @@ export default function SettingsScreen() {
  <div>
  <label className="text-xs text-slate-500 block mb-1.5">Response Length</label>
  <div className="grid grid-cols-3 gap-2">
- {(['short', 'medium', 'detailed'] as const).map((length) => (
+ {(['short', 'medium', 'long'] as const).map((length) => (
  <button
  key={length}
- onClick={() => updatePreference('responseLength', length)}
+ onClick={() => updatePreferences({ai: {...preferences.ai, responseLength: length}})}
  className={`
  py-2 rounded-xl text-xs font-medium transition-all border cursor-pointer
  ${
- preferences.responseLength === length
+ preferences.ai.responseLength === length
  ? 'bg-emerald-500/15 border-emerald-400/25 text-emerald-300'
  : 'bg-white/[0.03] border-transparent text-slate-400'
  }

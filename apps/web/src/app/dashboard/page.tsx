@@ -18,15 +18,15 @@ import {
  AlertTriangle,
  TrendingUp,
 } from 'lucide-react';
-import { Avatar } from '@/components/avatar/Avatar';
-import { VoiceWaveform } from '@/components/glass/VoiceWaveform';
-import { GlassPanel, GlassButton } from '@/components/glass';
-import { useAssistantStore } from '@/stores/assistant-store';
-import { useTaskStore } from '@/stores/task-store';
-import { useMemoryStore } from '@/stores/memory-store';
-import { useConversationStore } from '@/stores/conversation-store';
-import { formatTime, formatRelativeTime } from '@/lib/utils';
-import { animations } from '@/lib/animations';
+import { Avatar } from '../../components/avatar/Avatar';
+import { VoiceWaveform } from '../../components/glass/VoiceWaveform';
+import { GlassPanel, GlassButton } from '../../components/glass';
+import { useAssistantStore } from '../../stores/assistant-store';
+import { useTaskStore } from '../../stores/task-store';
+import { useMemoryStore } from '../../stores/memory-store';
+import { useConversationStore } from '../../stores/conversation-store';
+import { formatTime, formatRelativeTime } from '../../lib/utils';
+import { animations } from '../../lib/animations';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 

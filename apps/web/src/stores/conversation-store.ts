@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { generateId } from '../../lib/utils';
+import { generateId } from '../lib/utils';
 
 export interface Message {
  id: string;

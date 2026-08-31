@@ -8,6 +8,7 @@ const nextConfig = {
  images: {
  remotePatterns: [],
  },
+ outputFileTracingRoot: path.join(__dirname, '../../'),
  webpack: (config) => {
  config.resolve.alias = {
  ...(config.resolve.alias || {}),

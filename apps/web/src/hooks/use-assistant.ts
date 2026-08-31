@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
-import { useAssistantStore } from '../../stores/assistant-store';
-import { useConversationStore } from '../../stores/conversation-store';
+import { useAssistantStore } from '../stores/assistant-store';
+import { useConversationStore } from '../stores/conversation-store';
 
 const MOCK_RESPONSES = [
  "I understand, Abishek. Let me look into that for you.",
@@ -17,27 +17,28 @@ export function useAssistant() {
  const { state, setState, setEmotion, startListening, stopListening } = useAssistantStore();
  const { addMessage, isStreaming, setStreaming } = useConversationStore();
  const [isProcessing, setIsProcessing] = useState(false);
- const abortRef = useRef(false);
+ const cancelledRef = useRef(false);
+ const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
  const sendMessage = useCallback(
  async (content: string) => {
  if (!content.trim() || isProcessing) return;
+
+ cancelledRef.current = false;
 
  addMessage({ role: 'user', content: content.trim() });
  setStreaming(true);
  setState('thinking');
  setEmotion('neutral');
  setIsProcessing(true);
- abortRef.current = false;
 
  const responseDelay = 800 + Math.random() * 1200;
 
  await new Promise((resolve) => {
- const timeout = setTimeout(resolve, responseDelay);
- abortRef.current = () => clearTimeout(timeout);
+ timeoutRef.current = setTimeout(resolve, responseDelay);
  });
 
- if (abortRef.current) return;
+ if (cancelledRef.current) return;
 
  const randomResponse = MOCK_RESPONSES[Math.floor(Math.random() * MOCK_RESPONSES.length)];
  setState('speaking');
@@ -53,7 +54,7 @@ export function useAssistant() {
  });
 
  for (let i = 0; i < words.length; i++) {
- if (abortRef.current) return;
+ if (cancelledRef.current) return;
  await new Promise((r) => setTimeout(r, 50 + Math.random() * 60));
  currentText += (i > 0 ? ' ' : '') + words[i];
 
@@ -76,7 +77,8 @@ export function useAssistant() {
  );
 
  const cancelProcessing = useCallback(() => {
- abortRef.current = true;
+ cancelledRef.current = true;
+ if (timeoutRef.current) clearTimeout(timeoutRef.current);
  setStreaming(false);
  setIsProcessing(false);
  setState('idle');

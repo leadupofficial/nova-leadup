@@ -12,6 +12,7 @@ export interface Task {
  category: string;
  createdAt: Date;
  completedAt?: Date;
+ tags?: string[];
 }
 
 export interface Reminder {
@@ -19,6 +20,7 @@ export interface Reminder {
  title: string;
  datetime: Date;
  recurring?: 'daily' | 'weekly' | 'monthly';
+ recurringPattern?: string;
  isActive: boolean;
  sound?: string;
 }

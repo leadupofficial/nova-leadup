@@ -1,75 +1,40 @@
-/**
- * Simple migration runner for NOVA.
- *
- * Tracks applied migrations in the `schema_migrations` table.
- * Each file in src/db/migrations/ named 001-*.sql, 002-*.sql … is run once in order.
- *
- * Usage:
- * npx tsx src/db/migrate.ts (or npm run db:migrate)
- */
-import { getPool, query, closePool } from './connection';
+import 'dotenv/config';
+import { config } from '../config';
+import { getDb } from '../db/connection';
+import { logger } from '../utils/logger';
 
-const MIGRATIONS_DIR = new URL('.', import.meta.url).pathname;
+export async function migrate(): Promise<void> {
+ const db = getDb();
+ const queries = [
+ `CREATE TABLE IF NOT EXISTS users (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ email VARCHAR(255) UNIQUE NOT NULL,
+ password_hash VARCHAR(255) NOT NULL,
+ name VARCHAR(255),
+ role VARCHAR(50) DEFAULT 'user',
+ email_verified BOOLEAN DEFAULT FALSE,
+ created_at TIMESTAMP DEFAULT NOW(),
+ updated_at TIMESTAMP DEFAULT NOW()
+ )`,
+ `CREATE TABLE IF NOT EXISTS sessions (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ token_hash VARCHAR(255) NOT NULL,
+ expires_at TIMESTAMP NOT NULL,
+ created_at TIMESTAMP DEFAULT NOW()
+ )`,
+ `CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`,
+ `CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)`,
+ ];
 
-interface MigrationRow {
- version: string;
- applied_at: string;
-}
-
-async function ensureMigrationsTable(pool: ReturnType<typeof getPool>): Promise<void> {
- await pool.query(`
- CREATE TABLE IF NOT EXISTS schema_migrations (
- version VARCHAR(20) PRIMARY KEY,
- applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
- )
- `);
-}
-
-async function getAppliedVersions(pool: ReturnType<typeof getPool>): Promise<Set<string>> {
- const { rows } = await pool.query<MigrationRow>(
- 'SELECT version FROM schema_migrations ORDER BY version'
- );
- return new Set(rows.map((r) => r.version));
-}
-
-async function runMigrations(): Promise<void> {
- const { readdir, readFile } = await import('fs/promises');
- const pool = getPool();
-
+ for (const query of queries) {
  try {
- await ensureMigrationsTable(pool);
- const applied = await getAppliedVersions(pool);
-
- const files = (await readdir(MIGRATIONS_DIR))
- .filter((f) => f.endsWith('.sql') && /^\d{3}-/.test(f))
- .sort();
-
- let appliedCount = 0;
- for (const file of files) {
- const version = file.slice(0, 3);
- if (applied.has(version)) continue;
-
- const sql = await readFile(`${MIGRATIONS_DIR}/${file}`, 'utf-8');
- await pool.query('BEGIN');
- try {
- await pool.query(sql);
- await pool.query('INSERT INTO schema_migrations (version) VALUES ($1)', [version]);
- await pool.query('COMMIT');
- appliedCount++;
- console.log(`[migrate] applied ${file}`);
- } catch (err) {
- await pool.query('ROLLBACK');
- throw err;
+ await db.execute(query);
+ logger.debug('Migration executed');
+ } catch (error) {
+ logger.error(error, 'Migration failed');
+ throw error;
  }
  }
-
- console.log(`[migrate] done — ${appliedCount} new, ${files.length - appliedCount} already applied`);
- } finally {
- await closePool();
- }
+ logger.info('Database migrations complete');
 }
-
-runMigrations().catch((err) => {
- console.error('[migrate] FATAL:', err);
- process.exit(1);
-});
