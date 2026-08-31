@@ -43,16 +43,14 @@ jobs:
       uses: android-actions/setup-android@v3
     - name: Create placeholder app assets
       working-directory: apps/mobile
-      run: 'mkdir -p assets
-
-        printf ''\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\xad\xb8\x00\x00\x00\x00IEND\xae\x42\x60\x82''
-        > assets/icon.png
-
-        cp assets/icon.png assets/adaptive-icon.png
-
-        cp assets/icon.png assets/splash.png
-
-        echo "Created placeholder assets"'
+      run: "mkdir -p assets\npython3 -c \"\nimport struct, zlib\ndef chunk(ctype,\
+        \ data):\n c = ctype + data\n return struct.pack('>I', len(data)) + c + struct.pack('>I',\
+        \ zlib.crc32(c) & 0xffffffff)\nihdr = struct.pack('>IIBBBBB', 1, 1, 8, 6,\
+        \ 0, 0, 0)\nraw = b'\\x00' * 5\nidat = zlib.compress(raw)\npng = b'\\x89PNG\\\
+        r\\n\\x1a\\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', idat) + chunk(b'IEND',\
+        \ b'')\nwith open('assets/icon.png', 'wb') as f: f.write(png)\n\"\ncp assets/icon.png\
+        \ assets/adaptive-icon.png\ncp assets/icon.png assets/splash.png\necho \"\
+        Created valid placeholder assets\""
     - name: Generate native Android project
       working-directory: apps/mobile
       run: 'npx expo prebuild --platform android --clean
