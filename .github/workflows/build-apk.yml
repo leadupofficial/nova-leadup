@@ -31,6 +31,20 @@ jobs:
         java-version: '17'
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
+    - name: Create placeholder app assets
+      working-directory: apps/mobile
+      run: 'mkdir -p assets
+
+        # Create 1x1 transparent PNG as placeholder icon
+
+        printf ''\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\xad\xb8\x00\x00\x00\x00IEND\xae\x42\x60\x82''
+        > assets/icon.png
+
+        cp assets/icon.png assets/adaptive-icon.png
+
+        cp assets/icon.png assets/splash.png
+
+        echo "Created placeholder assets"'
     - name: Generate native Android project
       working-directory: apps/mobile
       run: 'npx expo prebuild --platform android --clean
@@ -40,9 +54,7 @@ jobs:
       working-directory: apps/mobile/android
       run: 'sed -i.bak ''/com.facebook.react.rootproject/d'' build.gradle
 
-        echo "Removed rootproject plugin"
-
-        grep -n "plugin" build.gradle | head -5'
+        echo ''Removed rootproject plugin'''
     - name: Build release APK
       working-directory: apps/mobile/android
       run: 'chmod +x gradlew
