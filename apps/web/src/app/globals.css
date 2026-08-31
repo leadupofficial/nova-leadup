@@ -1,6 +1,28 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+ --color-nova-bg: #0b1020;
+ --color-nova-surface: #0f172a;
+ --color-nova-surface-alt: #1e293b;
+ --color-nova-primary: #6366f1;
+ --color-nova-primary-light: #818cf8;
+ --color-nova-primary-dark: #4f46e5;
+ --color-nova-accent: #22d3ee;
+ --color-nova-accent-light: #67e8f9;
+ --color-nova-accent-dark: #06b6d4;
+ --color-nova-warning: #f59e0b;
+ --color-nova-warning-light: #fbbf24;
+ --color-nova-success: #10b981;
+ --color-nova-success-light: #34d399;
+ --color-nova-error: #ef4444;
+ --color-nova-error-light: #f87171;
+ --color-nova-text: #f8fafc;
+ --color-nova-text-secondary: #94a3b8;
+ --color-nova-text-dim: #64748b;
+ --color-nova-text-muted: #64748b;
+ --color-nova-border: #1e293b;
+ --color-nova-border-light: #334155;
+}
 
 :root {
  --nova-bg: #0b1020;
