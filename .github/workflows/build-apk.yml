@@ -20,8 +20,6 @@ jobs:
         node-version: 22.x
     - name: Install pnpm
       uses: pnpm/action-setup@v4
-    - name: Verify pnpm
-      run: pnpm --version
     - name: Install dependencies
       run: pnpm install --no-frozen-lockfile
       env:
@@ -38,6 +36,13 @@ jobs:
       run: 'npx expo prebuild --platform android --clean
 
         echo "Generated Android project"'
+    - name: Remove incompatible root project plugin
+      working-directory: apps/mobile/android
+      run: 'sed -i.bak ''/com.facebook.react.rootproject/d'' build.gradle
+
+        echo "Removed rootproject plugin"
+
+        grep -n "plugin" build.gradle | head -5'
     - name: Build release APK
       working-directory: apps/mobile/android
       run: 'chmod +x gradlew
