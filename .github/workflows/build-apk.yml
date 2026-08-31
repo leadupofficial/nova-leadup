@@ -12,6 +12,9 @@ name: Build Android APK
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    env:
+      EXPO_UNSTABLE_DISABLE_DEV_LAUNCHER_AUTOLINKING: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
     steps:
     - uses: actions/checkout@v4
     - name: Set up Node.js 22
@@ -22,8 +25,6 @@ jobs:
       uses: pnpm/action-setup@v4
     - name: Install dependencies
       run: pnpm install --no-frozen-lockfile
-      env:
-        PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
@@ -32,39 +33,64 @@ jobs:
     - name: Accept Android SDK licenses
       run: 'mkdir -p /usr/local/lib/android/sdk/licenses
 
-        echo "\nd243215ed4a640bd90b24baca47b2e39\n\n84831b9409646a918e30573bab4c9c91\n\nd56f5187479451eabf01fb78af6dfcb6"
+        echo -e "\nd243215ed4a640bd90b24baca47b2e39\n\n84831b9409646a918e30573bab4c9c91\n\nd56f5187479451eabf01fb78af6dfcb6"
         > /usr/local/lib/android/sdk/licenses/android-sdk-license
 
-        echo "\n84831b9409646a918e30573bab4c9c91\n\nd56f5187479451eabf01fb78af6dfcb6"
+        echo -e "\n84831b9409646a918e30573bab4c9c91\n\nd56f5187479451eabf01fb78af6dfcb6"
         > /usr/local/lib/android/sdk/licenses/android-sdk-preview-license
 
-        echo "Accepted licenses"'
+        echo "Accepted licenses"
+
+        '
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
     - name: Create placeholder app assets
       working-directory: apps/mobile
-      run: "mkdir -p assets\npython3 -c \"\nimport struct, zlib\ndef chunk(ctype,\
-        \ data):\n c = ctype + data\n return struct.pack('>I', len(data)) + c + struct.pack('>I',\
-        \ zlib.crc32(c) & 0xffffffff)\nihdr = struct.pack('>IIBBBBB', 1, 1, 8, 6,\
-        \ 0, 0, 0)\nraw = b'\\x00' * 5\nidat = zlib.compress(raw)\npng = b'\\x89PNG\\\
-        r\\n\\x1a\\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', idat) + chunk(b'IEND',\
-        \ b'')\nwith open('assets/icon.png', 'wb') as f: f.write(png)\n\"\ncp assets/icon.png\
-        \ assets/adaptive-icon.png\ncp assets/icon.png assets/splash.png\necho \"\
-        Created valid placeholder assets\""
+      run: 'mkdir -p assets
+
+        python3 -c "
+
+        import struct, zlib
+
+        def chunk(ctype, data):
+
+        c = ctype + data
+
+        return struct.pack(''>I'', len(data)) + c + struct.pack(''>I'', zlib.crc32(c)
+        & 0xffffffff)
+
+        ihdr = struct.pack(''>IIBBBBB'', 1, 1, 8, 6, 0, 0, 0)
+
+        raw = b''\x00'' * 5
+
+        idat = zlib.compress(raw)
+
+        png = b''\x89PNG\r\n\x1a\n'' + chunk(b''IHDR'', ihdr) + chunk(b''IDAT'', idat)
+        + chunk(b''IEND'', b'''')
+
+        with open(''assets/icon.png'', ''wb'') as f: f.write(png)
+
+        "
+
+        cp assets/icon.png assets/adaptive-icon.png
+
+        cp assets/icon.png assets/splash.png
+
+        echo "Created valid placeholder assets"
+
+        '
     - name: Generate native Android project
       working-directory: apps/mobile
+      env:
+        EXPO_UNSTABLE_DISABLE_DEV_LAUNCHER_AUTOLINKING: '1'
       run: 'npx expo prebuild --platform android --clean
 
         echo "Generated Android project"'
-    - name: Fix Gradle plugin conflicts for release build
+    - name: Fix Gradle root project plugin
       working-directory: apps/mobile/android
       run: 'sed -i.bak ''/com.facebook.react.rootproject/d'' build.gradle
 
-        sed -i.bak ''/expo-dev-launcher-gradle-plugin/d'' app/build.gradle
-
-        echo ''Fixed Gradle plugins''
-
-        grep -n "plugin" build.gradle app/build.gradle | head -10'
+        echo ''Removed rootproject plugin'''
     - name: Build release APK
       working-directory: apps/mobile/android
       run: 'chmod +x gradlew
@@ -81,8 +107,5 @@ jobs:
         if-no-files-found: error
     - name: APK Info
       run: 'APK_SIZE=$(find apps/mobile/android/app/build/outputs/apk/release -name
-        "*.apk" -exec ls -lh {} \; | awk ''{print $5}'')
-
-        echo "APK built successfully!"
-
-        echo "Size: $APK_SIZE"'
+        "*.apk" -exec ls -lh {} \; | awk ''{print $5}'')\necho "APK built successfully!"\necho
+        "Size: $APK_SIZE"'
