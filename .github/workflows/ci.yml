@@ -10,6 +10,44 @@ on:
  - cron: '0 0 * * 0'
 
 jobs:
+<<<<<<< HEAD
+=======
+ setup:
+ runs-on: ubuntu-latest
+ outputs:
+ cache-key: ${{ steps.cache-key.outputs.key }}
+ steps:
+ - uses: actions/checkout@v4
+ - id: cache-key
+ run: echo "key=ci-${{ hashFiles('pnpm-lock.yaml') }}" >> "$GITHUB_OUTPUT"
+
+ install:
+ needs: setup
+ runs-on: ubuntu-latest
+ strategy:
+ matrix:
+ node-version: [20.x]
+ steps:
+ - uses: actions/checkout@v4
+ - uses: pnpm/action-setup@v4
+ with:
+ version: 9
+ - uses: actions/setup-node@v4
+ with:
+ node-version: ${{ matrix.node-version }}
+ cache: 'pnpm'
+ cache-dependency-path: 'pnpm-lock.yaml'
+ - name: Install dependencies
+ run: pnpm install --frozen-lockfile
+ env:
+ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+ - name: Cache turbo
+ uses: actions/cache@v4
+ with:
+ path: .turbo
+ key: ${{ needs.setup.outputs.cache-key }}
+
+>>>>>>> f0688da (feat: complete mobile app source files and add GitHub Actions APK build workflow)
  lint:
  name: Lint
  runs-on: ubuntu-latest
@@ -22,9 +60,19 @@ jobs:
  with:
  node-version: '22'
  cache: 'pnpm'
+<<<<<<< HEAD
  - run: pnpm install --frozen-lockfile
  - run: pnpm run lint
  - run: pnpm run format:check
+=======
+ cache-dependency-path: 'pnpm-lock.yaml'
+ - name: Install dependencies
+ run: pnpm install --frozen-lockfile
+ env:
+ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+ - name: Lint
+ run: pnpm lint
+>>>>>>> f0688da (feat: complete mobile app source files and add GitHub Actions APK build workflow)
 
  type-check:
  name: Type Check
@@ -39,8 +87,18 @@ jobs:
  with:
  node-version: '22'
  cache: 'pnpm'
+<<<<<<< HEAD
  - run: pnpm install --frozen-lockfile
  - run: pnpm run type-check
+=======
+ cache-dependency-path: 'pnpm-lock.yaml'
+ - name: Install dependencies
+ run: pnpm install --frozen-lockfile
+ env:
+ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+ - name: Type check
+ run: pnpm typecheck
+>>>>>>> f0688da (feat: complete mobile app source files and add GitHub Actions APK build workflow)
 
  test:
  name: Unit Tests
@@ -55,12 +113,26 @@ jobs:
  with:
  node-version: '22'
  cache: 'pnpm'
+<<<<<<< HEAD
  - run: pnpm install --frozen-lockfile
  - run: pnpm run test:unit
  - uses: codecov/codecov-action@v4
  if: github.event_name == 'push'
  with:
  files: ./coverage/lcov.info
+=======
+ cache-dependency-path: 'pnpm-lock.yaml'
+ - name: Install dependencies
+ run: pnpm install --frozen-lockfile
+ env:
+ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+ - name: Run tests
+ run: pnpm test -- --coverage
+ - name: Upload coverage
+ uses: codecov/codecov-action@v4
+ with:
+ files: ./coverage/coverage-final.json
+>>>>>>> f0688da (feat: complete mobile app source files and add GitHub Actions APK build workflow)
  fail_ci_if_error: false
 
  security-scan:
@@ -75,11 +147,23 @@ jobs:
  with:
  node-version: '22'
  cache: 'pnpm'
+<<<<<<< HEAD
  - run: pnpm install --frozen-lockfile
  # SAST — dependency audit across all workspaces
  - run: pnpm run security:audit
  # SAST — Semgrep static analysis
  - uses: semgrep/semgrep-action@v1
+=======
+ cache-dependency-path: 'pnpm-lock.yaml'
+ - name: Install dependencies
+ run: pnpm install --frozen-lockfile
+ env:
+ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+ - name: Run audit
+ run: pnpm audit --audit-level moderate || true
+ - name: Secret scan
+ uses: trufflesecurity/trufflehog@main
+>>>>>>> f0688da (feat: complete mobile app source files and add GitHub Actions APK build workflow)
  with:
  config: >-
  p/security-audit

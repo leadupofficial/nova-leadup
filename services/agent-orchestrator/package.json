@@ -1,0 +1,31 @@
+{
+  "name": "@nova/agent-orchestrator",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc && tsc-alias -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "@nova/ai-core": "workspace:*",
+    "@nova/tools": "workspace:*",
+    "@nova/policy": "workspace:*",
+    "@nova/memory": "workspace:*",
+    "@nova/voice": "workspace:*",
+    "@nova/observability": "workspace:*",
+    "@nova/shared-types": "workspace:*",
+    "@anthropic-ai/sdk": ">=0.43.0",
+    "zod": "^3.24.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "vitest": "^2.1.0",
+    "tsc-alias": "^1.8.0"
+  }
+}

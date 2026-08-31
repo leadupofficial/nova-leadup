@@ -1,62 +1,40 @@
 {
  "$schema": "https://turbo.build/schema.json",
  "globalDependencies": ["**/.env.*local"],
- "pipeline": {
+ "globalEnv": [
+ "DATABASE_URL",
+ "REDIS_URL",
+ "ANTHROPIC_API_KEY",
+ "ELEVENLABS_API_KEY",
+ "SARVAM_API_KEY",
+ "S3_ENDPOINT",
+ "S3_ACCESS_KEY",
+ "S3_SECRET_KEY",
+ "S3_BUCKET",
+ "JWT_SECRET",
+ "NODE_ENV"
+ ],
+ "tasks": {
  "build": {
  "dependsOn": ["^build"],
- "outputs": ["dist/**", "build/**", ".next/**"],
- "cache": true
+ "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
  },
  "dev": {
  "cache": false,
  "persistent": true
  },
  "lint": {
- "dependsOn": [],
- "outputs": [],
- "cache": true
+ "dependsOn": ["^build"]
  },
- "type-check": {
- "dependsOn": ["build"],
- "outputs": [],
- "cache": true
+ "typecheck": {
+ "dependsOn": ["^build"]
  },
  "test": {
- "dependsOn": ["build"],
- "outputs": ["coverage/**"],
- "cache": true
- },
- "test:unit": {
- "dependsOn": ["build"],
- "outputs": ["coverage/**"],
- "cache": true
- },
- "db:migrate": {
- "dependsOn": [],
- "outputs": [],
- "cache": false
- },
- "db:seed": {
- "dependsOn": [],
- "outputs": [],
- "cache": false
+ "dependsOn": ["^build"],
+ "outputs": ["coverage/**"]
  },
  "clean": {
  "cache": false
  }
- },
- "globalEnv": [
- "NODE_ENV",
- "DATABASE_URL",
- "REDIS_URL",
- "S3_ENDPOINT",
- "S3_ACCESS_KEY",
- "S3_SECRET_KEY",
- "S3_BUCKET",
- "JWT_SECRET",
- "REFRESH_TOKEN_SECRET",
- "API_KEY",
- "API_KEY_SECRET",
- "AUTH_ENCRYPTION_KEY"
- ]
+ }
 }

@@ -1,32 +1,8 @@
 {
+ "extends": "./tsconfig.base.json",
  "compilerOptions": {
- "target": "ES2022",
- "module": "NodeNext",
- "moduleResolution": "NodeNext",
- "lib": ["ES2022"],
- "strict": true,
- "esModuleInterop": true,
- "skipLibCheck": true,
- "forceConsistentCasingInFileNames": true,
- "resolveJsonModule": true,
- "outDir": "./dist",
- "baseUrl": ".",
- "paths": {
- "@nova/types": ["./packages/types/src"],
- "@nova/utils": ["./packages/utils/src"],
- "@nova/auth-types": ["./packages/auth-types/src"]
- }
+ "outDir": "dist",
  },
- "references": [
- { "path": "./packages/types" },
- { "path": "./packages/utils" },
- { "path": "./packages/auth-types" },
- { "path": "./packages/config" },
- { "path": "./services/api" },
- { "path": "./services/auth" },
- { "path": "./services/admin" },
- { "path": "./services/workers" },
- { "path": "./apps/web" }
- ],
- "exclude": ["node_modules", "dist"]
+ "include": ["*"],
+ "exclude": ["node_modules", "dist", ".turbo"]
 }

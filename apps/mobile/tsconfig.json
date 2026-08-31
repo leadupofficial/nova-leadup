@@ -1,0 +1,15 @@
+{
+ "extends": "../../tsconfig.base.json",
+ "compilerOptions": {
+ "outDir": "dist",
+ "baseUrl": ".",
+ "paths": {
+ "nova-ui": ["./node_modules/nova-ui/index.js"],
+ "nova-api": ["./node_modules/nova-api/index.js"],
+ "nova-avatar": ["./node_modules/nova-avatar/index.js"],
+ "nova-voice": ["./node_modules/nova-voice/index.js"]
+ }
+ },
+ "include": ["expo-router/**/*.ts", "expo-router/**/*.tsx", "src/**/*", "node_modules/nova-ui/**/*", "node_modules/nova-api/**/*", "node_modules/nova-avatar/**/*", "node_modules/nova-voice/**/*"],
+ "exclude": ["node_modules", "dist"]
+}

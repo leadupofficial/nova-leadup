@@ -6,11 +6,17 @@
  "main": "./dist/index.js",
  "type": "module",
  "scripts": {
+<<<<<<< HEAD
  "dev": "tsx watch src/index.ts",
  "build": "tsc",
  "start": "node dist/index.js",
  "lint": "eslint src/",
  "type-check": "tsc --noEmit",
+=======
+ "dev": "tsx watch src/server.ts",
+ "build": "tsc && tsc-alias -p tsconfig.json",
+ "typecheck": "tsc --noEmit",
+>>>>>>> f0688da (feat: complete mobile app source files and add GitHub Actions APK build workflow)
  "test": "vitest run",
  "test:watch": "vitest",
  "test:coverage": "vitest run --coverage",
@@ -28,11 +34,23 @@
  "pg": "^8.16.0"
  },
  "devDependencies": {
+<<<<<<< HEAD
  "@nova/config": "workspace:*",
  "typescript": "^5.8.3",
  "eslint": "^9.27.0",
  "@types/pg": "^8.11.15",
  "tsx": "^4.7.0",
  "vitest": "^3.2.0"
+=======
+ "tsc-alias": "^1.8.0",
+ "typescript": "^5.7.0",
+ "tsx": "^4.19.0",
+ "vitest": "^2.1.0",
+ "@types/express": "^5.0.0",
+ "@types/cors": "^2.8.0",
+ "@types/bcryptjs": "^2.4.0",
+ "@types/jsonwebtoken": "^9.0.0",
+ "@types/ws": "^8.5.0"
+>>>>>>> f0688da (feat: complete mobile app source files and add GitHub Actions APK build workflow)
  }
 }

@@ -1,0 +1,21 @@
+{
+  "name": "@nova/ai-core",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc && tsc-alias -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nova/tools": "workspace:*",
+    "@nova/shared-types": "workspace:*",
+    "@anthropic-ai/sdk": ">=0.43.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsc-alias": "^1.8.0"
+  }
+}
