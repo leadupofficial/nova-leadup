@@ -57,7 +57,7 @@ jobs:
         echo "Created valid placeholder assets"'
     - name: Fix Android build files
       working-directory: apps/mobile/android
-      run: 'node .github/workflows/fix-android.js
+      run: 'node ../../../.github/workflows/fix-android.js
 
         echo ''Applied fixes'''
     - name: Build release APK
