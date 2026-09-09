@@ -7,8 +7,8 @@
  * Server-side only. Requires pgvector extension on PostgreSQL for vector search.
  */
 
-import { memories, memoryEmbeddings, sql } from '@nova/database/schema';
-import { eq, and } from 'drizzle-orm';
+import { memories, memoryEmbeddings } from '@nova/database/schema';
+import { eq, and, sql } from 'drizzle-orm';
 import type { MemorySearchRequest, MemorySearchResponse, MemoryRecord } from '@nova/shared-types';
 
 // ─── Embedding Generation ────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ export class MemorySearch {
  ? await this.vectorSearch(userId, limit)
  : await this.textSearch(userId, request, limit);
 
- const results = rows.map((row) => row as MemoryRecord);
+ const results = rows.map((row) => row as unknown as MemoryRecord);
  const latencyMs = Math.round(performance.now() - start);
 
  return {

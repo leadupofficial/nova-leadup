@@ -6,7 +6,15 @@
  */
 
 import dotenv from 'dotenv';
+import { validateEnv } from './utils/env';
+void validateEnv();
 dotenv.config();
+
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
+import { healthRoutes } from './routes/health.js';
 
 export interface JobDefinition<TInput = unknown, TOutput = unknown> {
  name: string;
@@ -79,3 +87,34 @@ export function getJobResults(): JobResult[] {
 function sleep(ms: number): Promise<void> {
  return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+// Express management API
+const wfApp = express();
+const WF_PORT = process.env.PORT || 3008;
+wfApp.use(helmet());
+
+const DEFAULT_ORIGINS = ['https://nova.leadup.in', 'https://admin.nova.leadup.in'];
+const allowedOrigins = process.env.CORS_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean) ?? DEFAULT_ORIGINS;
+
+wfApp.use(
+ cors({
+ origin: (origin, cb) => {
+ if (!origin) return cb(null, true);
+ if (allowedOrigins.includes(origin)) return cb(null, true);
+ return cb(new Error(`CORS: origin ${origin} not allowed`));
+ },
+ credentials: true,
+ }),
+);
+wfApp.use(compression() as any);
+wfApp.use(express.json({ limit: '10mb' }));
+wfApp.use('/health', healthRoutes as any);
+wfApp.get('/healthz', (_req, res) => res.json({ status: 'ok', service: 'workflow-engine', uptime: process.uptime() }));
+wfApp.get('/api/jobs', (_req, res) => res.json({ jobs: getRegisteredJobs() }));
+wfApp.post('/api/jobs/:name/execute', async (req, res) => {
+ const result = await executeJob(req.params.name, req.body as any);
+ res.json(result);
+});
+const wfServer = wfApp.listen(WF_PORT, () => console.log(`[workflow-engine] HTTP listening on :${WF_PORT}`));
+wfServer.timeout;
+;(wfServer as any).setTimeout(30_000);
