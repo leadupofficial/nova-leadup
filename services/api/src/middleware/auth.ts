@@ -2,7 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { HttpError } from '../middleware/error-handler';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production';
+// JWT secret validated at startup — safe to use here
+const JWT_SECRET = process.env.JWT_SECRET!;
 
 export interface AuthenticatedRequest extends Request {
  user?: { id: string; email: string; role: string };
