@@ -110,6 +110,20 @@ import type {
 	ToolCall,
 } from './types';
 
+export {
+	SUPPORTED_LANGUAGES,
+	LanguageCode,
+	SupportedLanguage,
+	MixedLanguageCode,
+	LanguageDetectionResult,
+	detectMixedLanguage,
+	detectLanguage,
+	getVoiceProviderForLanguage,
+	getSttProviderForLanguage,
+	getLanguageName,
+	getLanguageCodeMap,
+} from './languages';
+
 export type {
 	AppEvent,
 	AppEventType,

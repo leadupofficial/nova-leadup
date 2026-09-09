@@ -1,28 +1,42 @@
 {
-  "name": "@nova/database",
-  "version": "0.1.0",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "scripts": {
-    "build": "tsc && tsc-alias -p tsconfig.json",
-    "typecheck": "tsc --noEmit",
-    "generate": "drizzle-kit generate",
-    "migrate": "tsx src/migrate.ts",
-    "test": "vitest run"
-  },
-  "dependencies": {
-    "@aws-sdk/client-s3": "^3.670.0",
-    "@nova/shared-types": "workspace:*",
-    "drizzle-orm": "^0.39.0",
-    "ioredis": "^5.4.0",
-    "pg": "^8.13.0",
-    "pgvector": "^0.2.0"
-  },
-  "devDependencies": {
-    "better-sqlite3": "^13.0.3",
-    "drizzle-kit": "^0.30.0",
-    "tsc-alias": "^1.8.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
-  }
+ "name": "@nova/database",
+ "version": "0.1.0",
+ "main": "./dist/index.js",
+ "types": "./dist/index.d.ts",
+ "exports": {
+ ".": {
+ "types": "./dist/index.d.ts",
+ "import": "./dist/index.js",
+ "default": "./dist/index.js"
+ },
+ "./schema": {
+ "types": "./dist/schema.d.ts",
+ "import": "./dist/schema.js"
+ }
+ },
+ "scripts": {
+ "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
+ "typecheck": "tsc --noEmit -p tsconfig.json",
+ "generate": "drizzle-kit generate",
+ "migrate": "tsx scripts/migrate.ts",
+ "test": "vitest run"
+ },
+ "dependencies": {
+ "@aws-sdk/client-s3": "^3.670.0",
+ "@nova/shared-types": "workspace:*",
+ "dotenv": "^16.4.5",
+ "drizzle-orm": "^0.39.0",
+ "ioredis": "^5.4.0",
+ "pg": "^8.13.0",
+ "pgvector": "^0.2.0",
+ "postgres": "^3.4.5"
+ },
+ "devDependencies": {
+ "@types/pg": "^8.11.10",
+ "better-sqlite3": "^13.0.3",
+ "drizzle-kit": "^0.30.0",
+ "tsc-alias": "^1.8.0",
+ "tsx": "^4.19.0",
+ "typescript": "^5.7.0"
+ }
 }

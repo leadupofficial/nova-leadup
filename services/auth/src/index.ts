@@ -21,18 +21,41 @@
  * GET /api-keys
  * DELETE /api-keys/:id
  * GET /health
+ *
+ * This file also serves as the public API surface for the @nova/auth package,
+ * re-exporting shared types, auth utilities, and middleware so services can
+ * import from '@nova/auth'.
  */
 
+import 'dotenv/config';
+
 import express from 'express';
+import compression from 'compression';
+import { validateEnv } from './utils/env';
+void validateEnv();
 import Redis from 'ioredis';
-import { authRoutes } from './routes/authRoutes.js';
-import { orgRoutes } from './routes/orgRoutes.js';
-import { apiKeyRoutes, authenticateApiKey } from './routes/apiKeyRoutes.js';
+import authRoutes from './routes/authRoutes.js';
+import orgRoutes from './routes/orgRoutes.js';
+import apiKeyRoutes, { authenticateApiKey } from './routes/apiKeyRoutes.js';
 import { authenticateJwt, errorHandler } from './middleware.js';
+import type { AuthContext, AuthUser } from './middleware.js';
 import { rateLimitMiddleware } from './ratelimit.js';
 
-const app = express();
+// ─── Runtime Auth Utilities ────────────────────────────────────────────────────
+
+export { signAccessToken, verifyAccessToken } from './jwt.js';
+export { hashPassword, verifyPassword, generateOtp } from './crypto.js';
+export { authenticateJwt, requirePermission, requireRole } from './middleware.js';
+export type { AuthContext, AuthUser } from './middleware.js';
+export type { TokenPair } from './jwt.js';
+export type { JwtPayload } from '@nova/auth-types';
+
+// ─── Express App Setup ─────────────────────────────────────────────────────────
+
+const app: ReturnType<typeof express> = express();
 const PORT = process.env.PORT ?? 3003;
+
+app.use(compression() as any);
 
 // CORS (tighten in production)
 app.use((req, res, next) => {
@@ -82,8 +105,10 @@ app.use((_req, res) => {
 // Global error handler (RFC 7807)
 app.use(errorHandler);
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
  console.log(`[auth] @nova/auth listening on :${PORT}`);
 });
+server.timeout = 30_000;
+(server as any).setTimeout(30_000);
 
 export default app;
