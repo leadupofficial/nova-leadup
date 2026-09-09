@@ -1,0 +1,103 @@
+// ios/Runner.xcodeproj/project.pbxproj
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 54;
+	saveasToolFormat = "com.apple.dt.Xcode";
+	objects = {
+		/* Begin PBXBuildFile section */
+		A1 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = A0 /* GeneratedPluginRegistrant.m */; };
+		A3 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = A2 /* GeneratedPluginRegistrant.m */; };
+		AA1 /* RunnerTests.m in Sources */ = {isa = PBXBuildFile; fileRef = AA0 /* RunnerTests.m */; };
+		AAA1 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA0 /* RunnerTests.swift */; };
+		AAB1 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAB0 /* RunnerTests.swift */; };
+		AAC1 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAC0 /* RunnerTests.swift */; };
+		/* End PBXBuildFile section */
+		/* Begin PBXFileReference section */
+		0001 /* Runner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Runner.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0002 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		0003 /* RunnerTests.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = RunnerTests.m; sourceTree = "<group>"; };
+		0004 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
+		0005 /* AppFrameworkInfo.plist */ = {isa = PBXFileReference; path = AppFrameworkInfo.plist; sourceTree = BUILT_PRODUCTS_DIR; };
+		0006 /* Debug.xcconfig */ = {isa = PBXFileReference; path = Debug.xcconfig; sourceTree = "<group>"; };
+		0007 /* Release.xcconfig */ = {isa = PBXFileReference; path = Release.xcconfig; sourceTree = "<group>"; };
+		0008 /* GeneratedPluginRegistrant.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = GeneratedPluginRegistrant.m; sourceTree = "<group>"; };
+		0009 /* Flutter.xcconfig */ = {isa = PBXFileReference; path = Flutter.xcconfig; sourceTree = "<group>"; };
+		/* End PBXFileReference section */
+		/* Begin PBXGroup section */
+		000A /* Runner */ = {
+			isa = PBXGroup;
+			children = (
+				000B /* Runner */,
+				000C /* Frameworks */,
+				000D /* Products */,
+				000E /* Resources */,
+			);
+			sourceTree = "<group>";
+		};
+		000B /* Runner */ = {
+			isa = PBXGroup;
+			children = (
+				0006 /* Debug.xcconfig */,
+				0007 /* Release.xcconfig */,
+				0009 /* Flutter.xcconfig */,
+				000F /* Info.plist */,
+				0008 /* GeneratedPluginRegistrant.m */,
+				0010 /* Assets.xcassets */,
+				0011 /* LaunchScreen.storyboard */,
+			);
+			path = Runner;
+			sourceTree = "<group>";
+		};
+		000C /* Frameworks */ = {isa = PBXGroup; children = (); sourceTree = "<group>"; };
+		000D /* Products */ = {isa = PBXGroup; children = (0001 /* Runner.app */, ); sourceTree = BUILT_PRODUCTS_DIR; };
+		000E /* Resources */ = {isa = PBXGroup; children = (); sourceTree = "<group>"; };
+		/* End PBXGroup section */
+		/* Begin PBXNativeTarget section */
+		0012 /* Runner */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0013 /* Build configuration list for PBXNativeTarget "Runner" */;
+			buildPhases = (
+				0014 /* Sources */,
+				0015 /* Frameworks */,
+				0016 /* Resources */,
+				0017 /* RunScript */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = Runner;
+			productName = Runner;
+			productReference = 0001 /* Runner.app */;
+			productType = "com.apple.product-type.application";
+		};
+		/* End PBXNativeTarget section */
+		/* Begin PBXProject section */
+		0018 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+			};
+			buildConfigurationList = 0019 /* Build configuration list for PBXProject "Runner" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 000A /* Runner */;
+			productRefGroup = 000D /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0012 /* Runner */,
+			);
+		};
+		/* End PBXProject section */
+	}
+	rootObject = 0018 /* Project object */;
+}

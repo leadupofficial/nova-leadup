@@ -1,0 +1,6 @@
+#include: "Flutter/Generated.xcconfig"
+FLUTTER_BUILD_MODE=debug
+FLUTTER_BUILD_NAME=1.0.0
+FLUTTER_BUILD_NUMBER=1
+PRODUCT_NAME = Runner
+PRODUCT_BUNDLE_IDENTIFIER = com.leadup.nova
