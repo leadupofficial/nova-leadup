@@ -1,61 +1,62 @@
 package com.leadup.nova
 
-import android.os.Build
+import android.app.ActivityManager
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
+import android.util.Log
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
 
-import com.facebook.react.ReactActivity
-import com.facebook.react.ReactActivityDelegate
-import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
-import com.facebook.react.defaults.DefaultReactActivityDelegate
+class MainActivity : FlutterActivity() {
 
-import expo.modules.ReactActivityDelegateWrapper
+ override fun onCreate(savedInstanceState: Bundle?) {
+ super.onCreate(savedInstanceState)
+ }
 
-class MainActivity : ReactActivity() {
-  override fun onCreate(savedInstanceState: Bundle?) {
-    // Set the theme to AppTheme BEFORE onCreate to support
-    // coloring the background, status bar, and navigation bar.
-    // This is required for expo-splash-screen.
-    setTheme(R.style.AppTheme);
-    super.onCreate(null)
-  }
+ override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+ super.configureFlutterEngine(flutterEngine)
 
-  /**
-   * Returns the name of the main component registered from JavaScript. This is used to schedule
-   * rendering of the component.
-   */
-  override fun getMainComponentName(): String = "main"
+ // Set up the MethodChannel for wake word communication with NovaWakeService
+ MethodChannel(
+ flutterEngine.dartExecutor.binaryMessenger,
+ NovaWakeService.METHOD_CHANNEL_NAME
+ ).setMethodCallHandler { call, result ->
+ when (call.method) {
+ NovaWakeService.METHOD_START_LISTENING -> {
+ NovaWakeService.start(applicationContext)
+ result.success(true)
+ }
+ NovaWakeService.METHOD_STOP_LISTENING -> {
+ NovaWakeService.stop(applicationContext)
+ result.success(true)
+ }
+ else -> result.notImplemented()
+ }
+ }
 
-  /**
-   * Returns the instance of the [ReactActivityDelegate]. We use [DefaultReactActivityDelegate]
-   * which allows you to enable New Architecture with a single boolean flags [fabricEnabled]
-   */
-  override fun createReactActivityDelegate(): ReactActivityDelegate {
-    return ReactActivityDelegateWrapper(
-          this,
-          BuildConfig.IS_NEW_ARCHITECTURE_ENABLED,
-          object : DefaultReactActivityDelegate(
-              this,
-              mainComponentName,
-              fabricEnabled
-          ){})
-  }
+ // Bind to NovaWakeService if running
+ bindToWakeService()
+ }
 
-  /**
-    * Align the back button behavior with Android S
-    * where moving root activities to background instead of finishing activities.
-    * @see <a href="https://developer.android.com/reference/android/app/Activity#onBackPressed()">onBackPressed</a>
-    */
-  override fun invokeDefaultOnBackPressed() {
-      if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) {
-          if (!moveTaskToBack(false)) {
-              // For non-root activities, use the default implementation to finish them.
-              super.invokeDefaultOnBackPressed()
-          }
-          return
-      }
+ private fun bindToWakeService() {
+ val intent = Intent(this, NovaWakeService::class.java)
+ startService(intent)
+ bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+ }
 
-      // Use the default back button implementation on Android S
-      // because it's doing more than [Activity.moveTaskToBack] in fact.
-      super.invokeDefaultOnBackPressed()
-  }
+ private val serviceConnection = object : android.content.ServiceConnection {
+ override fun onServiceConnected(name: android.content.ComponentName?, service: android.os.IBinder?) {
+ Log.d(TAG, "Connected to NovaWakeService")
+ }
+
+ override fun onServiceDisconnected(name: android.content.ComponentName?) {
+ Log.d(TAG, "Disconnected from NovaWakeService")
+ }
+ }
+
+ companion object {
+ const val TAG = "MainActivity"
+ }
 }

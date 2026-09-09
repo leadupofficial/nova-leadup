@@ -1,35 +1,82 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-  <uses-permission android:name="android.permission.INTERNET"/>
-  <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
-  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-  <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-  <uses-permission android:name="android.permission.VIBRATE"/>
-  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-  <queries>
-    <intent>
-      <action android:name="android.intent.action.VIEW"/>
-      <category android:name="android.intent.category.BROWSABLE"/>
-      <data android:scheme="https"/>
-    </intent>
-  </queries>
-  <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true">
-    <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>
-    <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
-    <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
-    <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
-      <intent-filter>
-        <action android:name="android.intent.action.MAIN"/>
-        <category android:name="android.intent.category.LAUNCHER"/>
-      </intent-filter>
-      <intent-filter>
-        <action android:name="android.intent.action.VIEW"/>
-        <category android:name="android.intent.category.DEFAULT"/>
-        <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="nova"/>
-        <data android:scheme="com.leadup.nova"/>
-        <data android:scheme="exp+nova"/>
-      </intent-filter>
-    </activity>
-  </application>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+ package="com.leadup.nova">
+
+ <uses-permission android:name="android.permission.INTERNET" />
+ <uses-permission android:name="android.permission.RECORD_AUDIO" />
+ <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+ <uses-permission android:name="android.permission.USE_BIOMETRICS" />
+ <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+ <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+ <uses-permission android:name="android.permission.RECEIVE_NOTIFICATION_LISTENER" />
+
+ <queries>
+ <intent>
+ <action android:name="android.intent.action.PROCESS_TEXT"/>
+ <data android:mimeType="text/plain"/>
+ </intent>
+ </queries>
+
+ <application
+ android:label="NOVA"
+ android:name=".NovaApplication"
+ android:icon="@mipmap/ic_launcher">
+
+ <!-- Main Flutter activity -->
+ <activity
+ android:name=".MainActivity"
+ android:exported="true"
+ android:launchMode="singleTop"
+ android:taskAffinity=""
+ android:theme="@style/LaunchTheme"
+ android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+ android:hardwareAccelerated="true"
+ android:windowSoftInputMode="adjustResize">
+ <meta-data
+ android:name="io.flutter.embedding.android.NormalTheme"
+ android:resource="@style/NormalTheme" />
+ <intent-filter>
+ <action android:name="android.intent.action.MAIN"/>
+ <category android:name="android.intent.category.LAUNCHER"/>
+ </intent-filter>
+ </activity>
+
+ <!-- Wake-word foreground service -->
+ <service
+ android:name=".WakeWordService"
+ android:exported="false"
+ android:foregroundServiceType="microphone" />
+
+ <!-- Wake word Flutter bridge service -->
+ <service
+ android:name=".NovaWakeService"
+ android:exported="false"
+ android:foregroundServiceType="microphone" />
+
+ <!-- Boot receiver: starts wake-word service after device boot -->
+ <receiver
+ android:name=".BootReceiver"
+ android:exported="true"
+ android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+ <intent-filter>
+ <action android:name="android.intent.action.BOOT_COMPLETED" />
+ <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+ <category android:name="android.intent.category.DEFAULT" />
+ </intent-filter>
+ </receiver>
+
+ <!-- Notification listener: relays incoming notifications to the agent -->
+ <receiver
+ android:name=".NotificationListener"
+ android:exported="false">
+ <intent-filter>
+ <action android:name="nova.notification.POSTED" />
+ </intent-filter>
+ </receiver>
+
+ <meta-data
+ android:name="flutterEmbedding"
+ android:value="2" />
+ </application>
 </manifest>
