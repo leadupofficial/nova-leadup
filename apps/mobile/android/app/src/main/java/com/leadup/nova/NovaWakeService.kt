@@ -7,10 +7,14 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import android.util.Log
+import android.Manifest
 import io.flutter.plugin.common.MethodChannel
 
 class NovaWakeService : Service() {
@@ -28,6 +32,16 @@ class NovaWakeService : Service() {
  const val METHOD_STOP_LISTENING = "stopWakeWordListening"
 
  fun start(context: Context) {
+ // Guard: mirror WakeWordService — only start the mic FGS after runtime perms
+ if (!hasMicPermission(context)) {
+ Log.w(TAG, "start() skipped — RECORD_AUDIO not granted")
+ return
+ }
+ if (!hasPostNotificationsPermission(context)) {
+ Log.w(TAG, "start() skipped — POST_NOTIFICATIONS not granted")
+ return
+ }
+
  val intent = Intent(context, NovaWakeService::class.java).apply {
  action = ACTION_START
  }
@@ -43,6 +57,16 @@ class NovaWakeService : Service() {
  action = ACTION_STOP
  }
  context.stopService(intent)
+ }
+
+ private fun hasMicPermission(context: Context): Boolean {
+ return ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+ }
+
+ private fun hasPostNotificationsPermission(context: Context): Boolean {
+ return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+ ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+ } else true
  }
  }
 
@@ -61,7 +85,14 @@ class NovaWakeService : Service() {
  when (action) {
  ACTION_START -> startService()
  ACTION_STOP -> stopService()
- else -> startService()
+ else -> {
+ if (hasMicPermission(this) && hasPostNotificationsPermission(this)) {
+ startService()
+ } else {
+ Log.w(TAG, "onStartCommand with no action AND missing permissions — stopping service instead of crashing")
+ stopSelf()
+ }
+ }
  }
 
  return START_STICKY
@@ -84,7 +115,16 @@ class NovaWakeService : Service() {
  Log.d(TAG, "Starting NovaWakeService")
 
  val notification = buildNotification("NOVA is listening...")
+
+ if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+ startForeground(
+ NOTIFICATION_ID,
+ notification,
+ ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+ )
+ } else {
  startForeground(NOTIFICATION_ID, notification)
+ }
 
  isRunning = true
  }

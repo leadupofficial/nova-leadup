@@ -7,10 +7,14 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import android.util.Log
+import android.Manifest
 
 class WakeWordService : Service() {
 
@@ -22,6 +26,18 @@ class WakeWordService : Service() {
  const val ACTION_STOP = "com.leadup.nova.ACTION_STOP_WAKE_WORD"
 
  fun start(context: Context) {
+ // Guard: never start the mic FGS unless we actually hold the runtime permissions.
+ // On Android 14+ this is enforced; on Android 16 (SDK 36) failing this check
+ // raises SecurityException and crashes the whole process.
+ if (!hasMicPermission(context)) {
+ Log.w(TAG, "start() skipped — RECORD_AUDIO not granted; user must grant via permission_provider first")
+ return
+ }
+ if (!hasPostNotificationsPermission(context)) {
+ Log.w(TAG, "start() skipped — POST_NOTIFICATIONS not granted")
+ return
+ }
+
  val intent = Intent(context, WakeWordService::class.java).apply {
  action = ACTION_START
  }
@@ -37,6 +53,16 @@ class WakeWordService : Service() {
  action = ACTION_STOP
  }
  context.stopService(intent)
+ }
+
+ private fun hasMicPermission(context: Context): Boolean {
+ return ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+ }
+
+ private fun hasPostNotificationsPermission(context: Context): Boolean {
+ return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+ ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+ } else true
  }
  }
 
@@ -55,7 +81,16 @@ class WakeWordService : Service() {
  when (action) {
  ACTION_START -> startWakeWordDetection()
  ACTION_STOP -> stopWakeWordDetection()
- else -> startWakeWordDetection()
+ // Defensive: if no action is provided (e.g. recreated by the system post-crash),
+ // still guard on permissions instead of immediately calling startForeground(type=microphone).
+ else -> {
+ if (hasMicPermission(this) && hasPostNotificationsPermission(this)) {
+ startWakeWordDetection()
+ } else {
+ Log.w(TAG, "onStartCommand with no action AND missing permissions — stopping service instead of crashing")
+ stopSelf()
+ }
+ }
  }
 
  return START_STICKY
@@ -78,7 +113,17 @@ class WakeWordService : Service() {
  Log.d(TAG, "Starting wake word detection")
 
  val notification = buildNotification("Listening for wake word...")
+
+ if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+ // API 34+: must declare foregroundServiceType when calling startForeground
+ startForeground(
+ NOTIFICATION_ID,
+ notification,
+ ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+ )
+ } else {
  startForeground(NOTIFICATION_ID, notification)
+ }
 
  // Initialize Porcupine wake word engine (placeholder for SDK integration)
  initializePorcupine()
