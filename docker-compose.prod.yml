@@ -1,8 +1,6 @@
-# =============================================
-# NOVA — Production Deployment Configuration
-# =============================================
-# Usage: docker compose -f docker-compose.prod.yml up -d
-# Each service has its own Dockerfile for production multi-stage builds.
+# NOVA Production Compose — updated 2025-09-10
+# Uses pre-built images already present on the server (nova-api:prod, nova-auth:latest, etc.)
+# so it can boot without a Node.js toolchain on the host.
 
 services:
  # PostgreSQL with pgvector for vector search
@@ -81,15 +79,11 @@ services:
 
  # API Service — REST/GraphQL gateway
  api:
- build:
- context: .
- dockerfile: services/api/Dockerfile
- args:
- NODE_ENV: production
+ image: nova-api:prod
  container_name: nova-api
  restart: unless-stopped
  ports:
- - "3001:3001"
+ - "127.0.0.1:3001:3001"
  environment:
  NODE_ENV: production
  PORT: 3001
@@ -125,15 +119,11 @@ services:
 
  # Auth Service — authentication and RBAC
  auth:
- build:
- context: .
- dockerfile: services/auth/Dockerfile
- args:
- NODE_ENV: production
+ image: nova-auth:latest
  container_name: nova-auth
  restart: unless-stopped
  ports:
- - "3003:3003"
+ - "127.0.0.1:3003:3003"
  environment:
  NODE_ENV: production
  PORT: 3003
@@ -163,14 +153,33 @@ services:
  retries: 3
  start_period: 10s
 
- # Workers Service — background job processing
- workers:
- build:
- context: .
- dockerfile: services/workers/Dockerfile
- args:
+ # Realtime Gateway
+ realtime-gateway:
+ image: nova-realtime-gateway:latest
+ container_name: nova-realtime
+ restart: unless-stopped
+ ports:
+ - "127.0.0.1:3002:3002"
+ environment:
  NODE_ENV: production
- container_name: nova-workers
+ PORT: 3002
+ REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+ JWT_SECRET: ${JWT_SECRET}
+ depends_on:
+ redis:
+ condition: service_healthy
+ networks:
+ - nova-network
+ security_opt:
+ - no-new-privileges:true
+ read_only: true
+ tmpfs:
+ - /tmp
+
+ # Notification Service
+ notification-service:
+ image: nova-notification-service:latest
+ container_name: nova-notifications
  restart: unless-stopped
  environment:
  NODE_ENV: production
@@ -195,17 +204,57 @@ services:
  tmpfs:
  - /tmp
 
+ # Integration Service
+ integration-service:
+ image: nova-integration-service:latest
+ container_name: nova-integration
+ restart: unless-stopped
+ environment:
+ NODE_ENV: production
+ DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+ REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+ networks:
+ - nova-network
+ security_opt:
+ - no-new-privileges:true
+ read_only: true
+ tmpfs:
+ - /tmp
+
+ # Workflow Engine
+ workflow-engine:
+ image: nova-workflow-engine:latest
+ container_name: nova-workflow
+ restart: unless-stopped
+ environment:
+ NODE_ENV: production
+ DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+ REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+ networks:
+ - nova-network
+ security_opt:
+ - no-new-privileges:true
+ read_only: true
+ tmpfs:
+ - /tmp
+
  # Admin Console — administrative interface
  admin:
- build:
- context: .
- dockerfile: services/admin/Dockerfile
- args:
- NODE_ENV: production
+ image: nova-web:latest
  container_name: nova-admin
  restart: unless-stopped
  ports:
- - "3004:3004"
+ - "127.0.0.1:3004:3004"
  environment:
  NODE_ENV: production
  PORT: 3004
