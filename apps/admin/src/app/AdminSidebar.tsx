@@ -3,12 +3,13 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { type MouseEvent, useCallback, useEffect, useState } from 'react';
-import { clearTokens, decodeJwt } from '../../components/AdminAuthGuard';
+import { clearTokens, decodeJwt } from '../components/AdminAuthGuard';
 
 const NAV_ITEMS = [
  { href: '/', label: 'Dashboard', icon: '📊' },
  { href: '/users', label: 'Users', icon: '👥' },
  { href: '/organizations', label: 'Organizations', icon: '🏢' },
+ { href: '/languages', label: 'Languages', icon: '🌐' },
  { href: '/audit-logs', label: 'Audit Logs', icon: '📋' },
  { href: '/feature-flags', label: 'Feature Flags', icon: '🚩' },
  { href: '/incidents', label: 'Incidents', icon: '⚠️' },

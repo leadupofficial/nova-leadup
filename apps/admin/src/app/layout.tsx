@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import AdminSidebar from './AdminSidebar';
-import ErrorBoundary from '../components/ErrorBoundary';
 import AdminAuthGuard from '../components/AdminAuthGuard';
 import './globals.css';
 
@@ -17,7 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
  <div style={{ display: 'flex', minHeight: '100vh' }}>
  <AdminSidebar />
  <main style={{ flex: 1, padding: '2rem', overflow: 'auto' }}>
- <ErrorBoundary>{children}</ErrorBoundary>
+ {children}
  </main>
  </div>
  </AdminAuthGuard>

@@ -190,14 +190,15 @@ export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuar
  }
 
  // Check role using the resolved roles set
- const userRole = payload.role;
+ const userRole = payload?.role;
  if (!userRole || !roles.has(userRole)) {
  clearTokens();
  setState({ status: 'forbidden' });
  return;
  }
 
- setState({ status: 'authenticated', payload });
+ const validPayload = payload as JwtPayload;
+ setState({ status: 'authenticated', payload: validPayload });
  };
 
  validate();

@@ -173,6 +173,10 @@ export function detectLanguage(text: string): LanguageDetectionResult {
 
 // ─── Provider Routing Helpers ─────────────────────────────────────────────────
 
+export function getLanguageByCode(code: string): SupportedLanguage | undefined {
+	return SUPPORTED_LANGUAGES.find((l) => l.code === code);
+}
+
 export function getVoiceProviderForLanguage(
 	language: LanguageCode | MixedLanguageCode,
 ): SupportedLanguage['voiceProvider'] {
