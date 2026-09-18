@@ -179,6 +179,25 @@ dependencies {
     // no per-device licence: the models are bundled in the APK and inference runs
     // locally through ONNX Runtime. This pulls in onnxruntime-android transitively.
     implementation("xyz.rementia:openwakeword:0.1.5")
+
+    // Pin ONNX Runtime past the version openwakeword 0.1.5 asks for.
+    //
+    // It resolves 1.18.0, whose libonnxruntime4j_jni.so has 4 KB LOAD-segment
+    // alignment. Google Play requires every native library in a submission to be
+    // 16 KB aligned, and 4 KB is what makes the bundle fail the check. Measured
+    // across releases: 1.20.0 is still 4 KB (libonnxruntime.so is aligned but the
+    // JNI bridge is not), 1.22.0 is the first release where every shipped arm64
+    // library is 16 KB. Raise this only after re-measuring, not on the assumption
+    // that newer is aligned.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
+}
+
+// The transitive 1.18.0 must not win: without this a dependency that declares it
+// directly can drag the 4 KB copy back in.
+configurations.all {
+    resolutionStrategy {
+        force("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
+    }
 }
 
 flutter {
