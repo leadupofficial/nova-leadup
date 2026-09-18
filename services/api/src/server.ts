@@ -4,20 +4,20 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import { z } from 'zod';
-import { validateEnv } from './utils/env';
-import { migrate } from '@nova/database';
-import authRoutes from './routes/auth';
-import { chatRoutes } from './routes/chat';
-import { conversationsRoutes } from './routes/conversations';
-import { tasksRoutes } from './routes/tasks';
-import { memoriesRoutes } from './routes/memories';
-import { settingsRoutes } from './routes/settings';
-import { streamingRoutes } from './routes/streaming';
-import { voiceRoutes } from './routes/voice';
-import { healthRoutes } from './routes/health';
-import { biometricRoutes } from './routes/biometric';
-import adminRoutes from './routes/admin';
-import { errorHandler } from './middleware/error-handler';
+import { validateEnv } from './utils/env.js';
+import { authRoutes } from './routes/auth.js';
+import { chatRoutes } from './routes/chat.js';
+import { conversationsRoutes } from './routes/conversations.js';
+import { tasksRoutes } from './routes/tasks.js';
+import { memoriesRoutes } from './routes/memories.js';
+import { settingsRouter as settingsRoutes } from './routes/settings.js';
+import { streamingRoutes } from './routes/streaming.js';
+import { voiceRoutes } from './routes/voice.js';
+import { healthRoutes } from './routes/health.js';
+import { biometricRoutes } from './routes/biometric.js';
+import adminRoutes from './routes/admin.js';
+import { errorHandler } from './middleware/error-handler.js';
+import { rateLimitMiddleware } from './middleware/rateLimit.js';
 
 // ─── Env validation (fail fast) ────────────────────────────────────────────
 validateEnv();
@@ -26,7 +26,7 @@ const app: ReturnType<typeof express> = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
 // Security
-app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') || ['https://nova.leadup.in'], credentials: true }));
+app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',').map((s) => s.trim()).filter(Boolean) || ['https://nova.leadup.in'], credentials: true }));
 app.use(helmet());
 app.use(compression() as any);
 
@@ -39,8 +39,11 @@ app.use((req, res, next) => {
  next();
 });
 
-// Health endpoints
+// Health endpoints (no rate limit — must always respond)
 app.use('/', healthRoutes);
+
+// Rate limiting on API routes only
+app.use('/api/v1', rateLimitMiddleware());
 
 // API v1 routes
 const apiV1 = express.Router();
@@ -78,18 +81,22 @@ app.use((req, res) => {
 // Error handler
 app.use(errorHandler);
 
-// ─── Database migrations (best-effort) ────────────────────────────────────
-if (process.env.DATABASE_URL) {
- migrate({ databaseUrl: process.env.DATABASE_URL })
- .then((r: { applied: string[]; skipped: string[] }) => console.log(`[API] Migrations applied: ${r.applied.length}, skipped: ${r.skipped.length}`))
- .catch((err: Error) => {
- console.error('[API] Migration failed:', err.message);
- if (process.env.NODE_ENV === 'production') {
- console.error('[API] Refusing to start in production with unapplied migrations.');
- process.exit(1);
- }
- });
-}
+// ─── Database migrations ──────────────────────────────────────────────────
+// Auto-migration on boot was removed. It called `migrate()` from @nova/database,
+// which applied packages/database/src/migrations/*.ts — a legacy migration set whose
+// schema directly contradicted packages/database/src/schema.ts (the schema every route
+// actually queries through). It created `users.display_name` / `users.is_active` and a
+// `sessions.token_hash NOT NULL` column, while the Drizzle schema reads `users.name` /
+// `users.disabled` and writes `sessions.refresh_token_hash` only. Running it produced a
+// database that no route could query.
+//
+// The authoritative schema is packages/database/drizzle/0000_regular_colossus.sql,
+// generated from schema.ts. Apply it as an explicit deploy step:
+//
+//   pnpm db:migrate            # packages/database/scripts/migrate.ts (drizzle-kit)
+//
+// Keeping migrations out of the service boot path also avoids several replicas racing
+// to migrate the same database on a rolling deploy.
 
 // ─── Start server ──────────────────────────────────────────────────────────
 if (process.env.NODE_ENV !== 'test') {

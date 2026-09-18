@@ -10,11 +10,11 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import {
 	SUPPORTED_LANGUAGES,
+	type LanguageCode,
+	type MixedLanguageCode,
 	getLanguageByCode,
 	getSttProviderForLanguage,
 	getVoiceProviderForLanguage,
-	type LanguageCode,
-	type MixedLanguageCode,
 } from '@nova/shared-types';
 import {
 	transcribeAudio,
@@ -25,11 +25,11 @@ import {
 	synthesizeSpeechGoogle,
 	chatCompletion,
 	ChatMessage,
-} from '../services/ai';
-import { authenticate, type AuthenticatedRequest } from '../middleware/auth';
-import { HttpError } from '../middleware/error-handler';
-import { logger } from '../utils/logger';
-import { validate } from '../middleware/validate';
+} from '../services/ai.js';
+import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
+import { HttpError } from '../middleware/error-handler.js';
+import { logger } from '../utils/logger.js';
+import { validate } from '../middleware/validate.js';
 
 const router: ReturnType<typeof Router> = Router();
 

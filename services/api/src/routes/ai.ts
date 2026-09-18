@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { HttpError } from '../middleware/error-handler';
-import { authenticate, type AuthenticatedRequest } from '../middleware/auth';
+import { HttpError } from '../middleware/error-handler.js';
+import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -22,7 +22,7 @@ router.post('/embed', authenticate, async (req: AuthenticatedRequest, res, next)
  } catch (err) { next(err); }
 });
 
-router.get('/models', (req, res) => {
+router.get('/models', authenticate, (req, res) => {
  res.json({ models: [{ id: 'nova-1', name: 'NOVA-1', provider: 'anthropic', contextWindow: 200000 }] });
 });
 

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
-import { logger } from '../utils/logger';
+import { logger } from '../utils/logger.js';
 
 export interface AppError extends Error {
  statusCode?: number;
@@ -23,33 +23,41 @@ export class HttpError extends Error implements AppError {
 }
 
 export function errorHandler(err: AppError, req: Request, res: Response, next: NextFunction) {
- if (res.headersSent) return next(err);
+	if (res.headersSent) return next(err);
 
- const statusCode = err.statusCode || 500;
- const code = err.code || 'INTERNAL_ERROR';
- const message = err.message || 'Internal server error';
+	const statusCode = err.statusCode || 500;
+	const code = err.code || 'INTERNAL_ERROR';
+	const isProd = process.env.NODE_ENV === 'production';
 
- logger.error(err, `${req.method} ${req.path} -> ${statusCode}`);
+	// Log the full error server-side with stack trace for debugging
+	logger.error(
+		{ err, method: req.method, path: req.path, statusCode, code },
+		`${req.method} ${req.path} -> ${statusCode}`
+	);
 
- if (err instanceof ZodError) {
- return res.status(400).json({
- type: 'https://api.nova.leadup.in/problems/validation-error',
- title: 'Validation Error',
- status: 400,
- detail: 'Request validation failed',
- errors: err.errors.map((e) => ({ path: e.path.join('.'), message: e.message })),
- });
- }
+	// For validation errors, return structured details
+	if (err instanceof ZodError) {
+		return res.status(400).json({
+			type: 'https://api.nova.leadup.in/problems/validation-error',
+			title: 'Validation Error',
+			status: 400,
+			detail: 'Request validation failed',
+			errors: err.errors.map((e) => ({ path: e.path.join('.'), message: e.message })),
+		});
+	}
 
- const response: Record<string, unknown> = {
- type: `https://api.nova.leadup.in/problems/${code.toLowerCase()}`,
- title: statusCode < 500 ? message : 'Internal Server Error',
- status: statusCode,
- detail: message,
- instance: req.path,
- };
+	// Always return generic messages to clients — never leak
+	// including stack traces, DB schemas, file paths, or service topology.
+	const safeTitle = statusCode >= 500 ? 'Internal Server Error' : (err.message || 'Request failed');
+	const safeDetail = statusCode >= 500 ? 'An unexpected error occurred' : (err.message || 'Request failed');
 
- res.status(statusCode).json(response);
+	const response: Record<string, unknown> = {
+		type: `https://api.nova.leadup.in/problems/${code.toLowerCase()}`,
+		title: safeTitle,
+		status: statusCode,
+		detail: safeDetail,
+		instance: req.path,
+	};
+
+	res.status(statusCode).json(response);
 }
-
-export { HttpError };
