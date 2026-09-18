@@ -2,26 +2,27 @@
  * NOVA API — Sarvam streaming STT (Indian languages).
  *
  * Wire format, verified against production:
- *   wss://api.sarvam.ai/speech-to-text/ws
+ *   wss://api.sarvam.ai/speech-to-text-realtime/ws
  *   header  api-subscription-key: <SARVAM_API_KEY>
- *   query   language_code=ta-IN&model=saaras:v3&mode=transcribe&sample_rate=16000
- *           &input_audio_codec=pcm_s16le&high_vad_sensitivity=true
- *           &vad_signals=true&flush_signal=true
- *   send    JSON text frames — {"audio":{"data":"<base64 PCM>","sample_rate":16000,
- *           "encoding":"audio/wav"}} (binary frames are rejected by this endpoint)
- *   recv    {"type":"events","data":{"signal_type":"START_SPEECH"|"END_SPEECH"}}
- *           {"type":"data","data":{"transcript":"…"}}   utterance final
+ *   query   language_code=ta-IN&model=saaras:v3-realtime&stream_type=fast
+ *           &endpointing=vad&encoding=linear16&sample_rate=16000
+ *   send    {"event":"audio_input","audio":"<base64 linear16 PCM>"}
+ *   recv    {"event":"transcript.partial","text":"…"}   interim, as they speak
+ *           {"event":"transcript.final","text":"…"}     end of utterance
+ *           {"event":"vad.speech_start"} / {"event":"vad.speech_end"}
+ *           {"event":"error","code":…,"is_fatal":…,"message":…}
  *
- * Two honest limitations, both from the provider rather than this wrapper:
+ * This replaces the legacy `/speech-to-text/ws` endpoint, which emitted **no
+ * interim transcripts at all** — its docs say so, and a measured Tamil turn
+ * produced zero `partial` events. That made live text an English-only feature,
+ * which is the wrong way round for a companion whose users speak Tamil, Hindi
+ * and the other Indic languages. The realtime endpoint streams real partials and
+ * also brings a documented `ping` keepalive, millisecond VAD tuning, and
+ * `language_code=auto` with the detected language reported back.
  *
- * 1. This (legacy) endpoint has **no interim transcripts** — the docs state it
- *    emits "only a final transcript per utterance". Interim `partial` events are
- *    therefore a Deepgram/English feature; Sarvam turns surface text at the end
- *    of the utterance. Sarvam's newer `/speech-to-text-realtime/ws` endpoint
- *    does stream partials but is a different protocol, which the frozen client
- *    contract here does not cover.
- * 2. `encoding` on an audio message is fixed to `audio/wav` by the API schema;
- *    raw PCM is requested once, at connect time, with `input_audio_codec`.
+ * `stream_type=fast` is the provider's own recommendation for conversational
+ * agents, where partial latency matters more than the last few points of
+ * accuracy.
  */
 import { WebSocket } from 'ws';
 import type { RawData } from 'ws';
@@ -31,24 +32,38 @@ import { logger } from '../../utils/logger.js';
 import { isFatalProviderClose } from '../protocol.js';
 import type { SttOptions, SttSession } from './types.js';
 
-const SARVAM_STT_URL = 'wss://api.sarvam.ai/speech-to-text/ws';
+const SARVAM_STT_URL = 'wss://api.sarvam.ai/speech-to-text-realtime/ws';
 
 /** ~30 s of 16 kHz mono s16le, queued only while the handshake completes. */
 const MAX_PENDING_BYTES = 1_000_000;
 
 /**
+ * Silence that ends a turn. The provider defaults to 500 ms; below roughly
+ * 350 ms a normal sentence breaks at its own clause pauses, which is exactly the
+ * failure the legacy provider hit.
+ */
+const SILENCE_DURATION_MS = 500;
+
+/** One 100 ms frame of 16 kHz mono s16le, the shape the provider expects. */
+const SILENCE_FRAME_BYTES = 16_000 * 2 * 0.1;
+
+/**
  * Map our bare language codes onto the codes this endpoint accepts.
  *
- * Follows `toSarvamLanguageCode` in `routes/voice.ts` (bare code → `xx-IN`) with
- * one provider quirk: the legacy streaming endpoint still spells Odia `od-IN`
- * (the newer realtime endpoint renamed it `or-IN`). `auto` becomes `unknown`,
- * which is this API's auto-detect value.
+ * Bare code → `xx-IN`. Unlike the legacy endpoint this one knows Odia as
+ * `or-IN` (it renamed `od-IN`), and `auto` really is `auto` here rather than the
+ * legacy `unknown` — so auto-detected turns get partials too.
  */
 export function toSarvamStreamLanguageCode(code: string): string {
 	const value = (code || '').trim().toLowerCase();
-	if (!value || value === 'auto' || value === 'unknown') return 'unknown';
+	if (!value || value === 'auto' || value === 'unknown') return 'auto';
 	if (value.includes('-')) return value;
-	if (value === 'or') return 'od-IN';
+	// The mixed-code pseudo-languages lean on a base language for recognition;
+	// the model still transcribes the code-mixed speech it hears.
+	if (value === 'tanglish') return 'ta-IN';
+	if (value === 'hinglish') return 'hi-IN';
+	if (value === 'benglish') return 'bn-IN';
+	if (value === 'gujlish') return 'gu-IN';
 	return `${value}-IN`;
 }
 
@@ -60,25 +75,12 @@ export function createSarvamStt(options: SttOptions): SttSession {
 
 	const query = new URLSearchParams({
 		language_code: toSarvamStreamLanguageCode(options.language),
-		model: 'saaras:v3',
-		mode: 'transcribe',
+		model: 'saaras:v3-realtime',
+		stream_type: 'fast',
+		endpointing: 'vad',
+		encoding: 'linear16',
 		sample_rate: String(options.sampleRate),
-		input_audio_codec: 'pcm_s16le',
-		high_vad_sensitivity: 'true',
-		// Keep the preset's snappy speech *onset* detection (2 frames to start,
-		// 2 to interrupt — that is what makes barge-in fast) but restore a sane
-		// *end-of-utterance* boundary. The preset also drops
-		// `negative_frames_count` to 2 frames, i.e. ~64 ms of silence at 16 kHz,
-		// which ends the utterance at every natural pause: measured over the
-		// realtime socket, one spoken Tamil sentence arrived as three separate
-		// transcripts ("சென்னை" / "பற்றி ஒரு சிறிய" / "பெரிய தகவல் சொல்லுங்கள்.")
-		// and the assistant answered the last fragment only. These are the
-		// provider's own defaults (~576 ms of silence), which keep a sentence
-		// together while still ending the turn promptly.
-		negative_frames_count: '18',
-		negative_frames_window: '24',
-		vad_signals: 'true',
-		flush_signal: 'true',
+		silence_duration_ms: String(SILENCE_DURATION_MS),
 	});
 
 	const socket = new WebSocket(`${SARVAM_STT_URL}?${query}`, {
@@ -89,6 +91,19 @@ export function createSarvamStt(options: SttOptions): SttSession {
 	let opened = false;
 	let pending: Buffer[] = [];
 	let pendingBytes = 0;
+	/** The last partial we surfaced, so a repeated one is not re-sent. */
+	let lastPartial = '';
+	/**
+	 * Set between a client-initiated stop and the resulting final.
+	 *
+	 * Forcing the VAD boundary means feeding real silence, and the recogniser
+	 * transcribes part of that silence as a re-hearing of the last words: a
+	 * measured Tamil turn flashed "நாளை நாளைக்கு என்ன என்ன வேலை" on its way to the
+	 * clean final "நாளைக்கு என்ன வேலை". The turn is over at that point — the final
+	 * is what matters — so partials are dropped rather than shown garbled.
+	 */
+	let finalizing = false;
+
 	const send = (payload: unknown): void => {
 		if (closed || socket.readyState !== WebSocket.OPEN) return;
 		try {
@@ -98,12 +113,29 @@ export function createSarvamStt(options: SttOptions): SttSession {
 		}
 	};
 
+	const sendAudio = (pcm: Buffer): void => {
+		send({ event: 'audio_input', audio: pcm.toString('base64') });
+	};
+
+	/**
+	 * Silence pushed into the recogniser to force the VAD boundary.
+	 *
+	 * `flush` does NOT finalise under `endpointing=vad` — measured directly
+	 * against the provider, it produced no `transcript.final` at all, despite the
+	 * documentation saying it force-finalises buffered audio. Feeding real
+	 * silence does work: `vad.speech_end` fires and the final follows. So a
+	 * client-initiated "stop" is answered with silence rather than a flush.
+	 */
+	const pushSilence = (ms: number): void => {
+		const frames = Math.ceil((options.sampleRate * 2 * ms) / 1000 / SILENCE_FRAME_BYTES);
+		const silence = Buffer.alloc(SILENCE_FRAME_BYTES);
+		for (let i = 0; i < frames; i++) sendAudio(silence);
+	};
+
 	socket.on('open', () => {
 		opened = true;
 		logger.info({ provider: 'sarvam', queuedBytes: pendingBytes }, 'Streaming STT socket open');
-		for (const chunk of pending) {
-			send({ audio: { data: chunk.toString('base64'), sample_rate: options.sampleRate, encoding: 'audio/wav' } });
-		}
+		for (const chunk of pending) sendAudio(chunk);
 		pending = [];
 		pendingBytes = 0;
 	});
@@ -116,25 +148,42 @@ export function createSarvamStt(options: SttOptions): SttSession {
 			return;
 		}
 
-		if (message.type === 'events') {
-			const signal = message.data?.signal_type;
-			if (signal === 'START_SPEECH') {
-				options.handlers.onSpeechStart?.();
-			} else if (signal === 'END_SPEECH') {
-				options.handlers.onSpeechEnd?.();
+		switch (message.event) {
+			case 'transcript.partial': {
+				if (finalizing) return;
+				const text = String(message.text ?? '').trim();
+				// The provider emits each partial two or three times over, and
+				// sometimes restates a shorter hypothesis before extending it.
+				// Forward only a genuine advance, so the client is not redrawn
+				// with text that repeats or visibly goes backwards.
+				if (text && text !== lastPartial && !lastPartial.startsWith(text)) {
+					lastPartial = text;
+					options.handlers.onPartial?.(text);
+				}
+				return;
 			}
-			return;
-		}
-
-		if (message.type === 'data') {
-			const text: string = (message.data?.transcript ?? '').trim();
-			if (text) options.handlers.onFinal?.(text);
-			return;
-		}
-
-		if (message.type === 'error') {
-			const detail = message.data?.message ?? message.data?.error ?? JSON.stringify(message.data ?? {});
-			options.handlers.onError?.(new Error(`Sarvam STT: ${detail}`));
+			case 'transcript.final': {
+				const text = String(message.text ?? '').trim();
+				lastPartial = '';
+				finalizing = false;
+				if (text) options.handlers.onFinal?.(text);
+				return;
+			}
+			case 'vad.speech_start':
+				options.handlers.onSpeechStart?.();
+				return;
+			case 'vad.speech_end':
+				options.handlers.onSpeechEnd?.();
+				return;
+			case 'error': {
+				const detail = message.message ?? message.code ?? 'unknown error';
+				options.handlers.onError?.(new Error(`Sarvam STT: ${detail}`));
+				return;
+			}
+			default:
+				// `session.begin`, `pong`, `config.updated`, `session.end` are
+				// informational; nothing to do.
+				return;
 		}
 	});
 
@@ -160,17 +209,18 @@ export function createSarvamStt(options: SttOptions): SttSession {
 				pendingBytes += pcm.length;
 				return;
 			}
-			send({ audio: { data: pcm.toString('base64'), sample_rate: options.sampleRate, encoding: 'audio/wav' } });
+			sendAudio(pcm);
 		},
 		requestFinal(): void {
-			// Requires flush_signal=true at connect time.
-			send({ type: 'flush' });
+			// See pushSilence: `flush` is a no-op under VAD, so force the
+			// boundary with real silence and let `vad.speech_end` finalise.
+			finalizing = true;
+			pushSilence(SILENCE_DURATION_MS + 400);
 		},
 		keepAlive(): void {
-			// This endpoint documents no keepalive message (the newer realtime
-			// endpoint has `ping`); its inactivity timer is not something the
-			// documented protocol lets us reset. The session closes the socket
-			// when the conversation goes idle instead.
+			// This endpoint documents `ping` and closes an inactive socket with
+			// 1008, which the legacy endpoint gave us no way to prevent.
+			send({ event: 'ping' });
 		},
 		close(): void {
 			if (closed) return;
@@ -178,8 +228,14 @@ export function createSarvamStt(options: SttOptions): SttSession {
 			pending = [];
 			pendingBytes = 0;
 			try {
-				if (socket.readyState === WebSocket.OPEN) socket.close(1000, 'session closed');
-				else socket.terminate();
+				if (socket.readyState === WebSocket.OPEN) {
+					// `end` is the documented graceful close; it also reports the
+					// billed audio duration back in `session.end`.
+					send({ event: 'end' });
+					socket.close(1000, 'session closed');
+				} else {
+					socket.terminate();
+				}
 			} catch {
 				/* already gone */
 			}

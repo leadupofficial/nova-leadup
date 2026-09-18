@@ -62,8 +62,9 @@ export type SttLanguage = LanguageCode | MixedLanguageCode;
  *
  * `auto` → Sarvam with `language_code=unknown`, the platform's documented
  * auto-detect mode (it covers en-IN plus the 22 Indic languages). The trade-off
- * is that Sarvam's *legacy* streaming endpoint emits utterance finals only, so
- * `auto` turns get no interim transcripts; see sarvam.ts.
+ * is that Sarvam's *legacy* streaming endpoint emits utterance finals only.
+ * Sarvam now runs the realtime endpoint instead, so auto-detected turns get
+ * interim transcripts too; see sarvam.ts.
  */
 export function resolveSttProvider(language: string): SttProviderName {
 	const bare = (language || 'en').trim().toLowerCase();
