@@ -24,6 +24,15 @@ COPY apps/admin ./apps/admin
 
 RUN pnpm install --no-frozen-lockfile --filter nova-admin...
 
+# @nova/shared-types MUST be compiled before the console.
+#
+# apps/admin/src/app/languages/page.tsx imports it, and its package.json resolves
+# through ./dist — which is gitignored (`.gitignore: dist/`), so it is absent from
+# a clean checkout. Relying on a developer's stale local dist made this image
+# buildable only from this working tree; a pristine `git archive HEAD` context
+# failed with "Module not found: Can't resolve '@nova/shared-types'".
+RUN pnpm --filter @nova/shared-types build
+
 # Next inlines NEXT_PUBLIC_* at build time, so the public API base is baked in here.
 ARG NEXT_PUBLIC_API_BASE=https://nova.leadup.in/api/v1
 ENV NEXT_PUBLIC_API_BASE=$NEXT_PUBLIC_API_BASE
