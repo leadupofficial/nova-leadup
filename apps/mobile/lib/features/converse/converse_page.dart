@@ -6,6 +6,7 @@ import '../../core/api/models.dart';
 import '../../core/api/nova_api.dart';
 import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
+import 'tool_confirm_sheet.dart';
 
 /// The active conversation id for this Converse session.
 ///
@@ -65,7 +66,10 @@ class _ConversePageState extends ConsumerState<ConversePage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _ensureConversation());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _ensureConversation();
+      _maybePromptApproval();
+    });
   }
 
   @override
@@ -73,6 +77,25 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     _input.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// Blueprint §5.7: a side-effecting action must be confirmed before it runs.
+  /// The server queues it as a `tool_approvals` row; this raises the sheet for
+  /// the oldest pending one once, per visit.
+  bool _promptedApproval = false;
+
+  Future<void> _maybePromptApproval() async {
+    if (_promptedApproval || !mounted) return;
+    try {
+      final approvals = await ref.read(novaApiProvider).listApprovals();
+      if (!mounted) return;
+      final pending = approvals.where((a) => a.isPending).toList();
+      if (pending.isEmpty) return;
+      _promptedApproval = true;
+      await ToolConfirmSheet.show(context, pending.first);
+    } catch (_) {
+      // A missing approvals endpoint must not block the conversation.
+    }
   }
 
   Future<void> _ensureConversation() async {

@@ -296,6 +296,114 @@ class NovaMutations {
     await _api.updatePersona(persona);
     _ref.invalidate(personaProvider);
   }
+
+  // ── Recordings ────────────────────────────────────────────────────────────
+
+  Future<NovaRecording> startRecording({required String title, String? language}) async {
+    final rec = await _api.createRecording(title: title, language: language);
+    _ref.invalidate(recordingsProvider);
+    _ref.invalidate(homeOverviewProvider);
+    return rec;
+  }
+
+  Future<void> finishRecording(String id, {required int durationSeconds}) async {
+    await _api.updateRecording(
+      id,
+      durationSeconds: durationSeconds,
+      status: 'completed',
+    );
+    _ref.invalidate(recordingsProvider);
+    _ref.invalidate(recordingDetailProvider(id));
+  }
+
+  Future<void> deleteRecording(String id) async {
+    await _api.deleteRecording(id);
+    _ref.invalidate(recordingsProvider);
+  }
+
+  // ── Approvals ─────────────────────────────────────────────────────────────
+
+  Future<void> decideApproval(String id, {required bool approve}) async {
+    await _api.decideApproval(id, approve: approve);
+    _ref.invalidate(approvalsProvider);
+    _ref.invalidate(activityProvider);
+  }
+
+  // ── Consent ───────────────────────────────────────────────────────────────
+
+  Future<void> recordConsent({
+    required String purpose,
+    required bool granted,
+  }) async {
+    await _api.recordConsent(purpose: purpose, granted: granted);
+    _ref.invalidate(consentProvider);
+  }
+
+  Future<void> dismissReminder(String id) async {
+    await _api.deleteReminder(id);
+    _ref.invalidate(remindersProvider);
+    _ref.invalidate(homeOverviewProvider);
+  }
 }
 
 final novaMutationsProvider = Provider<NovaMutations>(NovaMutations.new);
+
+// ─── Activity centre ──────────────────────────────────────────────────────────
+
+final activityProvider = FutureProvider.autoDispose<List<NovaActivityItem>>((
+  ref,
+) async {
+  final api = ref.watch(novaApiProvider);
+  return api.listActivity();
+});
+
+// ─── Recordings ───────────────────────────────────────────────────────────────
+
+final recordingsProvider = FutureProvider.autoDispose<List<NovaRecording>>((
+  ref,
+) async {
+  final api = ref.watch(novaApiProvider);
+  return api.listRecordings();
+});
+
+final recordingDetailProvider = FutureProvider.autoDispose
+    .family<NovaRecordingDetail, String>((ref, id) async {
+      final api = ref.watch(novaApiProvider);
+      return api.getRecording(id);
+    });
+
+// ─── Tools & approvals ────────────────────────────────────────────────────────
+
+final approvalsProvider = FutureProvider.autoDispose<List<NovaToolApproval>>((
+  ref,
+) async {
+  final api = ref.watch(novaApiProvider);
+  return api.listApprovals();
+});
+
+final toolsProvider = FutureProvider.autoDispose<List<NovaToolDefinition>>((
+  ref,
+) async {
+  final api = ref.watch(novaApiProvider);
+  return api.listTools();
+});
+
+// ─── Consent ──────────────────────────────────────────────────────────────────
+
+final consentProvider = FutureProvider.autoDispose<List<NovaConsentRecord>>((
+  ref,
+) async {
+  final api = ref.watch(novaApiProvider);
+  return api.listConsent();
+});
+
+/// The oldest pending approval, used to raise the Tool Confirmation sheet.
+final pendingApprovalProvider = Provider.autoDispose<NovaToolApproval?>((
+  ref,
+) {
+  final approvals = ref.watch(approvalsProvider).asData?.value ?? const [];
+  // The API returns approvals newest-first; the oldest queued action is the one
+  // that has been waiting longest, so prompt for that.
+  final pending = approvals.where((a) => a.isPending).toList();
+  return pending.isEmpty ? null : pending.last;
+});

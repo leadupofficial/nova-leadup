@@ -7,9 +7,12 @@ import '../core/design/widgets/index.dart';
 import '../features/auth/auth_controller.dart';
 import '../features/auth/login_page.dart';
 import '../features/auth/register_page.dart';
+import '../features/activity/activity_page.dart';
 import '../features/converse/converse_page.dart';
 import '../features/home/home_page.dart';
 import '../features/memory/memory_page.dart';
+import '../features/recording/recording_page.dart';
+import '../features/recording/summary_page.dart';
 import '../features/onboarding/companion_page.dart';
 import '../features/onboarding/health_page.dart';
 import '../features/onboarding/onboarding_service.dart';
@@ -112,6 +115,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         redirect: (context, state) => '/login',
       ),
 
+      GoRoute(
+        path: '/recordings/:id',
+        name: 'recording-summary',
+        builder: (context, state) =>
+            SummaryPage(recordingId: state.pathParameters['id']!),
+      ),
+
       // ── Authenticated app shell ──────────────────────────────────────────
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) =>
@@ -141,6 +151,18 @@ final routerProvider = Provider<GoRouter>((ref) {
                 path: '/tasks',
                 name: 'tasks',
                 builder: (context, state) => const TasksPage(),
+                routes: [
+                  GoRoute(
+                    path: 'record',
+                    name: 'record',
+                    builder: (context, state) => const RecordingPage(),
+                  ),
+                  GoRoute(
+                    path: 'activity',
+                    name: 'activity',
+                    builder: (context, state) => const ActivityPage(),
+                  ),
+                ],
               ),
             ],
           ),

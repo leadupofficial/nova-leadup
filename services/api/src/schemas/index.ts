@@ -432,3 +432,70 @@ export const BiometricAuthSchema = z.object({
 	type: z.enum(['fingerprint', 'face', 'voice']),
 	signature: z.string().min(1),
 });
+
+// ─── Recording schemas ────────────────────────────────────────────────────────
+
+export const CreateRecordingSchema = z.object({
+	title: z.string().min(1).max(500),
+	language: z.string().max(50).optional(),
+	// The Recording screen sends a flat list of display names; objects are
+	// tolerated so a future speaker-labelled payload does not need a new route.
+	participants: z.array(z.union([z.string().max(500), z.record(z.unknown())])).optional(),
+	// `audio_recordings.storage_key` is NOT NULL with no database default. The
+	// route synthesises a placeholder when the upload pipeline has not supplied
+	// the real object-store key yet.
+	storageKey: z.string().min(1).max(1000).optional(),
+	durationSeconds: z.coerce.number().int().min(0).optional(),
+	consentRecorded: z.boolean().optional(),
+});
+
+export const UpdateRecordingSchema = z.object({
+	title: z.string().min(1).max(500).optional(),
+	durationSeconds: z.coerce.number().int().min(0).optional(),
+	// Free-form rather than an enum: the client's capture pipeline owns the
+	// vocabulary (recording | processing | completed | failed) and the column is
+	// a varchar(50).
+	status: z.string().min(1).max(50).optional(),
+	consentRecorded: z.boolean().optional(),
+});
+
+export const RecordingListQuerySchema = z.object({
+	cursor: z.string().base64url().optional(),
+	limit: z.coerce.number().int().min(1).max(100).default(20),
+	direction: z.enum(['forward', 'backward']).default('forward'),
+});
+
+// ─── Activity centre schemas ──────────────────────────────────────────────────
+
+export const ActivityListQuerySchema = z.object({
+	cursor: z.string().base64url().optional(),
+	limit: z.coerce.number().int().min(1).max(100).default(20),
+	direction: z.enum(['forward', 'backward']).default('forward'),
+	// Matched case-insensitively as a substring, so the Activity Centre's
+	// "Approvals" tab (`action=approval`) catches `tool.approval.requested`.
+	action: z.string().min(1).max(100).optional(),
+	outcome: z.string().min(1).max(50).optional(),
+});
+
+// ─── Tool definition / approval schemas ───────────────────────────────────────
+
+export const ToolApprovalListQuerySchema = z.object({
+	cursor: z.string().base64url().optional(),
+	limit: z.coerce.number().int().min(1).max(100).default(20),
+	direction: z.enum(['forward', 'backward']).default('forward'),
+	// Absent means "pending only". `all` explicitly disables that default.
+	status: z.enum(['pending', 'approved', 'denied', 'expired', 'all']).optional(),
+});
+
+export const DecideToolApprovalSchema = z.object({
+	decision: z.enum(['approve', 'deny']),
+});
+
+// ─── Consent schemas ──────────────────────────────────────────────────────────
+
+export const CreateConsentSchema = z.object({
+	purpose: z.string().min(1).max(100),
+	granted: z.boolean(),
+	// `consent_records.method` is NOT NULL; the route defaults it to 'app'.
+	method: z.string().min(1).max(50).optional(),
+});

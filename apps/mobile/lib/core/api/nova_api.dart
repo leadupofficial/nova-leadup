@@ -288,6 +288,141 @@ class NovaApi {
     return _asMap(data);
   }
 
+  // ─── Activity centre (audit_logs) ─────────────────────────────────────────
+
+  Future<List<NovaActivityItem>> listActivity({
+    int limit = 50,
+    String? action,
+    String? outcome,
+  }) async {
+    final data = await _get(
+      ApiConfig.activity,
+      query: {
+        'limit': limit,
+        'action': ?action,
+        'outcome': ?outcome,
+      },
+    );
+    return _list(data, 'activity', NovaActivityItem.fromJson);
+  }
+
+  // ─── Recordings & summaries ───────────────────────────────────────────────
+
+  Future<List<NovaRecording>> listRecordings({int limit = 50}) async {
+    final data = await _get(ApiConfig.recordings, query: {'limit': limit});
+    return _list(data, 'recordings', NovaRecording.fromJson);
+  }
+
+  Future<NovaRecording> createRecording({
+    required String title,
+    String? language,
+    List<String>? participants,
+  }) async {
+    final data = await _post(ApiConfig.recordings, {
+      'title': title,
+      'language': ?language,
+      'participants': ?participants,
+    });
+    return NovaRecording.fromJson(_object(data));
+  }
+
+  /// One recording plus its transcript and summary, as the detail route returns
+  /// them. `transcript` is a plain string; `summary` may be null when the
+  /// pipeline has not run yet.
+  Future<NovaRecordingDetail> getRecording(String id) async {
+    final data = await _get(ApiConfig.recording(id));
+    final map = _asMap(data);
+    final recJson = map['recording'] is Map
+        ? Map<String, dynamic>.from(map['recording'] as Map)
+        : map;
+    final summaryJson = map['summary'];
+    final transcript = map['transcript'];
+    return NovaRecordingDetail(
+      recording: NovaRecording.fromJson(recJson),
+      transcript: transcript is String
+          ? transcript
+          : (transcript is Map ? transcript['fullText'] as String? : null),
+      summary: summaryJson is Map
+          ? NovaRecordingSummary.fromJson(
+              Map<String, dynamic>.from(summaryJson),
+            )
+          : null,
+    );
+  }
+
+  Future<NovaRecording> updateRecording(
+    String id, {
+    String? title,
+    int? durationSeconds,
+    String? status,
+    bool? consentRecorded,
+  }) async {
+    final data = await _patch(ApiConfig.recording(id), {
+      'title': ?title,
+      'durationSeconds': ?durationSeconds,
+      'status': ?status,
+      'consentRecorded': ?consentRecorded,
+    });
+    return NovaRecording.fromJson(_object(data));
+  }
+
+  Future<void> deleteRecording(String id) =>
+      _delete(ApiConfig.recording(id));
+
+  Future<NovaRecordingSummary?> getRecordingSummary(String id) async {
+    final data = await _get(ApiConfig.recordingSummary(id));
+    final map = _asMap(data);
+    if (map.isEmpty) return null;
+    return NovaRecordingSummary.fromJson(map);
+  }
+
+  // ─── Tools & approvals ────────────────────────────────────────────────────
+
+  Future<List<NovaToolDefinition>> listTools() async {
+    final data = await _get(ApiConfig.tools);
+    return _list(data, 'tools', NovaToolDefinition.fromJson);
+  }
+
+  Future<List<NovaToolApproval>> listApprovals({String? status}) async {
+    final data = await _get(
+      ApiConfig.approvals,
+      query: {'status': ?status},
+    );
+    return _list(data, 'approvals', NovaToolApproval.fromJson);
+  }
+
+  /// Confirms or denies a pending side-effecting action. The blueprint requires
+  /// this to happen *before* anything external occurs (§5.7).
+  Future<NovaToolApproval> decideApproval(
+    String id, {
+    required bool approve,
+  }) async {
+    final data = await _post(ApiConfig.approvalDecision(id), {
+      'decision': approve ? 'approve' : 'deny',
+    });
+    return NovaToolApproval.fromJson(_object(data));
+  }
+
+  // ─── Consent ──────────────────────────────────────────────────────────────
+
+  Future<List<NovaConsentRecord>> listConsent() async {
+    final data = await _get(ApiConfig.consent);
+    return _list(data, 'consent', NovaConsentRecord.fromJson);
+  }
+
+  Future<NovaConsentRecord> recordConsent({
+    required String purpose,
+    required bool granted,
+    String? method,
+  }) async {
+    final data = await _post(ApiConfig.consent, {
+      'purpose': purpose,
+      'granted': granted,
+      'method': ?method,
+    });
+    return NovaConsentRecord.fromJson(_object(data));
+  }
+
   // ─── Transport helpers ────────────────────────────────────────────────────
 
   Future<dynamic> _get(String url, {Map<String, dynamic>? query}) =>

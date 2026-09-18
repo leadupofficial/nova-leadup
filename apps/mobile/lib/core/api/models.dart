@@ -501,3 +501,256 @@ class NovaPage<T> {
   final int? page;
   final bool? hasMore;
 }
+
+// ─── Activity centre (audit_logs) ─────────────────────────────────────────────
+
+/// One entry in the Activity Centre. Backed by `audit_logs`.
+class NovaActivityItem {
+  const NovaActivityItem({
+    required this.id,
+    required this.action,
+    this.targetType,
+    this.targetId,
+    this.outcome,
+    this.sourceDevice,
+    this.details,
+    this.occurredAt,
+  });
+
+  final String id;
+  final String action;
+  final String? targetType;
+  final String? targetId;
+  final String? outcome;
+  final String? sourceDevice;
+  final Map<String, dynamic>? details;
+  final DateTime? occurredAt;
+
+  /// The export's filters are All / Pending / Approvals / Completed / Errors.
+  bool get isError =>
+      (outcome ?? '').toLowerCase() == 'failure' ||
+      (outcome ?? '').toLowerCase() == 'error';
+
+  bool get isPending => (outcome ?? '').toLowerCase() == 'pending';
+
+  bool get isCompleted => (outcome ?? '').toLowerCase() == 'success';
+
+  bool get isApproval => action.toLowerCase().contains('approval');
+
+  /// Human title — the export shows "Reminder created: Call Kumar at 10:00 AM".
+  String get title {
+    final pretty = action
+        .replaceAll('_', ' ')
+        .replaceAll('.', ' ')
+        .trim();
+    if (pretty.isEmpty) return 'Activity';
+    return pretty[0].toUpperCase() + pretty.substring(1);
+  }
+
+  factory NovaActivityItem.fromJson(Map<String, dynamic> j) => NovaActivityItem(
+    id: (j['id'] ?? '').toString(),
+    action: (j['action'] ?? '').toString(),
+    targetType: j['targetType'] as String?,
+    targetId: j['targetId'] as String?,
+    outcome: j['outcome'] as String?,
+    sourceDevice: j['sourceDevice'] as String?,
+    details: j['details'] is Map
+        ? Map<String, dynamic>.from(j['details'] as Map)
+        : null,
+    occurredAt: _parseDate(j['occurredAt'] ?? j['occurred_at']),
+  );
+}
+
+// ─── Recordings & summaries ───────────────────────────────────────────────────
+
+class NovaRecording {
+  const NovaRecording({
+    required this.id,
+    required this.title,
+    this.durationSeconds,
+    this.language,
+    this.status = 'recording',
+    this.participants,
+    this.consentRecorded = false,
+    this.completedAt,
+    this.createdAt,
+  });
+
+  final String id;
+  final String title;
+  final int? durationSeconds;
+  final String? language;
+  final String status; // recording | processing | completed | failed
+  final List<String>? participants;
+  final bool consentRecorded;
+  final DateTime? completedAt;
+  final DateTime? createdAt;
+
+  bool get isLive => status == 'recording';
+
+  String get durationLabel {
+    final s = durationSeconds ?? 0;
+    final m = s ~/ 60;
+    final sec = s % 60;
+    return '${m.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}';
+  }
+
+  factory NovaRecording.fromJson(Map<String, dynamic> j) => NovaRecording(
+    id: (j['id'] ?? '').toString(),
+    title: (j['title'] ?? 'Recording').toString(),
+    durationSeconds: j['durationSeconds'] == null
+        ? null
+        : _parseInt(j['durationSeconds']),
+    language: j['language'] as String?,
+    status: (j['status'] ?? 'recording').toString(),
+    participants: (j['participants'] as List?)?.map((e) => e.toString()).toList(),
+    consentRecorded: _parseBool(j['consentRecorded']),
+    completedAt: _parseDate(j['completedAt']),
+    createdAt: _parseDate(j['createdAt']),
+  );
+}
+
+class NovaRecordingSummary {
+  const NovaRecordingSummary({
+    required this.id,
+    this.summary,
+    this.decisions = const [],
+    this.actionItems = const [],
+    this.extractedContacts = const [],
+    this.createdAt,
+  });
+
+  final String id;
+  final String? summary;
+  final List<String> decisions;
+  final List<String> actionItems;
+  final List<String> extractedContacts;
+  final DateTime? createdAt;
+
+  factory NovaRecordingSummary.fromJson(Map<String, dynamic> j) {
+    List<String> asList(Object? v) {
+      if (v is List) return v.map((e) => e.toString()).toList();
+      if (v is String && v.isNotEmpty) return [v];
+      return const [];
+    }
+
+    return NovaRecordingSummary(
+      id: (j['id'] ?? '').toString(),
+      summary: j['summary'] as String?,
+      decisions: asList(j['decisions']),
+      actionItems: asList(j['actionItems'] ?? j['action_items']),
+      extractedContacts: asList(j['extractedContacts']),
+      createdAt: _parseDate(j['createdAt']),
+    );
+  }
+}
+
+/// A recording together with its transcript and summary, as the
+/// `/recordings/:id` detail route returns them.
+class NovaRecordingDetail {
+  const NovaRecordingDetail({
+    required this.recording,
+    this.transcript,
+    this.summary,
+  });
+
+  final NovaRecording recording;
+  final String? transcript;
+  final NovaRecordingSummary? summary;
+}
+
+// ─── Tools & approvals ────────────────────────────────────────────────────────
+
+class NovaToolDefinition {
+  const NovaToolDefinition({
+    required this.id,
+    required this.name,
+    this.description,
+    this.permissionLevel,
+    this.confirmationRequired = true,
+  });
+
+  final String id;
+  final String name;
+  final String? description;
+
+  /// L0 read-only … L4 financial (blueprint §10.1). An integer, not a string.
+  final int? permissionLevel;
+  final bool confirmationRequired;
+
+  factory NovaToolDefinition.fromJson(Map<String, dynamic> j) =>
+      NovaToolDefinition(
+        id: (j['id'] ?? '').toString(),
+        name: (j['name'] ?? '').toString(),
+        description: j['description'] as String?,
+        permissionLevel: (j['permissionLevel'] as num?)?.toInt(),
+        confirmationRequired: _parseBool(j['confirmationRequired'], true),
+      );
+}
+
+/// A pending side-effecting action awaiting the user's confirmation.
+/// Shown by the Tool Confirmation sheet before anything external happens.
+class NovaToolApproval {
+  const NovaToolApproval({
+    required this.id,
+    required this.toolName,
+    this.toolInput,
+    this.permissionLevel,
+    this.status = 'pending',
+    this.expiresAt,
+    this.createdAt,
+  });
+
+  final String id;
+  final String toolName;
+  final Map<String, dynamic>? toolInput;
+  final int? permissionLevel;
+  final String status;
+  final DateTime? expiresAt;
+  final DateTime? createdAt;
+
+  bool get isPending => status == 'pending';
+
+  factory NovaToolApproval.fromJson(Map<String, dynamic> j) => NovaToolApproval(
+    id: (j['id'] ?? '').toString(),
+    toolName: (j['toolName'] ?? j['tool_name'] ?? 'Action').toString(),
+    toolInput: j['toolInput'] is Map
+        ? Map<String, dynamic>.from(j['toolInput'] as Map)
+        : null,
+    permissionLevel: (j['permissionLevel'] as num?)?.toInt(),
+    status: (j['status'] ?? 'pending').toString(),
+    expiresAt: _parseDate(j['expiresAt']),
+    createdAt: _parseDate(j['createdAt']),
+  );
+}
+
+// ─── Consent ──────────────────────────────────────────────────────────────────
+
+class NovaConsentRecord {
+  const NovaConsentRecord({
+    required this.id,
+    required this.purpose,
+    required this.granted,
+    this.method,
+    this.consentedAt,
+    this.revokedAt,
+  });
+
+  final String id;
+  final String purpose;
+  final bool granted;
+  final String? method;
+  final DateTime? consentedAt;
+  final DateTime? revokedAt;
+
+  bool get isActive => granted && revokedAt == null;
+
+  factory NovaConsentRecord.fromJson(Map<String, dynamic> j) => NovaConsentRecord(
+    id: (j['id'] ?? '').toString(),
+    purpose: (j['purpose'] ?? '').toString(),
+    granted: _parseBool(j['granted']),
+    method: j['method'] as String?,
+    consentedAt: _parseDate(j['consentedAt']),
+    revokedAt: _parseDate(j['revokedAt']),
+  );
+}

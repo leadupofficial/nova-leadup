@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/api/models.dart';
 import '../../core/api/providers.dart';
@@ -32,6 +33,20 @@ class _TasksPageState extends ConsumerState<TasksPage> {
           Expanded(
             child: Text('Tasks', style: NovaTheme.heroName(c)),
           ),
+          // Entry points to the Activity Centre and the recording flow, which
+          // the export groups with tasks/reminders.
+          NovaIconButton(
+            icon: Icons.history_rounded,
+            tooltip: 'Activity centre',
+            onTap: () => context.push('/tasks/activity'),
+          ),
+          const SizedBox(width: NovaSpace.xs),
+          NovaIconButton(
+            icon: Icons.mic_none_rounded,
+            tooltip: 'Record a meeting',
+            onTap: () => context.push('/tasks/record'),
+          ),
+          const SizedBox(width: NovaSpace.xs),
           NovaIconButton(
             icon: Icons.add_rounded,
             tooltip: _tab == 0 ? 'New task' : 'New reminder',

@@ -145,6 +145,11 @@ class ApiConfig {
   static String get memories => '$baseUrl/api/v1/memories';
   static String get reminders => '$baseUrl/api/v1/reminders';
   static String get notifications => '$baseUrl/api/v1/notifications';
+  static String get activity => '$baseUrl/api/v1/activity';
+  static String get recordings => '$baseUrl/api/v1/recordings';
+  static String get tools => '$baseUrl/api/v1/tools';
+  static String get approvals => '$baseUrl/api/v1/tools/approvals';
+  static String get consent => '$baseUrl/api/v1/consent';
 
   /// `services/api` mounts settings as sub-resources, so there is no
   /// `GET /api/v1/settings` — that path 404s. Each screen targets its own path.
@@ -168,4 +173,7 @@ class ApiConfig {
   static String memory(String id) => '$memories/$id';
   static String reminder(String id) => '$reminders/$id';
   static String avatar(String id) => '$settingsAvatars/$id';
+  static String recording(String id) => '$recordings/$id';
+  static String recordingSummary(String id) => '${recording(id)}/summary';
+  static String approvalDecision(String id) => '$approvals/$id/decide';
 }
