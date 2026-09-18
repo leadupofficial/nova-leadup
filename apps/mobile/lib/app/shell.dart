@@ -12,9 +12,23 @@ import '../features/tasks/reminder_composer.dart';
 /// own navigation stack, which is what the design's per-screen back buttons
 /// (`.back-btn`) expect.
 class NovaShell extends StatelessWidget {
-  const NovaShell({super.key, required this.navigationShell});
+  const NovaShell({
+    super.key,
+    required this.navigationShell,
+    this.location = '/',
+  });
 
   final StatefulNavigationShell navigationShell;
+
+  /// The current go_router path, used to decide where the floating assistant
+  /// orb is appropriate.
+  final String location;
+
+  /// The Converse thread is already a voice surface — it has its own avatar,
+  /// quick actions and composer — and the overlay's expanded panel sits at
+  /// `bottom: gutter`, which lands directly on top of that composer and makes
+  /// it unusable. Suppress the orb there rather than stacking two voice UIs.
+  bool get _showOverlay => !location.startsWith('/converse');
 
   static const destinations = <NovaNavDestination>[
     NovaNavDestination(
@@ -57,11 +71,12 @@ class NovaShell extends StatelessWidget {
           // FloatingOverlay already fills and positions itself, and only its
           // orb captures taps, so it can sit directly in this stack. Do not wrap
           // it in another Positioned.fill.
-          FloatingOverlay(
-            onTranslate: () => context.push('/translate'),
-            onReminder: () => ReminderComposer.show(context),
-            onTask: () => navigationShell.goBranch(2),
-          ),
+          if (_showOverlay)
+            FloatingOverlay(
+              onTranslate: () => context.push('/translate'),
+              onReminder: () => ReminderComposer.show(context),
+              onTask: () => navigationShell.goBranch(2),
+            ),
         ],
       ),
       bottomNavigationBar: NovaBottomNav(

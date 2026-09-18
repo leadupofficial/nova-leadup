@@ -129,8 +129,35 @@ class _ConversePageState extends ConsumerState<ConversePage> {
   }
 
   Future<void> _send(String text) async {
-    final conversationId = ref.read(activeConversationProvider);
-    if (conversationId == null || text.trim().isEmpty || _busy) return;
+    if (text.trim().isEmpty || _busy) return;
+
+    // A conversation has to exist before a message can be attached to it. The
+    // Converse tab opens on a brand-new thread with no id, and this used to bail
+    // out here, so the composer and every quick action were dead on arrival —
+    // "Start a conversation" was unreachable by text. Create the thread on the
+    // first send instead.
+    var conversationId = ref.read(activeConversationProvider);
+    if (conversationId == null) {
+      setState(() {
+        _busy = true;
+        _banner = null;
+      });
+      try {
+        final created = await ref
+            .read(novaMutationsProvider)
+            .startConversation(title: 'New conversation');
+        conversationId = created.id;
+        ref.read(activeConversationProvider.notifier).set(conversationId);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _busy = false;
+          _banner = _friendly(e);
+        });
+        return;
+      }
+      if (!mounted) return;
+    }
 
     _input.clear();
     setState(() {
@@ -325,13 +352,15 @@ class _ConversePageState extends ConsumerState<ConversePage> {
                 ),
 
                 _QuickActions(
-                  enabled: conversationId != null && !_busy,
+                  // Enabled with no conversation too: the first pick creates the
+                  // thread (see _send).
+                  enabled: !_busy,
                   onPick: _send,
                 ),
 
                 NovaComposer(
                   controller: _input,
-                  enabled: conversationId != null,
+                  enabled: !_busy,
                   micActive: _recording,
                   onSend: _send,
                   onMic: () => setState(() => _recording = !_recording),

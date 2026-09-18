@@ -174,8 +174,10 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // ── Authenticated app shell ──────────────────────────────────────────
       StatefulShellRoute.indexedStack(
-        builder: (context, state, navigationShell) =>
-            NovaShell(navigationShell: navigationShell),
+        builder: (context, state, navigationShell) => NovaShell(
+          navigationShell: navigationShell,
+          location: state.uri.path,
+        ),
         branches: [
           StatefulShellBranch(
             routes: [
