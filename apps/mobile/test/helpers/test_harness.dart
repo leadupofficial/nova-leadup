@@ -341,7 +341,11 @@ Widget testApp(TestDependencies deps, Widget home) {
 }
 
 /// Wraps an arbitrary widget (e.g. a router-driven `MaterialApp`) in the overrides.
-Widget testScope(TestDependencies deps, Widget child) {
+Widget testScope(
+  TestDependencies deps,
+  Widget child, {
+  NetworkService? networkService,
+}) {
   return ProviderScope(
     overrides: [
       sharedPreferencesProvider.overrideWithValue(deps.preferences),
@@ -352,8 +356,65 @@ Widget testScope(TestDependencies deps, Widget child) {
       analyticsServiceProvider.overrideWithValue(deps.analytics),
       networkInfoServiceProvider.overrideWithValue(deps.networkInfo),
       healthServiceProvider.overrideWithValue(deps.healthService),
+      // The dashboard and the feature screens fetch over this provider. Without
+      // an override they escape to the real network and the widget test hangs.
+      if (networkService != null)
+        networkServiceProvider.overrideWithValue(networkService),
+      if (networkService != null)
+        authNetworkServiceProvider.overrideWithValue(networkService),
     ],
-    child: child,
+    // The design's avatar and waveform loops repeat forever, so `pumpAndSettle`
+    // would never return. Every animated widget honours the OS "Reduce Motion"
+    // setting (blueprint §6.5), so disabling it here also exercises that path.
+    child: MediaQuery(
+      data: const MediaQueryData(disableAnimations: true),
+      child: child,
+    ),
+  );
+}
+
+/// Answers any request with an empty `{success, data}` envelope of the right
+/// shape, so list screens settle into their designed empty states.
+NetworkService emptyApiNetworkService() {
+  return fakeNetworkService(
+    FakeHttpAdapter((options) async {
+      final path = options.path;
+      if (path.contains('/tasks')) {
+        return jsonResponse(<String, dynamic>{
+          'success': true,
+          'data': <String, dynamic>{'tasks': <dynamic>[]},
+        });
+      }
+      if (path.contains('/memories')) {
+        return jsonResponse(<String, dynamic>{
+          'success': true,
+          'data': <String, dynamic>{'memories': <dynamic>[]},
+        });
+      }
+      if (path.contains('/reminders')) {
+        return jsonResponse(<String, dynamic>{
+          'success': true,
+          'data': <dynamic>[],
+        });
+      }
+      if (path.contains('/conversations')) {
+        return jsonResponse(<String, dynamic>{
+          'success': true,
+          'data': <String, dynamic>{'conversations': <dynamic>[]},
+        });
+      }
+      if (path.contains('/settings/profile')) {
+        return jsonResponse(<String, dynamic>{
+          'success': true,
+          'data': <String, dynamic>{
+            'id': 'user-1',
+            'email': 'alex@example.com',
+            'name': 'Alex',
+          },
+        });
+      }
+      return jsonResponse(<String, dynamic>{'success': true, 'data': null});
+    }),
   );
 }
 

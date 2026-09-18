@@ -74,12 +74,20 @@ void main() {
     );
     addTearDown(deps.dispose);
 
-    await tester.pumpWidget(testScope(deps, const NovaApp()));
+    await tester.pumpWidget(
+      testScope(deps, const NovaApp(), networkService: emptyApiNetworkService()),
+    );
     await tester.pumpAndSettle();
 
-    // The greeting proves the persisted session was restored and injected before the
-    // first frame, rather than being loaded asynchronously afterwards.
-    expect(find.text('Hi Alex'), findsOneWidget);
+    // The persisted session being restored is proved by the user's name rendering
+    // on the dashboard, and by the wake-word control that only the authenticated
+    // screen exposes.
+    //
+    // NOTE: the redesigned dashboard (OpenDesign `home/home.html`) shows the name
+    // as its own hero line beneath a separate greeting line ("Good morning"),
+    // rather than the old single "Hi Alex" string.
+    expect(find.text('Alex'), findsWidgets);
     expect(find.text('Wake word'), findsOneWidget);
+    expect(find.text('Tap to talk'), findsOneWidget);
   });
 }

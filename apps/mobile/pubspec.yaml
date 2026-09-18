@@ -57,9 +57,57 @@ flutter:
  uses-material-design: true
  assets:
  - assets/images/
+ fonts:
+ # Fonts required by the OpenDesign brand spec (assets/brand-spec.md "Font
+ # stacks"). All four ship as variable fonts, so the same asset is declared once
+ # per weight; NovaTheme additionally pins exact instances with fontVariations.
+ - family: PlusJakartaSans
+   fonts:
+   - asset: assets/fonts/PlusJakartaSans.ttf
+     weight: 300
+   - asset: assets/fonts/PlusJakartaSans.ttf
+     weight: 400
+   - asset: assets/fonts/PlusJakartaSans.ttf
+     weight: 500
+   - asset: assets/fonts/PlusJakartaSans.ttf
+     weight: 600
+   - asset: assets/fonts/PlusJakartaSans.ttf
+     weight: 700
+   - asset: assets/fonts/PlusJakartaSans.ttf
+     weight: 800
+ - family: Inter
+   fonts:
+   - asset: assets/fonts/Inter.ttf
+     weight: 300
+   - asset: assets/fonts/Inter.ttf
+     weight: 400
+   - asset: assets/fonts/Inter.ttf
+     weight: 500
+   - asset: assets/fonts/Inter.ttf
+     weight: 600
+   - asset: assets/fonts/Inter.ttf
+     weight: 700
+ - family: JetBrainsMono
+   fonts:
+   - asset: assets/fonts/JetBrainsMono.ttf
+     weight: 400
+   - asset: assets/fonts/JetBrainsMono.ttf
+     weight: 500
+ - family: NotoSansTamil
+   fonts:
+   - asset: assets/fonts/NotoSansTamil.ttf
+     weight: 400
+   - asset: assets/fonts/NotoSansTamil.ttf
+     weight: 500
+   - asset: assets/fonts/NotoSansTamil.ttf
+     weight: 600
+   - asset: assets/fonts/NotoSansTamil.ttf
+     weight: 700
 
 flutter_launcher_icons:
  android: true
  ios: true
- image_path: assets/images/icon.png
+ # assets/images/ holds only a README, so this previously pointed at a file that
+ # does not exist; the real icon is assets/icon.png.
+ image_path: assets/icon.png
  min_sdk_android: 24

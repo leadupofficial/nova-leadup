@@ -13,6 +13,14 @@ import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
 import { validate } from '../middleware/validate.js';
+import { chatCompletion } from '../services/ai.js';
+import {
+	HISTORY_MESSAGE_LIMIT,
+	NOVA_SYSTEM_PROMPT,
+	toAssistantError,
+	toChatMessages,
+	type AssistantError,
+} from '../services/assistant.js';
 import {
 	ConversationListQuerySchema,
 	CreateConversationSchema,
@@ -179,6 +187,9 @@ router.delete('/:id', authenticate, async (req: AuthenticatedRequest, res, next)
 
 // ─── Messages within a conversation ─────────────────────────────────────────
 
+/** Row shape returned by drizzle for `conversation_messages`. */
+type ConversationMessage = typeof conversationMessages.$inferSelect;
+
 router.get('/:id/messages', authenticate, async (req: AuthenticatedRequest, res, next) => {
 	try {
 		const { id } = req.params;
@@ -223,7 +234,7 @@ router.post('/:id/messages', authenticate, validate(SendMessageSchema), async (r
 			throw new HttpError(404, 'Conversation not found', 'NOT_FOUND');
 		}
 
-		const [message] = await db.insert(conversationMessages).values({
+		const [message]: ConversationMessage[] = await db.insert(conversationMessages).values({
 			conversationId: parsed.data.id,
 			role: body.role,
 			content: body.content,
@@ -236,7 +247,66 @@ router.post('/:id/messages', authenticate, validate(SendMessageSchema), async (r
 		// Update conversation's updatedAt
 		await db.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, parsed.data.id));
 
-		res.status(201).json({ success: true, data: message });
+		// Generate + persist the assistant reply for a *user* turn. An incoming
+		// assistant turn (imported history, tool echo) is stored as-is and must not
+		// trigger a second reply.
+		let assistantMessage: ConversationMessage | null = null;
+		let assistantError: AssistantError | null = null;
+
+		if (message.role === 'user') {
+			try {
+				// Replay the tail of this conversation so the model has context. The
+				// turn just persisted is already included; the helper bounds the
+				// replay to HISTORY_MESSAGE_LIMIT turns and HISTORY_CHAR_BUDGET chars.
+				const history = await db
+					.select({ role: conversationMessages.role, content: conversationMessages.content })
+					.from(conversationMessages)
+					.where(eq(conversationMessages.conversationId, parsed.data.id))
+					.orderBy(desc(conversationMessages.createdAt))
+					.limit(HISTORY_MESSAGE_LIMIT);
+
+				history.reverse();
+
+				const completion = await chatCompletion(toChatMessages(history), {
+					systemPrompt: NOVA_SYSTEM_PROMPT,
+					maxTokens: 1024,
+					temperature: 0.7,
+				});
+
+				[assistantMessage] = await db.insert(conversationMessages).values({
+					conversationId: parsed.data.id,
+					role: 'assistant',
+					content: completion.content,
+					model: completion.model,
+					tokenUsage: completion.usage,
+					createdAt: new Date(),
+				}).returning();
+
+				await db.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, parsed.data.id));
+
+				logger.info(
+					{ conversationId: parsed.data.id, userId: req.user!.id, model: completion.model, usage: completion.usage },
+					'Assistant reply generated',
+				);
+			} catch (aiErr) {
+				// Graceful degradation: the user's turn is already stored, so report the
+				// provider failure as data instead of a 5xx that would lose it.
+				assistantError = toAssistantError(aiErr);
+				logger.warn(
+					{ err: aiErr, conversationId: parsed.data.id, code: assistantError.code },
+					'Assistant reply unavailable — returning the stored user message',
+				);
+			}
+		}
+
+		res.status(201).json({
+			success: true,
+			data: {
+				userMessage: message,
+				assistantMessage,
+				assistantError,
+			},
+		});
 	} catch (err) { next(err); }
 });
 

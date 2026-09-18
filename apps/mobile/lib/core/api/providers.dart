@@ -1,0 +1,301 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'models.dart';
+import 'nova_api.dart';
+
+/// Riverpod data layer for the feature screens.
+///
+/// Every provider exposes the three states the export designs for — loading,
+/// error and empty — and the error is surfaced as a [NovaApiException] rather
+/// than being swallowed into an empty list. The admin console shipped the
+/// swallow-into-empty bug and it made a 401 look like an empty database; the
+/// screens here render the message instead.
+///
+/// Providers are `autoDispose` where the data is only needed while its screen is
+/// mounted, and invalidated after a mutation so counts stay truthful.
+
+// ─── Tasks ────────────────────────────────────────────────────────────────────
+
+final tasksProvider = FutureProvider.autoDispose<List<NovaTask>>((ref) async {
+  final api = ref.watch(novaApiProvider);
+  return api.listTasks();
+});
+
+final taskSummaryProvider = FutureProvider.autoDispose<TaskSummary>((
+  ref,
+) async {
+  final tasks = await ref.watch(tasksProvider.future);
+  final now = DateTime.now();
+  final open = tasks.where((t) => !t.isDone).toList();
+  return TaskSummary(
+    total: tasks.length,
+    open: open.length,
+    completed: tasks.length - open.length,
+    overdue: tasks.where((t) => t.isOverdue).length,
+    dueToday: open
+        .where(
+          (t) =>
+              t.dueAt != null &&
+              t.dueAt!.year == now.year &&
+              t.dueAt!.month == now.month &&
+              t.dueAt!.day == now.day,
+        )
+        .length,
+  );
+});
+
+class TaskSummary {
+  const TaskSummary({
+    required this.total,
+    required this.open,
+    required this.completed,
+    required this.overdue,
+    required this.dueToday,
+  });
+
+  final int total;
+  final int open;
+  final int completed;
+  final int overdue;
+  final int dueToday;
+
+  static const empty = TaskSummary(
+    total: 0,
+    open: 0,
+    completed: 0,
+    overdue: 0,
+    dueToday: 0,
+  );
+}
+
+// ─── Memories ─────────────────────────────────────────────────────────────────
+
+final memoriesProvider = FutureProvider.autoDispose<List<NovaMemory>>((
+  ref,
+) async {
+  final api = ref.watch(novaApiProvider);
+  return api.listMemories();
+});
+
+/// Memory search term. Setting it re-fetches from the server rather than
+/// filtering locally, so the result matches what is actually stored.
+///
+/// Riverpod 3 removed `StateProvider`, so this is a plain [Notifier].
+class MemorySearch extends Notifier<String> {
+  @override
+  String build() => '';
+
+  void set(String value) => state = value;
+  void clear() => state = '';
+}
+
+final memorySearchProvider = NotifierProvider<MemorySearch, String>(
+  MemorySearch.new,
+);
+
+final memorySearchResultsProvider =
+    FutureProvider.autoDispose<List<NovaMemory>>((ref) async {
+      final query = ref.watch(memorySearchProvider);
+      if (query.trim().isEmpty) return const [];
+      final api = ref.watch(novaApiProvider);
+      return api.listMemories(query: query.trim());
+    });
+
+// ─── Conversations ────────────────────────────────────────────────────────────
+
+final conversationsProvider =
+    FutureProvider.autoDispose<List<NovaConversation>>((ref) async {
+      final api = ref.watch(novaApiProvider);
+      return api.listConversations();
+    });
+
+/// Messages for one conversation, keyed by id.
+final messagesProvider = FutureProvider.autoDispose
+    .family<List<NovaMessage>, String>((ref, conversationId) async {
+      final api = ref.watch(novaApiProvider);
+      return api.listMessages(conversationId);
+    });
+
+// ─── Reminders ────────────────────────────────────────────────────────────────
+
+final remindersProvider = FutureProvider.autoDispose<List<NovaReminder>>((
+  ref,
+) async {
+  final api = ref.watch(novaApiProvider);
+  return api.listReminders();
+});
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+
+final profileProvider = FutureProvider.autoDispose<NovaProfile>((ref) async {
+  final api = ref.watch(novaApiProvider);
+  return api.getProfile();
+});
+
+final notificationPrefsProvider =
+    FutureProvider.autoDispose<NovaNotificationPrefs>((ref) async {
+      final api = ref.watch(novaApiProvider);
+      return api.getPreferences();
+    });
+
+final privacyPrefsProvider = FutureProvider.autoDispose<NovaPrivacyPrefs>((
+  ref,
+) async {
+  final api = ref.watch(novaApiProvider);
+  return api.getPrivacy();
+});
+
+final personaProvider = FutureProvider.autoDispose<NovaPersona>((ref) async {
+  final api = ref.watch(novaApiProvider);
+  return api.getPersona();
+});
+
+/// Combined counts for the Home dashboard's "Today's Overview" cards.
+///
+/// Fetches the three lists in parallel; a failure in any one is surfaced rather
+/// than silently zeroed, so the dashboard never claims "0 memories" when the
+/// real problem is an expired session.
+final homeOverviewProvider = FutureProvider.autoDispose<HomeOverview>((
+  ref,
+) async {
+  final api = ref.watch(novaApiProvider);
+  final results = await Future.wait([
+    api.listTasks(),
+    api.listMemories(),
+    api.listReminders(),
+  ]);
+
+  final tasks = results[0] as List<NovaTask>;
+  final memories = results[1] as List<NovaMemory>;
+  final reminders = results[2] as List<NovaReminder>;
+
+  return HomeOverview(
+    openTasks: tasks.where((t) => !t.isDone).length,
+    memories: memories.length,
+    reminders: reminders.where((r) => !r.completed).length,
+  );
+});
+
+class HomeOverview {
+  const HomeOverview({
+    required this.openTasks,
+    required this.memories,
+    required this.reminders,
+  });
+
+  final int openTasks;
+  final int memories;
+  final int reminders;
+}
+
+// ─── Mutations ────────────────────────────────────────────────────────────────
+
+/// Write operations plus the cache invalidation each one needs, so list screens
+/// and the dashboard counts refresh together.
+class NovaMutations {
+  NovaMutations(this._ref);
+
+  final Ref _ref;
+
+  NovaApi get _api => _ref.read(novaApiProvider);
+
+  Future<void> addTask({
+    required String title,
+    String? description,
+    DateTime? dueAt,
+  }) async {
+    await _api.createTask(
+      title: title,
+      description: description,
+      dueAt: dueAt,
+    );
+    _refreshTasks();
+  }
+
+  Future<void> toggleTask(NovaTask task) async {
+    await _api.completeTask(task.id, done: !task.isDone);
+    _refreshTasks();
+  }
+
+  Future<void> deleteTask(String id) async {
+    await _api.deleteTask(id);
+    _refreshTasks();
+  }
+
+  void _refreshTasks() {
+    _ref.invalidate(tasksProvider);
+    _ref.invalidate(taskSummaryProvider);
+    _ref.invalidate(homeOverviewProvider);
+  }
+
+  Future<void> addMemory({required String content}) async {
+    await _api.createMemory(content: content);
+    _refreshMemories();
+  }
+
+  Future<void> deleteMemory(String id) async {
+    await _api.deleteMemory(id);
+    _refreshMemories();
+  }
+
+  void _refreshMemories() {
+    _ref.invalidate(memoriesProvider);
+    _ref.invalidate(memorySearchResultsProvider);
+    _ref.invalidate(homeOverviewProvider);
+  }
+
+  Future<void> addReminder({required String title, DateTime? remindAt}) async {
+    await _api.createReminder(title: title, remindAt: remindAt);
+    _refreshReminders();
+  }
+
+  Future<void> deleteReminder(String id) async {
+    await _api.deleteReminder(id);
+    _refreshReminders();
+  }
+
+  void _refreshReminders() {
+    _ref.invalidate(remindersProvider);
+    _ref.invalidate(homeOverviewProvider);
+  }
+
+  Future<NovaConversation> startConversation({String? title}) async {
+    final conversation = await _api.createConversation(title: title);
+    _ref.invalidate(conversationsProvider);
+    return conversation;
+  }
+
+  Future<void> deleteConversation(String id) async {
+    await _api.deleteConversation(id);
+    _ref.invalidate(conversationsProvider);
+  }
+
+  Future<NovaSendResult> send(String conversationId, String content) async {
+    final result = await _api.sendMessage(conversationId, content);
+    _ref.invalidate(messagesProvider(conversationId));
+    _ref.invalidate(conversationsProvider);
+    return result;
+  }
+
+  Future<void> savePrivacy(NovaPrivacyPrefs prefs) async {
+    await _api.updatePrivacy(prefs);
+    _ref.invalidate(privacyPrefsProvider);
+  }
+
+  Future<void> saveNotificationPrefs(NovaNotificationPrefs prefs) async {
+    await _api.updatePreferences(prefs);
+    _ref.invalidate(notificationPrefsProvider);
+  }
+
+  Future<void> saveProfile({String? name, String? phone, String? timezone}) async {
+    await _api.updateProfile(name: name, phone: phone, timezone: timezone);
+    _ref.invalidate(profileProvider);
+  }
+
+  Future<void> savePersona(NovaPersona persona) async {
+    await _api.updatePersona(persona);
+    _ref.invalidate(personaProvider);
+  }
+}
+
+final novaMutationsProvider = Provider<NovaMutations>(NovaMutations.new);

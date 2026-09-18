@@ -138,8 +138,34 @@ class ApiConfig {
   static String get authRegister => '$baseUrl/api/v1/auth/register';
   static String get authRefresh => '$baseUrl/api/v1/auth/refresh';
   static String get authLogout => '$baseUrl/api/v1/auth/logout';
+  static String get me => '$baseUrl/api/v1/auth/me';
   static String get conversations => '$baseUrl/api/v1/conversations';
+  static String get chat => '$baseUrl/api/v1/chat';
   static String get tasks => '$baseUrl/api/v1/tasks';
   static String get memories => '$baseUrl/api/v1/memories';
+  static String get reminders => '$baseUrl/api/v1/reminders';
   static String get notifications => '$baseUrl/api/v1/notifications';
+
+  /// `services/api` mounts settings as sub-resources, so there is no
+  /// `GET /api/v1/settings` — that path 404s. Each screen targets its own path.
+  static String get settingsProfile => '$baseUrl/api/v1/settings/profile';
+  static String get settingsPreferences =>
+      '$baseUrl/api/v1/settings/preferences';
+  static String get settingsPrivacy => '$baseUrl/api/v1/settings/privacy';
+  static String get settingsPersona => '$baseUrl/api/v1/settings/persona';
+  static String get settingsAvatars => '$baseUrl/api/v1/settings/avatars';
+  static String get settingsCompanion => '$baseUrl/api/v1/settings/companion';
+
+  // ── Path builders ─────────────────────────────────────────────────────────
+  /// Conversations: `/conversations/:id`
+  static String conversation(String id) => '$conversations/$id';
+
+  /// Messages within a conversation: `/conversations/:id/messages`
+  static String conversationMessages(String id) =>
+      '${conversation(id)}/messages';
+
+  static String task(String id) => '$tasks/$id';
+  static String memory(String id) => '$memories/$id';
+  static String reminder(String id) => '$reminders/$id';
+  static String avatar(String id) => '$settingsAvatars/$id';
 }

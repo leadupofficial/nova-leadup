@@ -3,21 +3,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/design/widgets/index.dart';
 import '../features/auth/auth_controller.dart';
 import '../features/auth/login_page.dart';
 import '../features/auth/register_page.dart';
+import '../features/converse/converse_page.dart';
 import '../features/home/home_page.dart';
+import '../features/memory/memory_page.dart';
 import '../features/onboarding/health_page.dart';
 import '../features/onboarding/onboarding_service.dart';
 import '../features/onboarding/permissions_page.dart';
 import '../features/onboarding/profile_page.dart';
 import '../features/onboarding/welcome_page.dart';
+import '../features/settings/me_page.dart';
+import '../features/tasks/tasks_page.dart';
 import 'providers.dart';
+import 'shell.dart';
 
 /// Application routing and the gate that decides onboarding vs. auth vs. app.
 ///
-/// The first screen used to be an unconditional "NOVA" text placeholder: there were no
-/// routes at all, no onboarding gate, and no auth gate. This provider owns both gates.
+/// The authenticated app is a [StatefulShellRoute] with the five destinations the
+/// OpenDesign export specifies (Home, Converse, Tasks, Memory, Me) so each tab
+/// keeps its own navigation stack and the designed `.bottom-nav` can highlight
+/// the active branch.
 final routerProvider = Provider<GoRouter>((ref) {
   final onboarding = ref.read(onboardingServiceProvider);
 
@@ -61,11 +69,6 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: <RouteBase>[
       GoRoute(
-        path: '/',
-        name: 'home',
-        builder: (context, state) => const HomePage(),
-      ),
-      GoRoute(
         path: '/login',
         name: 'login',
         builder: (context, state) => const LoginPage(),
@@ -102,8 +105,62 @@ final routerProvider = Provider<GoRouter>((ref) {
         name: 'onboarding-complete',
         redirect: (context, state) => '/login',
       ),
+
+      // ── Authenticated app shell ──────────────────────────────────────────
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) =>
+            NovaShell(navigationShell: navigationShell),
+        branches: [
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/',
+                name: 'home',
+                builder: (context, state) => const HomePage(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/converse',
+                name: 'converse',
+                builder: (context, state) => const ConversePage(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/tasks',
+                name: 'tasks',
+                builder: (context, state) => const TasksPage(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/memory',
+                name: 'memory',
+                builder: (context, state) => const MemoryPage(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/me',
+                name: 'me',
+                builder: (context, state) => const MePage(),
+              ),
+            ],
+          ),
+        ],
+      ),
     ],
-    errorBuilder: (context, state) => _RouteNotFoundScreen(location: state.uri.toString()),
+    errorBuilder: (context, state) =>
+        _RouteNotFoundScreen(location: state.uri.toString()),
   );
 });
 
@@ -121,24 +178,27 @@ class _RouteNotFoundScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.nova;
     return Scaffold(
-      appBar: AppBar(title: const Text('Not found')),
+      backgroundColor: c.bg,
       body: Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(NovaSpace.gutter),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.explore_off_rounded, size: 48),
-              const SizedBox(height: 16),
+              Icon(Icons.explore_off_rounded, size: 48, color: c.muted),
+              const SizedBox(height: NovaSpace.md),
               Text(
                 'No screen matches "$location".',
                 textAlign: TextAlign.center,
+                style: NovaTheme.sectionHeading(c),
               ),
-              const SizedBox(height: 16),
-              FilledButton(
+              const SizedBox(height: NovaSpace.md),
+              NovaPrimaryButton(
+                label: 'Go home',
+                expand: false,
                 onPressed: () => context.go('/'),
-                child: const Text('Go home'),
               ),
             ],
           ),

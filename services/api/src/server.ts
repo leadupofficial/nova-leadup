@@ -3,12 +3,13 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
-import { z } from 'zod';
 import { validateEnv } from './utils/env.js';
 import { authRoutes } from './routes/auth.js';
+import { aiRoutes } from './routes/ai.js';
 import { chatRoutes } from './routes/chat.js';
 import { conversationsRoutes } from './routes/conversations.js';
 import { tasksRoutes } from './routes/tasks.js';
+import { remindersRoutes } from './routes/reminders.js';
 import { memoriesRoutes } from './routes/memories.js';
 import { settingsRouter as settingsRoutes } from './routes/settings.js';
 import { streamingRoutes } from './routes/streaming.js';
@@ -48,28 +49,17 @@ app.use('/api/v1', rateLimitMiddleware());
 // API v1 routes
 const apiV1 = express.Router();
 apiV1.use('/auth', authRoutes);
+apiV1.use('/ai', aiRoutes);
 apiV1.use('/conversations', conversationsRoutes);
 apiV1.use('/chat', chatRoutes);
 apiV1.use('/tasks', tasksRoutes);
+apiV1.use('/reminders', remindersRoutes);
 apiV1.use('/memories', memoriesRoutes);
 apiV1.use('/settings', settingsRoutes);
 apiV1.use('/streaming', streamingRoutes);
 apiV1.use('/voice', voiceRoutes);
 apiV1.use('/biometric', biometricRoutes);
 apiV1.use('/admin', adminRoutes);
-
-// Inline reminder routes (no separate file yet)
-const remindersRouter = express.Router();
-remindersRouter.get('/', (req, res) => {
- res.json({ success: true, data: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 } });
-});
-remindersRouter.post('/', (req, res) => {
- const schema = z.object({ title: z.string().min(1), dueAt: z.string(), method: z.enum(['notification', 'sms', 'call']).default('notification') });
- const parsed = schema.safeParse(req.body);
- if (!parsed.success) return res.status(400).json({ success: false, error: 'Invalid input', code: 'INVALID_INPUT' });
- res.status(201).json({ success: true, data: { id: Date.now().toString(), ...parsed.data, status: 'scheduled', createdAt: new Date().toISOString() } });
-});
-apiV1.use('/reminders', remindersRouter);
 
 app.use('/api/v1', apiV1);
 

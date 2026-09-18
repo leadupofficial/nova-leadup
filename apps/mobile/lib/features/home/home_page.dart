@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
-import '../../core/avatar/avatar_provider.dart';
-import '../../core/theme/nova_theme.dart';
+import '../../core/api/providers.dart';
+import '../../core/design/widgets/index.dart';
 import '../../core/voice/wake_word_controller.dart';
 import '../../services/health_service.dart';
 import '../auth/auth_controller.dart';
@@ -13,174 +14,386 @@ final backendHealthProvider = FutureProvider<HealthCheckResult>(
   (ref) => ref.watch(healthServiceProvider).check(),
 );
 
+/// Home dashboard — a port of the export's `home/home.html`.
+///
+/// Layout, in the order the design specifies:
+///   `.top-bar` (menu / notification bell with badge / settings)
+///   `.greeting` + `.name` + `.date`
+///   `.avatar-container` with the `.avatar-status` pill
+///   `.cta-primary`  "Tap to talk"  +  `or say "Hey Nova"`
+///   `.overview` with three `.stat-card`s
+///
+/// The previous version was a plain `ListView` of "Hi {name}", a gradient circle
+/// and two status cards — none of the designed structure. It also showed no real
+/// counts; the three stat cards below are wired to the tasks/memories/reminders
+/// endpoints, which are genuinely DB-backed.
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.nova;
     final auth = ref.watch(authStateProvider);
     final avatar = ref.watch(avatarStateProvider);
     final wakeWord = ref.watch(wakeWordStateProvider);
     final health = ref.watch(backendHealthProvider);
+    final overview = ref.watch(homeOverviewProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        title: const Text('NOVA'),
-        actions: [
-          IconButton(
-            tooltip: 'Sign out',
-            icon: const Icon(Icons.logout),
-            onPressed: () => ref.read(authStateProvider.notifier).logout(),
+    final name = auth.user?.displayName ?? 'there';
+
+    return NovaScaffold(
+      topBar: Row(
+        children: [
+          NovaIconButton(
+            icon: Icons.menu_rounded,
+            tooltip: 'Menu',
+            onTap: () => _showMenu(context, ref),
+          ),
+          const Spacer(),
+          NovaIconButton(
+            icon: Icons.notifications_none_rounded,
+            tooltip: 'Notifications',
+            badge: '0',
+            onTap: () => context.go('/me'),
+          ),
+          const SizedBox(width: 8),
+          NovaIconButton(
+            icon: Icons.settings_outlined,
+            tooltip: 'Settings',
+            onTap: () => context.go('/me'),
           ),
         ],
       ),
-      body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: () async {
-            ref.invalidate(backendHealthProvider);
-            await ref.read(wakeWordStateProvider.notifier).arm();
-          },
-          child: ListView(
-            padding: const EdgeInsets.all(24),
-            physics: const AlwaysScrollableScrollPhysics(),
-            children: [
-              Text(
-                'Hi ${auth.user?.displayName ?? 'there'}',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                switch (avatar) {
-                  AsyncData(:final value) => _avatarCaption(value),
-                  AsyncError() => 'Something went wrong.',
-                  _ => 'Getting ready...',
-                },
-                style: const TextStyle(color: NovaTheme.onSurfaceVariant),
-              ),
-              const SizedBox(height: 24),
-              NovaAvatar(
-                state: switch (avatar) {
-                  AsyncData(:final value) => value,
-                  _ => AvatarState.idle,
-                },
-                size: 160,
-              ),
-              const SizedBox(height: 32),
-              _WakeWordCard(state: wakeWord),
-              const SizedBox(height: 16),
-              _BackendCard(health: health),
-            ],
+      refresh: () async {
+        ref.invalidate(backendHealthProvider);
+        ref.invalidate(homeOverviewProvider);
+        await ref.read(wakeWordStateProvider.notifier).arm();
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(_greeting(), style: NovaTheme.greeting(c)),
+          const SizedBox(height: 4),
+          Text(name, style: NovaTheme.heroName(c)),
+          const SizedBox(height: 4),
+          Text(_today(), style: NovaTheme.dateLine(c)),
+          const SizedBox(height: 28),
+
+          NovaAvatarHeroCard(
+            statusLabel: _statusLabel(avatar, wakeWord),
+            statusTone: _statusTone(avatar, health, c),
+            onTap: () => context.go('/converse'),
           ),
-        ),
+          const SizedBox(height: 20),
+
+          NovaPrimaryButton(
+            label: 'Tap to talk',
+            icon: Icons.mic_none_rounded,
+            onPressed: () => context.go('/converse'),
+          ),
+          const SizedBox(height: 14),
+          Center(
+            child: Text(
+              wakeWord.enabled && wakeWord.listening
+                  ? 'Listening for "Hey Nova"'
+                  : 'or say "Hey Nova"',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+          const SizedBox(height: 32),
+
+          Text("Today's Overview", style: NovaTheme.sectionHeading(c)),
+          const SizedBox(height: 16),
+          overview.when(
+            loading: () => const _OverviewSkeleton(),
+            error: (e, _) => NovaStateView(
+              icon: Icons.cloud_off_rounded,
+              tone: NovaStateTone.error,
+              title: 'Could not load your overview',
+              message: _describe(e),
+              actionLabel: 'Retry',
+              onAction: () => ref.invalidate(homeOverviewProvider),
+            ),
+            data: (data) => Row(
+              children: [
+                Expanded(
+                  child: NovaStatCard(
+                    icon: '🗓',
+                    value: '${data.reminders}',
+                    label: 'Reminders',
+                    onTap: () => context.go('/tasks'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: NovaStatCard(
+                    icon: '✅',
+                    value: '${data.openTasks}',
+                    label: 'Tasks',
+                    onTap: () => context.go('/tasks'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: NovaStatCard(
+                    icon: '💭',
+                    value: '${data.memories}',
+                    label: 'Memories',
+                    onTap: () => context.go('/memory'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 32),
+
+          Text('Status', style: NovaTheme.sectionHeading(c)),
+          const SizedBox(height: 12),
+          _StatusCard(wakeWord: wakeWord),
+          const SizedBox(height: 12),
+          _BackendCard(health: health),
+        ],
       ),
     );
   }
 
-  String _avatarCaption(AvatarState state) {
-    switch (state) {
-      case AvatarState.idle:
-        return 'Ready when you are.';
-      case AvatarState.listening:
-        return 'Listening...';
-      case AvatarState.thinking:
-        return 'Thinking...';
-      case AvatarState.speaking:
-        return 'Speaking...';
-      case AvatarState.sleeping:
-        return 'Resting.';
-      case AvatarState.alert:
-        return 'Something needs your attention.';
+  String _greeting() {
+    final h = DateTime.now().hour;
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
+  String _today() {
+    const days = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    final now = DateTime.now();
+    return '${days[now.weekday - 1]}, ${months[now.month - 1]} ${now.day}';
+  }
+
+  String _statusLabel(AsyncValue<AvatarState> avatar, WakeWordState wakeWord) {
+    if (wakeWord.listening) return NovaAvatarState.listening.label;
+    return switch (avatar) {
+      AsyncData(:final value) => switch (value) {
+        AvatarState.idle => NovaAvatarState.idle.label,
+        AvatarState.listening => NovaAvatarState.listening.label,
+        AvatarState.thinking => NovaAvatarState.thinking.label,
+        AvatarState.speaking => NovaAvatarState.speaking.label,
+        AvatarState.sleeping => 'Resting',
+        AvatarState.alert => 'Needs attention',
+      },
+      AsyncError() => 'Something went wrong',
+      _ => 'Getting ready…',
+    };
+  }
+
+  Color _statusTone(
+    AsyncValue<AvatarState> avatar,
+    AsyncValue<HealthCheckResult> health,
+    NovaColors c,
+  ) {
+    if (health.hasError) return c.danger;
+    if (avatar is AsyncError) return c.danger;
+    if (avatar is AsyncData && avatar.value == AvatarState.alert) {
+      return c.warning;
     }
+    return c.success;
+  }
+
+  void _showMenu(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Theme.of(context).bottomSheetTheme.backgroundColor,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.auto_awesome_rounded),
+              title: const Text('Memory'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                context.go('/memory');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle_outline_rounded),
+              title: const Text('Tasks & reminders'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                context.go('/tasks');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_outline_rounded),
+              title: const Text('Profile & settings'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                context.go('/me');
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.logout_rounded),
+              title: const Text('Sign out'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                ref.read(authStateProvider.notifier).logout();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
-class _WakeWordCard extends ConsumerWidget {
-  const _WakeWordCard({required this.state});
+/// Placeholder cards while the overview loads, sized like the real ones so the
+/// layout does not jump.
+class _OverviewSkeleton extends StatelessWidget {
+  const _OverviewSkeleton();
 
-  final WakeWordState state;
+  @override
+  Widget build(BuildContext context) {
+    final c = context.nova;
+    return Row(
+      children: List.generate(3, (i) {
+        return Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(right: i == 2 ? 0 : 10),
+            child: Container(
+              height: 92,
+              decoration: BoxDecoration(
+                color: c.surface,
+                borderRadius: NovaRadius.rCard,
+                border: Border.all(color: c.border),
+              ),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: c.muted,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+class _StatusCard extends ConsumerWidget {
+  const _StatusCard({required this.wakeWord});
+
+  final WakeWordState wakeWord;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.nova;
     final controller = ref.read(wakeWordStateProvider.notifier);
-    final availability = state.availability;
+    final availability = wakeWord.availability;
     final supported = availability?.available ?? false;
 
-    return _Card(
+    return NovaCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.hearing_rounded, color: NovaTheme.primary),
+              Icon(Icons.hearing_rounded, color: c.accent, size: 20),
               const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Wake word',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
-              if (state.busy)
-                const SizedBox(
+              if (wakeWord.busy)
+                SizedBox(
                   width: 18,
                   height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: c.accent,
+                  ),
                 )
               else
                 Switch(
-                  value: state.enabled,
-                  activeThumbColor: NovaTheme.primary,
+                  value: wakeWord.enabled,
                   onChanged: supported ? controller.setEnabled : null,
                 ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
             availability == null
-                ? 'Checking availability...'
+                ? 'Checking availability…'
                 : availability.userMessage,
-            style: const TextStyle(color: NovaTheme.onSurfaceVariant, fontSize: 13),
+            style: Theme.of(context).textTheme.bodySmall,
           ),
-          if (state.listening) ...[
-            const SizedBox(height: 8),
+          if (wakeWord.listening) ...[
+            const SizedBox(height: 10),
             Row(
               children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: NovaTheme.success,
-                    shape: BoxShape.circle,
-                  ),
+                NovaWaveform(
+                  bars: 4,
+                  height: 14,
+                  color: c.success,
+                  animate: true,
                 ),
-                const SizedBox(width: 8),
-                const Text(
+                const SizedBox(width: 10),
+                Text(
                   'Listening in the background',
-                  style: TextStyle(color: NovaTheme.success, fontSize: 13),
+                  style: NovaTheme.chip(c).copyWith(color: c.success),
                 ),
               ],
             ),
           ],
-          if (state.error != null) ...[
+          if (wakeWord.error != null) ...[
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: NovaTheme.error.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: NovaTheme.error.withValues(alpha: 0.4)),
+                color: c.danger.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(NovaRadius.control),
+                border: Border.all(color: c.danger.withValues(alpha: 0.4)),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.error_outline, color: NovaTheme.error, size: 20),
+                  Icon(Icons.error_outline, color: c.danger, size: 18),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      state.error!,
-                      style: const TextStyle(color: NovaTheme.error, fontSize: 13),
+                      wakeWord.error!,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall!.copyWith(color: c.danger),
                     ),
                   ),
                 ],
@@ -200,84 +413,89 @@ class _BackendCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final (IconData icon, Color color, String title, String subtitle) = switch (health) {
-      AsyncData(:final value) when value.healthy => (
-          Icons.cloud_done_rounded,
-          NovaTheme.success,
-          'Connected',
-          value.endpoint,
-        ),
-      AsyncData(:final value) => (
-          Icons.cloud_off_rounded,
-          NovaTheme.error,
-          'Not reachable',
-          value.error ?? 'Unknown error',
-        ),
-      AsyncError(:final error) => (
-          Icons.cloud_off_rounded,
-          NovaTheme.error,
-          'Not reachable',
-          '$error',
-        ),
-      _ => (
-          Icons.cloud_queue_rounded,
-          NovaTheme.onSurfaceVariant,
-          'Checking...',
-          'Contacting the NOVA API',
-        ),
-    };
+    final c = context.nova;
 
-    return _Card(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: color),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    color: NovaTheme.onSurfaceVariant,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
+    return health.when(
+      loading: () => const NovaCard(
+        child: Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
             ),
-          ),
-          IconButton(
-            tooltip: 'Re-check',
-            icon: const Icon(Icons.refresh, size: 20),
-            onPressed: () => ref.invalidate(backendHealthProvider),
-          ),
-        ],
+            SizedBox(width: 12),
+            Text('Checking connection…'),
+          ],
+        ),
       ),
+      error: (e, _) => NovaCard(
+        child: Row(
+          children: [
+            Icon(Icons.cloud_off_rounded, color: c.danger, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Not reachable',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 2),
+                  Text('${e.runtimeType}', style: NovaTheme.msgLabel(c)),
+                ],
+              ),
+            ),
+            NovaIconButton(
+              icon: Icons.refresh_rounded,
+              size: 36,
+              onTap: () => ref.invalidate(backendHealthProvider),
+            ),
+          ],
+        ),
+      ),
+      data: (result) {
+        final ok = result.healthy;
+        return NovaCard(
+          child: Row(
+            children: [
+              Icon(
+                ok ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+                color: ok ? c.success : c.danger,
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      ok ? 'Connected' : 'Not reachable',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(result.endpoint, style: NovaTheme.msgLabel(c)),
+                  ],
+                ),
+              ),
+              NovaIconButton(
+                icon: Icons.refresh_rounded,
+                size: 36,
+                onTap: () => ref.invalidate(backendHealthProvider),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
 
-class _Card extends StatelessWidget {
-  const _Card({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: NovaTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: NovaTheme.border),
-      ),
-      child: child,
-    );
+String _describe(Object error) {
+  final message = error.toString();
+  if (message.contains('401')) {
+    return 'Your session expired. Sign out and back in.';
   }
+  return message.length > 160 ? '${message.substring(0, 157)}…' : message;
 }

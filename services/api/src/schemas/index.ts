@@ -268,6 +268,50 @@ export const TaskListQuerySchema = z.object({
 	assigneeId: z.string().uuid().optional(),
 });
 
+// ─── Reminder schemas ─────────────────────────────────────────────────────────
+
+export const REMINDER_CHANNELS = ['push', 'sms', 'call', 'email'] as const;
+
+export const CreateReminderSchema = z.object({
+	title: z.string().min(1).max(500),
+	// `triggerAt` is canonical (reminders.trigger_at). `dueAt` is the field name
+	// the old inline stub accepted; it is kept as an alias for compatibility.
+	triggerAt: z.coerce.date().optional(),
+	dueAt: z.coerce.date().optional(),
+	timezone: z.string().max(50).default('Asia/Kolkata'),
+	repeatRule: z.string().max(1000).optional().nullable(),
+	notificationChannel: z.array(z.enum(REMINDER_CHANNELS)).optional(),
+	linkedTaskId: z.string().uuid().optional().nullable(),
+	linkedContactId: z.string().uuid().optional().nullable(),
+	sourceAudit: z.string().max(2000).optional().nullable(),
+}).refine((value) => value.triggerAt !== undefined || value.dueAt !== undefined, {
+	message: 'triggerAt is required',
+	path: ['triggerAt'],
+});
+
+export const UpdateReminderSchema = z.object({
+	title: z.string().min(1).max(500).optional(),
+	triggerAt: z.coerce.date().optional(),
+	timezone: z.string().max(50).optional(),
+	repeatRule: z.string().max(1000).optional().nullable(),
+	notificationChannel: z.array(z.enum(REMINDER_CHANNELS)).optional(),
+	linkedTaskId: z.string().uuid().optional().nullable(),
+	linkedContactId: z.string().uuid().optional().nullable(),
+	sourceAudit: z.string().max(2000).optional().nullable(),
+	dismissed: z.boolean().optional(),
+});
+
+export const ReminderListQuerySchema = z.object({
+	cursor: z.string().base64url().optional(),
+	limit: z.coerce.number().int().min(1).max(100).default(20),
+	direction: z.enum(['forward', 'backward']).default('forward'),
+	// Explicit enum rather than z.coerce.boolean(), which turns the string
+	// "false" into `true`.
+	dismissed: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
+	from: z.coerce.date().optional(),
+	to: z.coerce.date().optional(),
+});
+
 // ─── Admin / audit schemas ────────────────────────────────────────────────────
 
 export const AdminAuditQuerySchema = z.object({
