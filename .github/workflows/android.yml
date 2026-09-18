@@ -1,0 +1,78 @@
+name: Android CI
+
+# Lint and unit-test gate for the Flutter mobile app (apps/mobile).
+#
+# Build artifacts (debug/release APKs) are produced by
+# `.github/workflows/build-apk.yml`. This workflow deliberately does not build them,
+# so a change is only compiled once per pipeline run.
+#
+# The previous revision pinned `flutter-version: '3.29.0'` (channel stable). That ships
+# Dart 3.7, while apps/mobile/pubspec.yaml requires `sdk: ^3.13.2`, so `flutter pub get`
+# failed before any test could run.
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'apps/mobile/**'
+      - '.github/workflows/android.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'apps/mobile/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    name: Lint & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      # The app's pubspec requires Dart ^3.13.2, which is newer than the Dart shipped
+      # with Flutter stable 3.29. Verified against Flutter 3.48.0-0.4.pre / Dart 3.14.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: beta
+          cache: true
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --fatal-infos
+
+      - name: Unit and widget tests
+        run: flutter test
+
+      # The wake word engine silently degrades if these are missing, so fail the build
+      # instead of shipping an APK whose wake word cannot work.
+      - name: Verify wake word model assets are bundled
+        run: |
+          set -e
+          for asset in \
+            android/app/src/main/assets/melspectrogram.onnx \
+            android/app/src/main/assets/embedding_model.onnx \
+            android/app/src/main/assets/wakeword/models.json
+          do
+            if [ ! -f "$asset" ]; then
+              echo "::error::Missing wake word asset: $asset (see assets/wakeword/README.md)"
+              exit 1
+            fi
+          done
+          echo "Wake word assets present"

@@ -1,81 +1,123 @@
 name: Build Android APK
+
+# Produces installable Flutter APKs for the NOVA mobile app.
+#
+#   - pull request  -> unsigned debug APK (fast smoke artifact)
+#   - push / manual -> signed release APK
+#
+# This workflow used to be an Expo/React Native pipeline: it installed Node, Expo and
+# pnpm, ran `npm test` / `npx expo lint`, and then invoked `./gradlew assembleRelease`
+# directly inside apps/mobile/android. That last step cannot work any more, because
+# apps/mobile/android is now a Flutter Android project: `settings.gradle.kts` requires
+# `flutter.sdk` from local.properties and the Flutter Gradle plugin, neither of which
+# exists when Gradle is called without the Flutter tool. It also never installed a
+# Flutter SDK, and it wrote `app/signing.properties` with MYAPP_RELEASE_* keys, which
+# the current build reads as keystore.properties / ANDROID_* environment variables.
+#
+# Lint and unit tests run in `.github/workflows/android.yml`; this workflow owns
+# build artifacts only.
+#
+# Release signing secrets:
+#   ANDROID_KEYSTORE_BASE64   base64 of the release .jks   (required for release)
+#   ANDROID_KEYSTORE_PASSWORD keystore password            (required for release)
+#   ANDROID_KEY_ALIAS         key alias, defaults to "nova"
+#   ANDROID_KEY_PASSWORD      key password, defaults to ANDROID_KEYSTORE_PASSWORD
+#
+# `android/app/build.gradle.kts` reads these ANDROID_* environment variables directly,
+# so no keystore.properties file is needed in CI. A release build with missing values
+# fails loudly with an explicit list of what is absent.
+
 on:
   push:
-    branches:
-    - main
-    - develop
+    branches: [main, develop]
   pull_request:
-    branches:
-    - main
-    - develop
-  workflow_dispatch: null
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: Artifact to build
+        type: choice
+        options: [release, debug]
+        default: release
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-apk:
+    name: Build APK
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
     env:
-      EXPO_UNSTABLE_DISABLE_DEV_LAUNCHER_AUTOLINKING: '1'
-      EXPO_USE_COMMUNITY_AUTOLINKING: '1'
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || 'nova' }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || secrets.ANDROID_KEYSTORE_PASSWORD }}
+      API_URL: ${{ vars.NOVA_API_URL || 'https://api.nova.leadup.tech' }}
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Node.js 22
-      uses: actions/setup-node@v4
-      with:
-        node-version: 22.x
-    - name: Install pnpm
-      uses: pnpm/action-setup@v4
-    - name: Install dependencies
-      run: pnpm install --no-frozen-lockfile
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        distribution: temurin
-        java-version: '17'
-    - name: Accept Android SDK licenses
-      run: 'mkdir -p /usr/local/lib/android/sdk/licenses
+      - uses: actions/checkout@v4
 
-        echo -e "\nd243215ed4a640bd90b24baca47b2e39\n\n84831b9409646a918e30573bab4c9c91\n\nd56f5187479451eabf01fb78af6dfcb6"
-        > /usr/local/lib/android/sdk/licenses/android-sdk-license
+      # The app's pubspec requires Dart ^3.13.2, which is newer than the Dart shipped
+      # with Flutter stable 3.29. Verified against Flutter 3.48.0-0.4.pre / Dart 3.14.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: beta
+          cache: true
 
-        echo -e "\n84831b9409646a918e30573bab4c9c91\n\nd56f5187479451eabf01fb78af6dfcb6"
-        > /usr/local/lib/android/sdk/licenses/android-sdk-preview-license
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
 
-        echo "Accepted licenses"'
-    - name: Set up Android SDK
-      uses: android-actions/setup-android@v3
-    - name: Create placeholder app assets
-      working-directory: apps/mobile
-      run: 'mkdir -p assets
+      - name: Install dependencies
+        run: flutter pub get
 
-        echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-        | base64 -d > assets/icon.png
+      - name: Resolve build type
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "mode=debug" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=${{ github.event.inputs.build_type || 'release' }}" >> "$GITHUB_OUTPUT"
+          fi
 
-        cp assets/icon.png assets/adaptive-icon.png
+      - name: Decode release keystore
+        if: steps.mode.outputs.mode == 'release'
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not set, so a signed release APK cannot be produced."
+            exit 1
+          fi
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/nova-release.jks
+          # Read by the signingConfigs block in android/app/build.gradle.kts.
+          echo "ANDROID_KEYSTORE_PATH=nova-release.jks" >> "$GITHUB_ENV"
+          echo "Decoded release keystore"
 
-        cp assets/icon.png assets/splash.png
+      - name: Build ${{ steps.mode.outputs.mode }} APK
+        run: |
+          flutter build apk \
+            --${{ steps.mode.outputs.mode }} \
+            --dart-define=API_URL="$API_URL"
 
-        echo "Created valid placeholder assets"'
-    - name: Fix Android build files
-      working-directory: apps/mobile/android
-      run: 'node ../../../.github/workflows/fix-android.js
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-android-${{ steps.mode.outputs.mode }}-${{ github.sha }}
+          path: apps/mobile/build/app/outputs/flutter-apk/*.apk
+          retention-days: 30
+          if-no-files-found: error
 
-        echo ''Applied fixes'''
-    - name: Build release APK
-      working-directory: apps/mobile/android
-      run: 'chmod +x gradlew
-
-        ./gradlew assembleRelease --no-daemon --warning-mode=none
-
-        echo "Built APK"'
-    - name: Upload APK artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: nova-android-apk
-        path: apps/mobile/android/app/build/outputs/apk/release/*.apk
-        retention-days: 30
-        if-no-files-found: error
-    - name: APK Info
-      run: 'find apps/mobile/android/app/build/outputs/apk/release -name ''*.apk''
-        -exec ls -lh {} \; | awk ''{print $5}''
-
-        echo ''APK built successfully!'''
+      # Needed to symbolicate obfuscated release crash reports.
+      - name: Upload R8 mapping
+        if: steps.mode.outputs.mode == 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-mapping-${{ github.sha }}
+          path: apps/mobile/build/app/outputs/mapping/release/mapping.txt
+          retention-days: 90
+          if-no-files-found: warn
