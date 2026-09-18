@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/nova_theme.dart';
 import 'nova_avatar.dart';
+import 'nova_avatar_waveform.dart';
 import 'nova_controls.dart';
 import 'nova_markdown.dart';
 import 'nova_surfaces.dart';
@@ -285,10 +286,18 @@ class NovaConverseHeader extends StatelessWidget {
     super.key,
     required this.state,
     this.face = '😊',
+    this.emotion = 'neutral',
+    this.animationDensity = NovaAvatarDensity.medium,
   });
 
   final NovaAvatarState state;
   final String face;
+
+  /// `NovaAvatarPrefs.emotion`, passed through to the rig.
+  final String emotion;
+
+  /// `NovaAvatarPrefs.animationDensity`, passed through to the rig.
+  final NovaAvatarDensity animationDensity;
 
   @override
   Widget build(BuildContext context) {
@@ -301,7 +310,13 @@ class NovaConverseHeader extends StatelessWidget {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              NovaAvatarRing(size: 180, face: face, state: state),
+              NovaAvatarRing(
+                size: 180,
+                face: face,
+                state: state,
+                emotion: emotion,
+                animationDensity: animationDensity,
+              ),
               Positioned(
                 bottom: 26,
                 child: NovaAvatarStateBadge(state: state),

@@ -3,6 +3,12 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../theme/nova_theme.dart';
+import 'nova_avatar_rig.dart';
+
+// The rig's state and density vocabulary is part of this file's public API
+// (`NovaAvatarRing.animationDensity`, `NovaAvatarHeroCard.state`), so callers
+// that import the avatar directly do not also need to import the rig.
+export 'nova_avatar_rig.dart' show NovaAvatarDensity, NovaAvatarFaceState;
 
 /// `.avatar-ring` + `.avatar-inner` from the converse screen.
 ///
@@ -14,6 +20,12 @@ import '../../theme/nova_theme.dart';
 /// an `AvatarEngine` interface. This widget is the designed *container* for that
 /// — it renders the ring, glow and state, and takes an arbitrary [child] so a
 /// rigged renderer can be dropped in without touching the layout.
+///
+/// Since [NovaAvatarFace] exists, the rig **is** the default face. [face] is
+/// retained so callers that predate the rig still compile, but the emoji is now
+/// an explicit fallback: pass `showEmojiFace: true` to opt back into it (and
+/// `reducedMotionFace: true` to prefer it under OS "Reduce Motion"). [child]
+/// still wins over both, so an external renderer can replace the rig.
 class NovaAvatarRing extends StatefulWidget {
   const NovaAvatarRing({
     super.key,
@@ -22,19 +34,88 @@ class NovaAvatarRing extends StatefulWidget {
     this.state = NovaAvatarState.idle,
     this.child,
     this.breathe = true,
+    this.emotion = 'neutral',
+    this.animationDensity = NovaAvatarDensity.medium,
+    this.showEmojiFace = false,
+    this.reducedMotionFace = false,
   });
 
   final double size;
   final String face;
   final NovaAvatarState state;
 
-  /// When provided, replaces the emoji face (e.g. a Rive/Live2D renderer).
+  /// When provided, replaces the rig (e.g. a Rive/Live2D renderer).
   final Widget? child;
   final bool breathe;
+
+  /// `NovaAvatarPrefs.emotion`, passed straight through to the rig.
+  final String emotion;
+
+  /// `NovaAvatarPrefs.animationDensity`, passed straight through to the rig.
+  final NovaAvatarDensity animationDensity;
+
+  /// Opt back into the emoji instead of the code-drawn rig.
+  final bool showEmojiFace;
+
+  /// Draw the emoji (rather than the rig's calm still pose) when the OS has
+  /// "Reduce Motion" on.
+  final bool reducedMotionFace;
 
   @override
   State<NovaAvatarRing> createState() => _NovaAvatarRingState();
 }
+
+/// The face layer that sits inside an avatar circle.
+///
+/// [state] is the rig's own vocabulary; [faceStateFor] converts the design
+/// system's `NovaAvatarState` for callers that have one.
+///
+/// Priority: an explicit [child], then the emoji when asked for, then the rig.
+/// The rig handles its own "Reduce Motion" pose, so it stays the default even
+/// when that setting is on unless the caller opts out.
+Widget novaAvatarFaceLayer({
+  required BuildContext context,
+  required double size,
+  required NovaAvatarFaceState state,
+  required NovaAvatarDensity animationDensity,
+  required String emotion,
+  required String emoji,
+  required Widget? child,
+  required bool showEmojiFace,
+  required bool reducedMotionFace,
+  double? emojiSize,
+}) {
+  if (child != null) return child;
+  final reduce = context.novaReduceMotion;
+  if (showEmojiFace || (reducedMotionFace && reduce)) {
+    // Falls back to the circle diameter, which is what the pre-rig call sites
+    // used as the glyph size.
+    return Text(
+      emoji,
+      style: TextStyle(fontSize: emojiSize ?? size),
+    );
+  }
+  return NovaAvatarFace(
+    size: size,
+    state: state,
+    emotion: emotion,
+    density: animationDensity,
+  );
+}
+
+/// The design system's `NovaAvatarState` -> the rig's state vocabulary.
+NovaAvatarFaceState faceStateFor(NovaAvatarState state) => switch (state) {
+  NovaAvatarState.idle => NovaAvatarFaceState.idle,
+  NovaAvatarState.wake => NovaAvatarFaceState.listening,
+  NovaAvatarState.listening => NovaAvatarFaceState.listening,
+  NovaAvatarState.thinking => NovaAvatarFaceState.thinking,
+  NovaAvatarState.awaitingConfirmation => NovaAvatarFaceState.thinking,
+  NovaAvatarState.executing => NovaAvatarFaceState.thinking,
+  NovaAvatarState.speaking => NovaAvatarFaceState.speaking,
+  NovaAvatarState.success => NovaAvatarFaceState.success,
+  NovaAvatarState.error => NovaAvatarFaceState.warning,
+  NovaAvatarState.recording => NovaAvatarFaceState.recording,
+};
 
 class _NovaAvatarRingState extends State<NovaAvatarRing>
     with SingleTickerProviderStateMixin {
@@ -119,12 +200,18 @@ class _NovaAvatarRingState extends State<NovaAvatarRing>
                     ),
                   ),
                   Center(
-                    child:
-                        widget.child ??
-                        Text(
-                          widget.face,
-                          style: TextStyle(fontSize: widget.size * 0.44),
-                        ),
+                    child: novaAvatarFaceLayer(
+                      context: context,
+                      size: widget.size,
+                      state: faceStateFor(widget.state),
+                      animationDensity: widget.animationDensity,
+                      emotion: widget.emotion,
+                      emoji: widget.face,
+                      child: widget.child,
+                      showEmojiFace: widget.showEmojiFace,
+                      reducedMotionFace: widget.reducedMotionFace,
+                      emojiSize: widget.size * 0.44,
+                    ),
                   ),
                 ],
               ),
@@ -162,98 +249,6 @@ class NovaAvatarStateBadge extends StatelessWidget {
   }
 }
 
-/// `.recording-indicator` — five bars waving out of phase.
-///
-/// Port of the export: 3px bars, 1s loop, delays 0/.15/.3/.45/.6, height
-/// swinging 6px <-> 20px. brand-spec rule 6 makes this the red treatment.
-class NovaWaveform extends StatefulWidget {
-  const NovaWaveform({
-    super.key,
-    this.bars = 5,
-    this.height = 20,
-    this.color,
-    this.animate = true,
-  });
-
-  final int bars;
-  final double height;
-  final Color? color;
-  final bool animate;
-
-  @override
-  State<NovaWaveform> createState() => _NovaWaveformState();
-}
-
-class _NovaWaveformState extends State<NovaWaveform>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: NovaMotion.waveform,
-  );
-
-  @override
-  void initState() {
-    super.initState();
-  }
-
-  void _sync() {
-    final reduce = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    if (widget.animate && !reduce) {
-      _c.repeat();
-    } else {
-      _c.stop();
-      _c.value = 0.25;
-    }
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _sync();
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.nova;
-    final color = widget.color ?? c.danger;
-
-    return SizedBox(
-      height: widget.height,
-      child: AnimatedBuilder(
-        animation: _c,
-        builder: (context, _) {
-          return Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: List.generate(widget.bars, (i) {
-              // Phase-shift each bar by 0.15 of the cycle, as the CSS delays do.
-              final t = (_c.value + i * 0.15) % 1.0;
-              final wave = (math.sin(t * 2 * math.pi) + 1) / 2;
-              final h = 6 + wave * (widget.height - 6);
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 1.5),
-                child: Container(
-                  width: 3,
-                  height: h,
-                  decoration: BoxDecoration(
-                    color: color,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              );
-            }),
-          );
-        },
-      ),
-    );
-  }
-}
 
 /// `.avatar-container` from the home screen — the tall rounded panel that holds
 /// the companion, with the `.avatar-status` pill in its top-right corner and a
@@ -264,15 +259,31 @@ class NovaAvatarHeroCard extends StatefulWidget {
     this.face = '😊',
     this.statusLabel = 'Ready',
     this.statusTone,
-    this.faceSize = 96,
+    // 0 means "size to the card" — see the LayoutBuilder in build().
+    this.faceSize = 0,
     this.onTap,
+    this.state = NovaAvatarFaceState.idle,
+    this.emotion = 'neutral',
+    this.animationDensity = NovaAvatarDensity.medium,
+    this.showEmojiFace = false,
   });
 
   final String face;
   final String statusLabel;
   final Color? statusTone;
+
+  /// Diameter of the face circle (the rig, or the emoji when opted in).
+  /// `0` derives it from the card's width.
   final double faceSize;
   final VoidCallback? onTap;
+
+  /// Drives the rig's expression, mouth and eyes.
+  final NovaAvatarFaceState state;
+  final String emotion;
+  final NovaAvatarDensity animationDensity;
+
+  /// Opt back into the emoji instead of the code-drawn rig.
+  final bool showEmojiFace;
 
   @override
   State<NovaAvatarHeroCard> createState() => _NovaAvatarHeroCardState();
@@ -382,9 +393,25 @@ class _NovaAvatarHeroCardState extends State<NovaAvatarHeroCard>
               ),
               Padding(
                 padding: const EdgeInsets.only(bottom: 20),
-                child: Text(
-                  widget.face,
-                  style: TextStyle(fontSize: widget.faceSize),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Keep the face proportional to the card so the rig never
+                    // falls below the size where its detail is legible.
+                    final face = widget.faceSize > 0
+                        ? widget.faceSize
+                        : math.max(96.0, constraints.maxWidth * 0.45);
+                    return novaAvatarFaceLayer(
+                      context: context,
+                      size: face,
+                      state: widget.state,
+                      animationDensity: widget.animationDensity,
+                      emotion: widget.emotion,
+                      emoji: widget.face,
+                      child: null,
+                      showEmojiFace: widget.showEmojiFace,
+                      reducedMotionFace: false,
+                    );
+                  },
                 ),
               ),
               // `.avatar-status` pill.

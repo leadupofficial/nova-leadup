@@ -38,6 +38,8 @@ class HomePage extends ConsumerWidget {
     final wakeWord = ref.watch(wakeWordStateProvider);
     final health = ref.watch(backendHealthProvider);
     final overview = ref.watch(homeOverviewProvider);
+    // The saved avatar appearance; the defaults hold until it resolves.
+    final avatarPrefs = ref.watch(avatarPrefsProvider).asData?.value;
 
     final name = auth.user?.displayName ?? 'there';
 
@@ -80,6 +82,11 @@ class HomePage extends ConsumerWidget {
           const SizedBox(height: 28),
 
           NovaAvatarHeroCard(
+            state: _avatarFaceState(avatar, wakeWord),
+            emotion: avatarPrefs?.emotion ?? 'neutral',
+            animationDensity: NovaAvatarDensity.parse(
+              avatarPrefs?.animationDensity,
+            ),
             statusLabel: _statusLabel(avatar, wakeWord),
             statusTone: _statusTone(avatar, health, c),
             onTap: () => context.go('/converse'),
@@ -192,8 +199,22 @@ class HomePage extends ConsumerWidget {
     return '${days[now.weekday - 1]}, ${months[now.month - 1]} ${now.day}';
   }
 
-  String _statusLabel(AsyncValue<AvatarState> avatar, WakeWordState wakeWord) {
-    if (wakeWord.listening) return NovaAvatarState.listening.label;
+  /// The rig state for the hero card: the shared [avatarStateProvider], lifted
+  /// to the wake-word "listening" face while the wake word is armed, and
+  /// `warning` when that provider itself failed.
+  NovaAvatarFaceState _avatarFaceState(
+    AsyncValue<AvatarState> avatar,
+    WakeWordState wakeWord,
+  ) {
+    if (wakeWord.listening) return NovaAvatarFaceState.listening;
+    return switch (avatar) {
+      AsyncData(:final value) => faceStateForAvatar(value),
+      AsyncError() => NovaAvatarFaceState.warning,
+      _ => NovaAvatarFaceState.idle,
+    };
+  }
+
+  String _statusLabel(AsyncValue<AvatarState> avatar, WakeWordState wakeWord) {    if (wakeWord.listening) return NovaAvatarState.listening.label;
     return switch (avatar) {
       AsyncData(:final value) => switch (value) {
         AvatarState.idle => NovaAvatarState.idle.label,

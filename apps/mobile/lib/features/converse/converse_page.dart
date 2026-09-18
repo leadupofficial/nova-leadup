@@ -354,6 +354,15 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     _ => NovaAvatarState.idle,
   };
 
+  /// The saved appearance preferences, or the defaults when the request has not
+  /// resolved (or failed) yet — the avatar must render regardless.
+  String get _avatarEmotion =>
+      ref.watch(avatarPrefsProvider).asData?.value.emotion ?? 'neutral';
+
+  NovaAvatarDensity get _avatarDensity => NovaAvatarDensity.parse(
+    ref.watch(avatarPrefsProvider).asData?.value.animationDensity,
+  );
+
   Widget _statusPill(_Phase phase) {
     final c = context.nova;
     final (label, tone) = switch (phase) {
@@ -412,7 +421,11 @@ class _ConversePageState extends ConsumerState<ConversePage> {
                         : Icons.info_outline_rounded,
                   ),
 
-                NovaConverseHeader(state: _avatarState(phase)),
+                NovaConverseHeader(
+                  state: _avatarState(phase),
+                  emotion: _avatarEmotion,
+                  animationDensity: _avatarDensity,
+                ),
 
                 Expanded(
                   child: messages.isEmpty

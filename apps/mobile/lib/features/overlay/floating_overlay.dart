@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
 import '../../core/voice/voice_provider.dart';
 import '../../core/voice/wake_word_controller.dart';
@@ -123,7 +124,10 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
     final c = context.nova;
     final voice = ref.watch(voiceProvider);
     final wake = ref.watch(wakeWordStateProvider);
+    final avatar = ref.watch(avatarStateProvider);
     final prompt = _promptFor(voice, wake);
+    final live = _live(voice, wake);
+    final face = _faceState(voice, wake, avatar);
 
     return Positioned.fill(
       child: Stack(
@@ -131,7 +135,7 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
           Positioned(
             top: 60,
             right: NovaSpace.gutter,
-            child: _orb(c, _live(voice, wake)),
+            child: _orb(c, live, face),
           ),
           Positioned(
             left: NovaSpace.gutter,
@@ -205,8 +209,40 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
         state == VoiceState.speaking;
   }
 
-  /// `.bubble` — 80px gradient orb, 36px face, cyan `.dot`, float + pulse loops.
-  Widget _orb(NovaColors c, bool live) {
+  /// The rig's state for the orb: the voice state is the live one on this
+  /// surface, with the wake word lifting an idle voice state to "listening".
+  /// Falls back to the shared avatar state when the voice service is unknown.
+  NovaAvatarFaceState _faceState(
+    AsyncValue<VoiceState> voice,
+    WakeWordState wake,
+    AsyncValue<AvatarState> avatar,
+  ) {
+    final voiceState = voice.asData?.value;
+    final base = voiceState != null
+        ? faceStateForVoice(voiceState)
+        : switch (avatar) {
+            AsyncData(:final value) => faceStateForAvatar(value),
+            AsyncError() => NovaAvatarFaceState.warning,
+            _ => NovaAvatarFaceState.idle,
+          };
+    return faceStateForWake(base, wake.listening);
+  }
+
+  /// `NovaAvatarPrefs`, or the defaults while the request is in flight.
+  String get _avatarEmotion =>
+      ref.watch(avatarPrefsProvider).asData?.value.emotion ?? 'neutral';
+
+  NovaAvatarDensity get _avatarDensity => NovaAvatarDensity.parse(
+    ref.watch(avatarPrefsProvider).asData?.value.animationDensity,
+  );
+
+  /// `.bubble` — 80px gradient orb, cyan `.dot`, float + pulse loops.
+  ///
+  /// The face inside is the code-drawn rig ([NovaAvatarFace]) at 60px, not an
+  /// emoji: its line weights derive from the paint box, so the eyes and mouth
+  /// survive the small size. It follows the same [voiceProvider] /
+  /// [avatarStateProvider] state the Home and Converse avatars use.
+  Widget _orb(NovaColors c, bool live, NovaAvatarFaceState face) {
     return Semantics(
       button: true,
       label: 'Summon NOVA',
@@ -253,7 +289,21 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
                         stops: const [0, 0.55],
                       ),
                     ),
-                    child: const Text('😊', style: TextStyle(fontSize: 36)),
+                    child: Container(
+                      width: 62,
+                      height: 62,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: c.surface,
+                      ),
+                      child: NovaAvatarFace(
+                        size: 60,
+                        state: face,
+                        emotion: _avatarEmotion,
+                        density: _avatarDensity,
+                      ),
+                    ),
                   ),
                 ),
                 Positioned(
