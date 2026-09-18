@@ -6,7 +6,7 @@ import { listIncidents, resolveIncident, type AdminIncident } from '../../lib/ap
 
 async function getIncidents() {
  try {
- const result = await listIncidents({ token: '' });
+ const result = await listIncidents();
  return result;
  } catch {
  return null;
@@ -22,7 +22,7 @@ const SEVERITY_COLORS: Record<string, { bg: string; color: string; border: strin
 
 export default async function IncidentsPage() {
  const result = await getIncidents();
- const incidents: AdminIncident[] = result?.data ?? [];
+ const incidents: AdminIncident[] = result ?? [];
 
  return (
  <div>

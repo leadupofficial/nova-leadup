@@ -6,7 +6,7 @@ import { listAuditLogs, type AdminAuditLog } from '../../lib/api';
 
 async function getLogs(params: Record<string, string | number>) {
  try {
- const result = await listAuditLogs({ ...params, token: '' });
+ const result = await listAuditLogs({ ...params });
  return result;
  } catch {
  return null;
@@ -23,7 +23,7 @@ export default async function AuditLogsPage({ searchParams }: { searchParams: Pr
 	const resolved = await searchParams;
 	const actionFilter = typeof resolved.action === 'string' ? resolved.action : '';
 	const result = await getLogs({ action: actionFilter, limit: 50 });
-	const logs: AdminAuditLog[] = result?.data ?? [];
+	const logs: AdminAuditLog[] = result ?? [];
 
  return (
  <div>
