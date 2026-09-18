@@ -15,6 +15,39 @@ export interface AuthenticatedRequest extends Request {
 	user?: { id: string; email: string; role: string; jti?: string };
 }
 
+export interface AccessTokenUser {
+	id: string;
+	email: string;
+	role: string;
+	jti?: string;
+}
+
+/**
+ * Verifies an access token and returns the user it belongs to.
+ *
+ * Extracted from [authenticate] so the realtime voice WebSocket — which has no
+ * Express request to hang `req.user` on — enforces exactly the same checks:
+ * signature, expiry, and the JTI denylist. Throws `HttpError(401)` (or 500 when
+ * the server has no `JWT_SECRET`) rather than returning null, so a caller
+ * cannot accidentally treat a failure as an authenticated identity.
+ */
+export function verifyAccessToken(token: string): AccessTokenUser {
+	const jwtSecret = getJwtSecret();
+
+	let payload: { sub: string; email: string; role: string; jti?: string };
+	try {
+		payload = jwt.verify(token, jwtSecret) as typeof payload;
+	} catch {
+		throw new HttpError(401, 'Invalid or expired token', 'UNAUTHORIZED');
+	}
+
+	if (payload.jti && tokenDenylist.isRevoked(payload.jti, payload.sub)) {
+		throw new HttpError(401, 'Token has been revoked', 'UNAUTHORIZED');
+	}
+
+	return { id: payload.sub, email: payload.email, role: payload.role, jti: payload.jti };
+}
+
 /**
  * Verifies the bearer token and attaches `req.user`.
  *
@@ -32,8 +65,6 @@ export interface AuthenticatedRequest extends Request {
  */
 export function authenticate(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
 	try {
-		const jwtSecret = getJwtSecret();
-
 		const authHeader = req.headers.authorization;
 		if (!authHeader?.startsWith('Bearer ')) {
 			throw new HttpError(401, 'Missing or invalid authorization header', 'UNAUTHORIZED');
@@ -44,22 +75,13 @@ export function authenticate(req: AuthenticatedRequest, res: Response, next: Nex
 			throw new HttpError(401, 'Missing or invalid authorization header', 'UNAUTHORIZED');
 		}
 
-		let payload: { sub: string; email: string; role: string; jti?: string };
-		try {
-			payload = jwt.verify(token, jwtSecret) as typeof payload;
-		} catch {
-			throw new HttpError(401, 'Invalid or expired token', 'UNAUTHORIZED');
-		}
-
-		if (payload.jti && tokenDenylist.isRevoked(payload.jti, payload.sub)) {
-			throw new HttpError(401, 'Token has been revoked', 'UNAUTHORIZED');
-		}
+		const user = verifyAccessToken(token);
 
 		req.user = {
-			id: payload.sub,
-			email: payload.email,
-			role: payload.role,
-			jti: payload.jti,
+			id: user.id,
+			email: user.email,
+			role: user.role,
+			jti: user.jti,
 		};
 		next();
 	} catch (error) {

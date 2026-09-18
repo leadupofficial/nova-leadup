@@ -132,7 +132,10 @@ const ChatSchema = z.object({
 
 // Build a language-aware covering all 22 supported languages
 // and 4 mixed-language codes.
-function buildSystemPromptForLanguage(language: string): string {
+//
+// Exported so the realtime voice socket (`src/realtime/session.ts`) speaks with
+// exactly the same persona and language framing as this REST path.
+export function buildSystemPromptForLanguage(language: string): string {
 	const langInfo = getLanguageByCode(language);
 	if (langInfo) {
 		return `You are NOVA, a warm AI companion. The user is speaking ${langInfo.name} (${langInfo.native}). Respond fluently and naturally in ${langInfo.name}. Keep answers concise. Be helpful, friendly, and slightly playful.`;

@@ -65,6 +65,18 @@ export function createSarvamStt(options: SttOptions): SttSession {
 		sample_rate: String(options.sampleRate),
 		input_audio_codec: 'pcm_s16le',
 		high_vad_sensitivity: 'true',
+		// Keep the preset's snappy speech *onset* detection (2 frames to start,
+		// 2 to interrupt — that is what makes barge-in fast) but restore a sane
+		// *end-of-utterance* boundary. The preset also drops
+		// `negative_frames_count` to 2 frames, i.e. ~64 ms of silence at 16 kHz,
+		// which ends the utterance at every natural pause: measured over the
+		// realtime socket, one spoken Tamil sentence arrived as three separate
+		// transcripts ("சென்னை" / "பற்றி ஒரு சிறிய" / "பெரிய தகவல் சொல்லுங்கள்.")
+		// and the assistant answered the last fragment only. These are the
+		// provider's own defaults (~576 ms of silence), which keep a sentence
+		// together while still ending the turn promptly.
+		negative_frames_count: '18',
+		negative_frames_window: '24',
 		vad_signals: 'true',
 		flush_signal: 'true',
 	});
