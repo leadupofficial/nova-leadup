@@ -51,6 +51,19 @@ router.get('/health/live', allowLocalhost, (req, res: Response) => {
 	res.status(200).json(data);
 });
 
+// ─── Public liveness for mobile clients ───────────────────────────────────────
+// apps/mobile polls GET /healthz to render its connectivity indicator, and it runs
+// on a device, so the localhost restriction above cannot apply to it. Previously
+// nothing served this path at all: the request fell through to the admin console,
+// which answered 307 → /login → 200 HTML, and the client's `statusCode < 300`
+// check read that as "Connected" whether or not the API was up.
+//
+// Deliberately minimal — no uptime accounting, dependency names or build
+// metadata. The authenticated /health/ready remains the detailed report.
+router.get('/healthz', (_req, res: Response) => {
+	res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // ─── Readiness (authenticated) ─────────────────────────────────────────────────
 // Returns sanitized dependency status. Requires authentication.
 
