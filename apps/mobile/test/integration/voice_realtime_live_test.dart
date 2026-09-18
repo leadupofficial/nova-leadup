@@ -121,6 +121,94 @@ void main() {
         : null,
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  test(
+    'a second utterance is understood without pressing anything again',
+    () async {
+      final pcm = _readPcm16kMono(pcmPath!);
+      final token = await _login(email, password);
+      final capture = FakeStreamCapture();
+      final playback = FakeStreamPlayback();
+
+      final service = VoiceStreamService(
+        uri: _realtimeUri(token),
+        config: const VoiceReconnectConfig(
+          initialDelay: Duration(milliseconds: 100),
+          maxDelay: Duration(milliseconds: 400),
+        ),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          voiceStreamServiceProvider.overrideWithValue(service),
+          voiceStreamCaptureProvider.overrideWithValue(capture),
+          voiceStreamPlaybackProvider.overrideWithValue(playback),
+        ],
+      );
+      addTearDown(() async {
+        container.dispose();
+        await service.close();
+        await capture.dispose();
+        await playback.dispose();
+      });
+
+      final controller = container.read(voiceRealtimeProvider.notifier);
+      // Counted, not deduplicated by text: this test speaks the same clip twice,
+      // so identical transcripts are two turns, not one repeated commit.
+      var userTurns = 0;
+      var replyTurns = 0;
+      container.listen(voiceRealtimeProvider, (previous, next) {
+        final users = next.commits.where((c) => c.user).length;
+        final replies = next.commits.length - users;
+        if (users > userTurns) userTurns = users;
+        if (replies > replyTurns) replyTurns = replies;
+      });
+
+      // ONE tap opens the session. Everything after this is hands-free: the
+      // provider's VAD decides where each turn ends, so the user never presses
+      // stop between turns.
+      await controller.startTurn(language: language);
+      await _pump(pcm, capture, const Duration(milliseconds: 100));
+      await _awaitAtLeast(() => userTurns, 1);
+
+      // Wait for NOVA to finish answering before speaking again, which is what
+      // a person does. Talking over the reply is a different behaviour — it is
+      // barge-in, and the server handles it by design.
+      await _awaitAtLeast(() => replyTurns, 1);
+
+      // Deliberately no second startTurn/stopTurn: just keep talking.
+      await _pump(pcm, capture, const Duration(milliseconds: 100));
+      await _awaitAtLeast(() => userTurns, 2);
+      // Wait for the second answer too, or the assertion races the reply.
+      await _awaitAtLeast(() => replyTurns, 2);
+
+      // ignore: avoid_print
+      print('handsFreeTurns=$userTurns replies=$replyTurns');
+
+      expect(
+        userTurns,
+        greaterThanOrEqualTo(2),
+        reason: 'the second utterance produced no turn — VAD did not roll over',
+      );
+      expect(
+        replyTurns,
+        greaterThanOrEqualTo(2),
+        reason: 'the second utterance got no reply',
+      );
+    },
+    skip: !live || pcmPath == null
+        ? 'set NOVA_LIVE_API=1 and NOVA_VOICE_PCM=<16kHz mono wav>'
+        : null,
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+}
+
+/// Waits until [read] reaches [count], or gives up.
+Future<void> _awaitAtLeast(int Function() read, int count) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 60));
+  while (DateTime.now().isBefore(deadline)) {
+    if (read() >= count) return;
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
 }
 
 Uri _realtimeUri(String token) {

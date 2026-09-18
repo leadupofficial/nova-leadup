@@ -44,6 +44,12 @@ export interface RealtimeUser {
 const IDLE_TIMEOUT_MS = 120_000;
 /** Deepgram drops a silent socket (~10s); nudge it well inside that window. */
 const KEEPALIVE_INTERVAL_MS = 5_000;
+/**
+ * How long audio must be absent before a hands-free turn is closed for the
+ * user. Long enough not to cut off a mid-sentence pause, short enough that
+ * the reply still feels immediate.
+ */
+const END_OF_SPEECH_SILENCE_MS = 900;
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_HISTORY_MESSAGES = 12;
 
@@ -86,6 +92,7 @@ export class RealtimeVoiceSession {
 	private lastSendAt = this.lastAudioAt;
 
 	private idleTimer: ReturnType<typeof setTimeout> | null = null;
+	private endOfSpeechTimer: ReturnType<typeof setTimeout> | null = null;
 	private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
 	private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -181,9 +188,11 @@ export class RealtimeVoiceSession {
 		if (this.idleTimer) clearTimeout(this.idleTimer);
 		if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
 		if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+		if (this.endOfSpeechTimer) clearTimeout(this.endOfSpeechTimer);
 		this.idleTimer = null;
 		this.keepAliveTimer = null;
 		this.heartbeatTimer = null;
+		this.endOfSpeechTimer = null;
 	}
 
 	/** Idle timeout: a forgotten socket must not hold a provider connection. */
@@ -318,15 +327,42 @@ export class RealtimeVoiceSession {
 	private handleAudio(pcm: Buffer): void {
 		if (this.closed || !pcm.length) return;
 		this.lastAudioAt = Date.now();
+		// Tracked alongside audio so a keepalive is not sent on top of audio that
+		// is already flowing, which is what the provider's idle timer measures.
+		this.lastSendAt = this.lastAudioAt;
 		if (!this.stt.active) return;
 
 		this.stt.sendAudio(pcm);
+		this.armEndOfSpeech();
 
 		// Energy fallback for barge-in: works even when the provider's VAD
 		// signal is late or absent (Deepgram has no speech_start event at all).
 		if ((this.phase === 'thinking' || this.phase === 'speaking') && this.energy.observe(pcm)) {
 			this.bargeIn('energy');
 		}
+	}
+
+	/**
+	 * Backstop for hands-free turns.
+	 *
+	 * A provider ends an utterance on silence it can *see in the audio*, so a
+	 * client that simply stops sending frames — a paused microphone, a dropped
+	 * uplink — leaves the turn open indefinitely and the user gets no reply
+	 * unless they press stop. Measured: a client that streamed a whole sentence
+	 * and then went quiet produced zero turns across two minutes. If audio stops
+	 * arriving while listening, force the boundary the way an explicit stop does.
+	 */
+	private armEndOfSpeech(): void {
+		if (this.phase !== 'listening') return;
+		if (this.endOfSpeechTimer) clearTimeout(this.endOfSpeechTimer);
+		const timer = setTimeout(() => {
+			this.endOfSpeechTimer = null;
+			if (this.closed || this.phase !== 'listening' || !this.stt.active) return;
+			if (Date.now() - this.lastAudioAt < END_OF_SPEECH_SILENCE_MS) return;
+			this.stt.requestFinal();
+		}, END_OF_SPEECH_SILENCE_MS + 200);
+		timer.unref?.();
+		this.endOfSpeechTimer = timer;
 	}
 
 	// ─── Turn pipeline ─────────────────────────────────────────────────
@@ -417,7 +453,12 @@ export class RealtimeVoiceSession {
 			this.remember(text, result.text);
 			this.activeTurn = null;
 			this.endSpeaking();
-			this.phase = 'idle';
+			// Back to listening, not idle: the microphone is still open and the
+			// provider is still transcribing, so the next thing the user says is
+			// a new turn without touching anything. Reporting idle here also
+			// stopped the end-of-speech backstop from arming, which is what left
+			// a second utterance unanswered.
+			this.phase = this.stt.active ? 'listening' : 'idle';
 			this.send({ type: 'done', text: result.text });
 		} catch (err) {
 			if (isAbortError(err) || isCancelled()) return;

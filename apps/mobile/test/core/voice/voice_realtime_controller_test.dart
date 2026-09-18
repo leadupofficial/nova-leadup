@@ -201,7 +201,8 @@ void main() {
       expect(harness.state.phase, VoiceRealtimePhase.thinking);
     });
 
-    test('done commits the reply and returns to idle', () async {
+    test('done commits the reply and stays listening while the mic is open',
+        () async {
       await harness.controller.startTurn();
       await settle();
       harness.socket.push('{"type":"final","text":"hi"}');
@@ -210,11 +211,28 @@ void main() {
       await settle();
 
       expect(harness.playback.endTurns, 1);
-      expect(harness.state.phase, VoiceRealtimePhase.idle);
+      // The turn ended but the session did not: the microphone is still open and
+      // the provider is still transcribing, so the user can just keep talking.
+      // Reporting idle here is what made hands-free conversation look broken.
+      expect(harness.state.phase, VoiceRealtimePhase.listening);
+      expect(harness.state.micActive, isTrue);
       expect(harness.state.reply, '');
       expect(harness.state.commits, hasLength(2));
       expect(harness.state.commits.last.user, isFalse);
       expect(harness.state.commits.last.text, 'Hello there.');
+    });
+
+    test('done returns to idle once the microphone has been stopped', () async {
+      await harness.controller.startTurn();
+      await settle();
+      await harness.controller.stopTurn();
+      harness.socket.push('{"type":"final","text":"hi"}');
+      harness.socket.push('{"type":"done","text":"Hello there."}');
+      await settle();
+
+      // Nothing is capturing, so the session really is finished.
+      expect(harness.state.phase, VoiceRealtimePhase.idle);
+      expect(harness.state.micActive, isFalse);
     });
 
     test('a server error stops the mic, flushes audio and reports the code', () async {

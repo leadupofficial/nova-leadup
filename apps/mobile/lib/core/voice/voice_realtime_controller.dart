@@ -258,7 +258,18 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
           _appendCommit(
             text,
             user: false,
-          ).copyWith(phase: VoiceRealtimePhase.idle, reply: ''),
+          ).copyWith(
+            // Not necessarily idle. The microphone is left open and the
+            // provider's VAD is already listening for the next utterance, so
+            // reporting idle here told the user the session had stopped while it
+            // was still live and still capturing. That is what made hands-free
+            // conversation look broken: the turn really had ended, but the
+            // session had not.
+            phase: state.micActive
+                ? VoiceRealtimePhase.listening
+                : VoiceRealtimePhase.idle,
+            reply: '',
+          ),
         );
 
       case VoiceServerErrorEvent(:final code, :final message):
