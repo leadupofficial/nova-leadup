@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -254,6 +256,67 @@ class NovaApi {
   }
 
   Future<void> deleteReminder(String id) => _delete(ApiConfig.reminder(id));
+
+  // ─── Voice ────────────────────────────────────────────────────────────────
+
+  /// Transcribes base64-encoded audio. The server routes by [language]:
+  /// Deepgram for English, Sarvam for the Indian languages it covers.
+  Future<String> transcribeAudio({
+    required String audioBase64,
+    String language = 'en',
+  }) async {
+    final data = await _post(ApiConfig.voiceStt, {
+      'audioData': audioBase64,
+      'language': language,
+    });
+    return (_object(data)['transcript'] ?? '').toString();
+  }
+
+  /// Synthesises speech and returns the decoded audio bytes.
+  ///
+  /// The server answers `audioData: null` with a `provider: 'fallback'` and an
+  /// `error` field when no TTS provider could serve the request; that is
+  /// reported as [NovaApiException] rather than silently returning no audio.
+  Future<List<int>> synthesizeSpeech({
+    required String text,
+    String language = 'en',
+    String? voiceId,
+  }) async {
+    final data = await _post(ApiConfig.voiceTts, {
+      'text': text,
+      'language': language,
+      'voiceId': ?voiceId,
+    });
+    final object = _object(data);
+    final audio = object['audioData'];
+    if (audio is! String || audio.isEmpty) {
+      throw NovaApiException(
+        (object['error'] ?? 'Speech synthesis returned no audio').toString(),
+      );
+    }
+    return base64Decode(audio);
+  }
+
+  /// A language-aware assistant turn. Distinct from the conversation route:
+  /// it applies the voice persona and is the path the Converse tab speaks.
+  Future<String> voiceChat({
+    required List<Map<String, String>> messages,
+    String language = 'en',
+  }) async {
+    final data = await _post(ApiConfig.voiceChat, {
+      'messages': messages,
+      'language': language,
+    });
+    return (_object(data)['text'] ?? '').toString();
+  }
+
+  /// Language catalogue with each language's STT/TTS provider routing.
+  Future<List<Map<String, dynamic>>> voiceLanguages() async {
+    final data = await _get(ApiConfig.voiceLanguages);
+    final raw = data is List ? data : _object(data)['languages'];
+    if (raw is! List) return const [];
+    return raw.whereType<Map>().map(Map<String, dynamic>.from).toList();
+  }
 
   // ─── Settings ─────────────────────────────────────────────────────────────
 

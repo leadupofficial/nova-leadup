@@ -133,6 +133,15 @@ class ApiConfig {
 
   // Endpoints
   static String get health => '$baseUrl/health';
+
+  /// Voice REST surface. [voiceWs] streams audio, but transcription, synthesis
+  /// and the language-aware chat turn are ordinary authenticated POSTs and were
+  /// never reachable from the client.
+  static String get voiceStt => '$baseUrl/api/v1/voice/stt';
+  static String get voiceTts => '$baseUrl/api/v1/voice/tts';
+  static String get voiceChat => '$baseUrl/api/v1/voice/chat';
+  static String get voiceLanguages => '$baseUrl/api/v1/voice/languages';
+
   static String get healthz => '$baseUrl/healthz';
   static String get authLogin => '$baseUrl/api/v1/auth/login';
   static String get authRegister => '$baseUrl/api/v1/auth/register';
