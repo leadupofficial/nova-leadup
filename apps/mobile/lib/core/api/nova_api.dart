@@ -213,11 +213,15 @@ class NovaApi {
   /// never lost.
   Future<NovaSendResult> sendMessage(
     String conversationId,
-    String content,
-  ) async {
+    String content, {
+    String? language,
+  }) async {
     final raw = await _postRaw(ApiConfig.conversationMessages(conversationId), {
       'role': 'user',
       'content': content,
+      // The server uses this to instruct the model which language to answer in.
+      // Without it the reply language was left to inference on every turn.
+      'language': ?language,
     });
     final map = _asMap(raw);
 

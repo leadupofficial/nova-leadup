@@ -282,8 +282,16 @@ class NovaMutations {
     _ref.invalidate(conversationsProvider);
   }
 
-  Future<NovaSendResult> send(String conversationId, String content) async {
-    final result = await _api.sendMessage(conversationId, content);
+  Future<NovaSendResult> send(
+    String conversationId,
+    String content, {
+    String? language,
+  }) async {
+    final result = await _api.sendMessage(
+      conversationId,
+      content,
+      language: language,
+    );
     _ref.invalidate(messagesProvider(conversationId));
     _ref.invalidate(conversationsProvider);
     return result;

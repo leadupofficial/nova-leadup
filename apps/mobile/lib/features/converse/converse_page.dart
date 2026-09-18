@@ -286,7 +286,14 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     try {
       final result = await ref
           .read(novaMutationsProvider)
-          .send(conversationId, text.trim());
+          .send(
+            conversationId,
+            text.trim(),
+            // The companion's configured language, so the server can tell the
+            // model which language to answer in rather than inferring it.
+            // 'auto' means "match whatever the user writes".
+            language: ref.read(personaProvider).asData?.value.languagePolicy,
+          );
       if (!mounted) return;
 
       final updated = [...ref.read(transcriptProvider)];
