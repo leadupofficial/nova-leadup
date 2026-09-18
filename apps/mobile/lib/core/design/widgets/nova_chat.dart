@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../theme/nova_theme.dart';
 import 'nova_avatar.dart';
 import 'nova_avatar_waveform.dart';
-import 'nova_controls.dart';
 import 'nova_markdown.dart';
 import 'nova_surfaces.dart';
 
@@ -14,6 +13,11 @@ enum NovaMessageRole { user, nova, system }
 ///
 /// User bubbles are the accent gradient with a 4px bottom-right corner; NOVA
 /// bubbles are `--surface-raised` with a border and a 4px bottom-left corner.
+///
+/// [provisional] marks text that has not been committed yet — the live partial
+/// transcript from the realtime voice socket. It is drawn as a quiet outline
+/// bubble rather than a filled one so "still being heard" is visually distinct
+/// from a finished turn without introducing a new colour.
 class NovaMessageBubble extends StatelessWidget {
   const NovaMessageBubble({
     super.key,
@@ -21,6 +25,8 @@ class NovaMessageBubble extends StatelessWidget {
     required this.role,
     this.pending = false,
     this.failed = false,
+    this.provisional = false,
+    this.label,
     this.onRetry,
   });
 
@@ -28,6 +34,13 @@ class NovaMessageBubble extends StatelessWidget {
   final NovaMessageRole role;
   final bool pending;
   final bool failed;
+
+  /// Text that is still arriving (a live transcript or a streaming reply).
+  final bool provisional;
+
+  /// Overrides the role label, e.g. `You · listening`.
+  final String? label;
+
   final VoidCallback? onRetry;
 
   @override
@@ -35,24 +48,35 @@ class NovaMessageBubble extends StatelessWidget {
     final c = context.nova;
     final isUser = role == NovaMessageRole.user;
 
-    final label = switch (role) {
+    final baseLabel = switch (role) {
       NovaMessageRole.user => 'You',
       NovaMessageRole.nova => 'Nova',
       NovaMessageRole.system => 'System',
     };
+    final displayLabel = label ?? (provisional ? '$baseLabel · live' : baseLabel);
+
+    // A provisional bubble is unfilled with an accent outline; a committed one
+    // keeps the filled treatment the export specifies.
+    final Color? fill = provisional
+        ? (isUser ? c.accent.withValues(alpha: 0.12) : c.surfaceRaised)
+        : (isUser ? null : c.surfaceRaised);
 
     final bubble = Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        gradient: isUser ? c.accentGradient : null,
-        color: isUser ? null : c.surfaceRaised,
+        gradient: (!provisional && isUser) ? c.accentGradient : null,
+        color: fill,
         borderRadius: BorderRadius.only(
           topLeft: const Radius.circular(NovaRadius.bubble),
           topRight: const Radius.circular(NovaRadius.bubble),
           bottomLeft: Radius.circular(isUser ? NovaRadius.bubble : 4),
           bottomRight: Radius.circular(isUser ? 4 : NovaRadius.bubble),
         ),
-        border: isUser ? null : Border.all(color: c.border),
+        border: Border.all(
+          color: provisional
+              ? c.accent.withValues(alpha: 0.55)
+              : (isUser ? Colors.transparent : c.border),
+        ),
       ),
       child: pending
           ? Row(
@@ -79,7 +103,7 @@ class NovaMessageBubble extends StatelessWidget {
               text: text,
               tight: true,
               style: NovaTheme.bubble(c).copyWith(
-                color: isUser ? c.onAccent : c.fg,
+                color: (isUser && !provisional) ? c.onAccent : c.fg,
               ),
             ),
     );
@@ -93,7 +117,12 @@ class NovaMessageBubble extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.only(left: 2, bottom: 4),
-            child: Text(label.toUpperCase(), style: NovaTheme.msgLabel(c)),
+            child: Text(
+              displayLabel.toUpperCase(),
+              style: NovaTheme.msgLabel(
+                c,
+              ).copyWith(color: provisional ? c.accent : null),
+            ),
           ),
           ConstrainedBox(
             constraints: BoxConstraints(
@@ -408,101 +437,6 @@ class NovaConversationTopBar extends StatelessWidget {
             onTap: onHistory,
           ),
         ],
-      ),
-    );
-  }
-}
-/// The inline notice Converse shows for a recoverable failure (mic denied,
-/// transcription failed, speech unavailable); never swallowed.
-class NovaChatNotice extends StatelessWidget {
-  const NovaChatNotice({
-    super.key,
-    required this.message,
-    this.tone,
-    this.icon = Icons.info_outline_rounded,
-  });
-
-  final String message;
-  final Color? tone;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.nova;
-    final color = tone ?? c.warning;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: NovaSpace.gutter,
-        vertical: NovaSpace.xs,
-      ),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(NovaSpace.sm),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: NovaRadius.rControl,
-          border: Border.all(color: color.withValues(alpha: 0.35)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, size: 16, color: color),
-            const SizedBox(width: NovaSpace.xs),
-            Expanded(
-              child: Text(
-                message,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall!.copyWith(color: c.fg),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-/// `.quick-actions` — horizontally scrolling suggestion chips.
-class NovaQuickActions extends StatelessWidget {
-  const NovaQuickActions({
-    super.key,
-    required this.enabled,
-    required this.onPick,
-  });
-
-  final bool enabled;
-  final ValueChanged<String> onPick;
-
-  static const _actions = <(IconData, String, String)>[
-    (Icons.check_circle_outline_rounded, 'Create task', 'Create a task: '),
-    (Icons.alarm_add_rounded, 'Set reminder', 'Remind me to '),
-    (Icons.search_rounded, 'Search memory', 'What do you remember about '),
-    (Icons.translate_rounded, 'Translate', 'Translate this to Tamil: '),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 48,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: NovaSpace.gutter),
-        itemCount: _actions.length,
-        separatorBuilder: (_, _) => const SizedBox(width: NovaSpace.xs),
-        itemBuilder: (context, i) {
-          final (icon, label, prefix) = _actions[i];
-          return Center(
-            child: Opacity(
-              opacity: enabled ? 1 : 0.5,
-              child: NovaChip(
-                label: label,
-                icon: icon,
-                onTap: enabled ? () => onPick(prefix) : null,
-              ),
-            ),
-          );
-        },
       ),
     );
   }

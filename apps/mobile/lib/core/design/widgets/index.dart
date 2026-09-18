@@ -14,6 +14,7 @@ export 'nova_avatar.dart';
 export 'nova_avatar_rig.dart';
 export 'nova_avatar_waveform.dart';
 export 'nova_chat.dart';
+export 'nova_converse_feedback.dart';
 export 'nova_controls.dart';
 export 'nova_markdown.dart';
 export 'nova_nav.dart';

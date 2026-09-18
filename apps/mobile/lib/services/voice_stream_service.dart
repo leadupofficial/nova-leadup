@@ -91,16 +91,34 @@ class DefaultVoiceSocketConnector implements VoiceSocketConnector {
 /// a sustained outage is reported through [statuses] and [errors].
 class VoiceStreamService {
   VoiceStreamService({
-    required this.uri,
+    Uri? uri,
+    this.uriResolver,
     this.connector = const DefaultVoiceSocketConnector(),
     this.config = const VoiceReconnectConfig(),
     this.headers,
-  });
+  }) : assert(
+         uri != null || uriResolver != null,
+         'VoiceStreamService needs either a fixed uri or a uriResolver.',
+       ),
+       _uri = uri;
 
-  final Uri uri;
+  final Uri? _uri;
+
+  /// Resolves the connection URI at *each* attempt instead of once at
+  /// construction.
+  ///
+  /// The access token is a query parameter and expires after 15 minutes, so a
+  /// URI captured at construction time would make every reconnect after that
+  /// point fail authentication forever. Supplying a resolver means a reconnect
+  /// (and the first connect) always carries the current token.
+  final Uri Function()? uriResolver;
+
   final VoiceSocketConnector connector;
   final VoiceReconnectConfig config;
   final Map<String, dynamic>? headers;
+
+  /// The URI used for the next connection attempt.
+  Uri get uri => uriResolver?.call() ?? _uri!;
 
   final StreamController<dynamic> _messages = StreamController<dynamic>.broadcast();
   final StreamController<VoiceStreamStatus> _statuses =

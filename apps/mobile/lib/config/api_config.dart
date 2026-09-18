@@ -120,13 +120,18 @@ class ApiConfig {
   /// Validates the resolved configuration. Empty list means "safe to use".
   static List<String> validate() => validateUrl(resolvedBaseUrl);
 
-  /// Convenience for building the WebSocket endpoint that mirrors [baseUrl].
+  /// The realtime voice WebSocket that mirrors [baseUrl].
+  ///
+  /// This is the frozen server contract: one socket carrying microphone PCM up
+  /// and transcript / LLM / MP3 frames down. The previous path
+  /// (`/api/v1/voice/stream`) never existed on the server, so the socket could
+  /// only ever fail to connect.
   static String get voiceWs {
     final uri = Uri.parse(baseUrl);
     return uri
         .replace(
           scheme: uri.scheme == 'https' ? 'wss' : 'ws',
-          path: '/api/v1/voice/stream',
+          path: '/api/v1/voice/realtime',
         )
         .toString();
   }

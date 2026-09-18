@@ -8,45 +8,20 @@ import '../../core/api/models.dart';
 import '../../core/api/nova_api.dart';
 import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
-import '../../core/voice/voice_capture.dart';
 import '../../core/voice/voice_playback.dart';
+import '../../core/voice/voice_protocol.dart';
+import '../../core/voice/voice_realtime_controller.dart';
+import '../../core/voice/voice_realtime_view.dart';
+import '../../core/voice/voice_session_store.dart';
 import 'tool_confirm_sheet.dart';
-
-/// The active conversation id for this Converse session; `null` means "not yet
-/// resolved" — the screen loads the newest conversation, or creates one.
-class ActiveConversation extends Notifier<String?> {
-  @override
-  String? build() => null;
-
-  void set(String id) => state = id;
-}
-
-final activeConversationProvider =
-    NotifierProvider<ActiveConversation, String?>(ActiveConversation.new);
-
-/// Local transcript for the active conversation.
-///
-/// Held separately from [messagesProvider] so an optimistic user bubble and the
-/// assistant's reply can be appended without a full refetch flicker.
-class Transcript extends Notifier<List<NovaMessage>> {
-  @override
-  List<NovaMessage> build() => const [];
-
-  void set(List<NovaMessage> messages) => state = messages;
-}
-
-final transcriptProvider = NotifierProvider<Transcript, List<NovaMessage>>(
-  Transcript.new,
-);
-
-enum _Phase { idle, connecting, listening, transcribing, thinking, speaking }
 
 /// Converse — the primary live-companion screen. Port of `chat/converse.html`.
 ///
-/// The voice loop is real: the mic drives [VoiceCapture] (the `record` plugin),
-/// `POST /api/v1/voice/stt` transcribes it, the transcription goes through the
-/// same [_send] path as typed text, and the reply is read aloud through
-/// [VoicePlayback] (`just_audio`) when "speak replies" is on (default: off).
+/// The microphone drives [VoiceRealtimeController] over the realtime WebSocket
+/// (`/api/v1/voice/realtime`): partial words appear as the user speaks and the
+/// reply streams back as text plus MP3 audio. Tapping the mic while NOVA talks
+/// barges in. Typed messages keep the REST path ([_send]) because that is where
+/// a turn is persisted to the conversation.
 class ConversePage extends ConsumerStatefulWidget {
   const ConversePage({super.key, this.conversationId});
 
@@ -61,14 +36,13 @@ class _ConversePageState extends ConsumerState<ConversePage> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
 
-  late final VoiceCapture _capture;
+  late final VoiceRealtimeController _realtime;
   late final VoicePlayback _playback;
-  StreamSubscription<VoiceCaptureEvent>? _captureSub;
   StreamSubscription<bool>? _speakingSub;
 
   bool _busy = false;
-  bool _listening = false;
-  bool _transcribing = false;
+
+  /// True while the REST text-to-speech of a typed reply is audible.
   bool _speaking = false;
 
   /// Off by default: NOVA must never start talking at a user unprompted.
@@ -81,9 +55,8 @@ class _ConversePageState extends ConsumerState<ConversePage> {
   @override
   void initState() {
     super.initState();
-    _capture = ref.read(voiceCaptureProvider);
+    _realtime = ref.read(voiceRealtimeProvider.notifier);
     _playback = ref.read(voicePlaybackProvider);
-    _captureSub = _capture.events.listen(_onCaptureEvent);
     _speakingSub = _playback.playingStream.listen((playing) {
       if (mounted && _speaking != playing) setState(() => _speaking = playing);
     });
@@ -95,10 +68,9 @@ class _ConversePageState extends ConsumerState<ConversePage> {
 
   @override
   void dispose() {
-    _captureSub?.cancel();
     _speakingSub?.cancel();
     // Never leave the microphone open or NOVA talking behind the screen.
-    unawaited(_capture.cancel());
+    unawaited(_realtime.cancel());
     unawaited(_playback.stop());
     _input.dispose();
     _scroll.dispose();
@@ -110,9 +82,8 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     _noticeIsError = error;
   }
 
-  void _noticeError(String message) {
-    setState(() => _showNotice(message, error: true));
-  }
+  void _noticeError(String message) =>
+      setState(() => _showNotice(message, error: true));
 
   /// Blueprint §5.7: a side-effecting action must be confirmed before it runs.
   Future<void> _maybePromptApproval() async {
@@ -129,21 +100,20 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     }
   }
 
-  Future<NovaConversation> _newestOrNew(NovaApi api) async {
-    final existing = await api.listConversations(limit: 1);
-    return existing.isNotEmpty
-        ? existing.first
-        : await api.createConversation(title: 'New conversation');
-  }
-
   Future<void> _ensureConversation() async {
     if (ref.read(activeConversationProvider) != null) return;
     try {
       final api = ref.read(novaApiProvider);
       final requested = widget.conversationId;
-      final conversation = requested != null
-          ? await api.getConversation(requested)
-          : await _newestOrNew(api);
+      final NovaConversation conversation;
+      if (requested != null) {
+        conversation = await api.getConversation(requested);
+      } else {
+        final existing = await api.listConversations(limit: 1);
+        conversation = existing.isNotEmpty
+            ? existing.first
+            : await api.createConversation(title: 'New conversation');
+      }
       if (!mounted) return;
       ref.read(activeConversationProvider.notifier).set(conversation.id);
       final messages = await api.listMessages(conversation.id);
@@ -155,94 +125,63 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     }
   }
 
-  /// Resolves the thread id, creating the conversation on the first send.
-  Future<String?> _threadId() async {
-    final existing = ref.read(activeConversationProvider);
-    if (existing != null) return existing;
-    try {
-      final created = await ref
-          .read(novaMutationsProvider)
-          .startConversation(title: 'New conversation');
-      ref.read(activeConversationProvider.notifier).set(created.id);
-      return created.id;
-    } catch (e) {
-      if (mounted) _noticeError(_friendly(e));
-      return null;
-    }
-  }
-
-  /// Starts or stops a real recording. The clip arrives through
-  /// [_onCaptureEvent] rather than as a return value, so a stop triggered by
-  /// the max-duration safety cap takes the same path as a user stop.
+  /// The mic button: start a live turn, or end the one that is listening.
+  ///
+  /// Tapping while NOVA is thinking or speaking starts a *new* turn, which the
+  /// controller performs as a barge-in — the "interrupt NOVA mid-sentence"
+  /// gesture.
   Future<void> _toggleMic() async {
-    if (_transcribing) return;
-    if (_capture.isRecording) {
-      await _capture.stop();
+    if (ref.read(voiceRealtimeProvider).phase == VoiceRealtimePhase.listening) {
+      await _realtime.stopTurn();
       return;
     }
-    // Do not let the mic hear NOVA still talking.
+    // A REST text-to-speech reply must not talk over the microphone.
     await _playback.stop();
-    if (mounted) setState(() => _showNotice(null));
-    try {
-      await _capture.start();
-      if (mounted) setState(() => _listening = true);
-    } on VoiceCaptureException catch (error) {
-      // Permission denials, a missing mic and start failures each carry their
-      // own user-facing message. Nothing is swallowed.
-      if (mounted) _noticeError(error.message);
+    if (mounted) {
+      setState(() {
+        _speaking = false;
+        _showNotice(null);
+      });
     }
+    await _realtime.startTurn(
+      language: normalizeVoiceLanguage(
+        ref.read(personaProvider).asData?.value.languagePolicy,
+      ),
+    );
   }
 
-  void _onCaptureEvent(VoiceCaptureEvent event) {
-    if (!mounted) return;
-    switch (event) {
-      case VoiceClipCaptured(:final clip):
-        setState(() {
-          _listening = false;
-          _transcribing = true;
-          _showNotice(null);
-        });
-        unawaited(_transcribe(clip));
-      case VoiceCaptureFailed(:final error):
-        setState(() {
-          _listening = false;
-          _transcribing = false;
-        });
-        _noticeError(error.message);
-    }
+  /// The explicit Stop control: cancels the turn on the server and locally.
+  Future<void> _stopEverything() async {
+    await _realtime.cancel();
+    await _playback.stop();
+    if (mounted && _speaking) setState(() => _speaking = false);
   }
 
-  Future<void> _transcribe(VoiceClip clip) async {
-    final String transcript;
-    try {
-      // The requested language picks the STT provider: 'en' routes to Deepgram.
-      transcript = await ref
-          .read(novaApiProvider)
-          .transcribeAudio(audioBase64: clip.base64Data);
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _transcribing = false);
-      _noticeError('Could not transcribe that recording. ${_friendly(error)}');
-      return;
+  /// Appends turns the realtime socket finished while the screen was open.
+  void _appendVoiceCommits(List<VoiceTurnCommit> commits) {
+    if (commits.isEmpty || !mounted) return;
+    final updated = [...ref.read(transcriptProvider)];
+    for (final commit in commits) {
+      updated.add(
+        NovaMessage(
+          // Locally minted ids: the socket does not return server-side ids, and
+          // the transcript only needs them to be stable within the screen.
+          id: 'voice-${DateTime.now().microsecondsSinceEpoch}-${updated.length}',
+          role: commit.user ? 'user' : 'assistant',
+          content: commit.text,
+          createdAt: DateTime.now(),
+        ),
+      );
     }
-
-    if (!mounted) return;
-    setState(() => _transcribing = false);
-    final text = transcript.trim();
-    if (text.isEmpty) {
-      _noticeError('No speech was detected. Try again a little closer.');
-      return;
-    }
-    await _send(text);
+    ref.read(transcriptProvider.notifier).set(updated);
+    _scrollToEnd();
   }
 
-  /// Reads [text] aloud if "speak replies" is on.
+  /// Reads [text] aloud if "speak replies" is on (typed replies only).
   Future<void> _speak(String text) async {
     if (text.trim().isEmpty) return;
     try {
-      final bytes = await ref
-          .read(novaApiProvider)
-          .synthesizeSpeech(text: text);
+      final bytes = await ref.read(novaApiProvider).synthesizeSpeech(text: text);
       if (mounted) await _playback.play(bytes);
     } catch (error) {
       // Covers the server's `audioData: null` + `error` TTS fallback (thrown by
@@ -251,22 +190,36 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     }
   }
 
-  Future<void> _stopSpeaking() async {
-    await _playback.stop();
-    if (mounted) setState(() => _speaking = false);
-  }
-
+  /// The typed-message path. Unchanged from the pre-realtime screen except that
+  /// it supersedes whatever the voice socket is doing.
   Future<void> _send(String text) async {
     if (text.trim().isEmpty || _busy) return;
-    setState(() { _busy = true; _showNotice(null); });
+    setState(() {
+      _busy = true;
+      _showNotice(null);
+    });
 
-    final conversationId = await _threadId();
-    if (!mounted) return;
+    // Resolve the thread, creating the conversation on the first send.
+    var conversationId = ref.read(activeConversationProvider);
     if (conversationId == null) {
-      setState(() => _busy = false);
-      return;
+      try {
+        final created = await ref
+            .read(novaMutationsProvider)
+            .startConversation(title: 'New conversation');
+        ref.read(activeConversationProvider.notifier).set(created.id);
+        conversationId = created.id;
+      } catch (e) {
+        if (mounted) {
+          _noticeError(_friendly(e));
+          setState(() => _busy = false);
+        }
+        return;
+      }
     }
+    if (!mounted) return;
 
+    // A typed turn supersedes whatever the voice socket is doing.
+    unawaited(_realtime.cancel());
     unawaited(_playback.stop());
     _input.clear();
 
@@ -329,30 +282,24 @@ class _ConversePageState extends ConsumerState<ConversePage> {
 
   void _scrollToEnd() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        _scroll.animateTo(
-          _scroll.position.maxScrollExtent,
-          duration: NovaMotion.ui,
-          curve: Curves.easeOut,
-        );
-      }
+      if (!_scroll.hasClients) return;
+      _scroll.animateTo(
+        _scroll.position.maxScrollExtent,
+        duration: NovaMotion.ui,
+        curve: Curves.easeOut,
+      );
     });
   }
 
-  _Phase _phase(String? conversationId) {
-    if (_listening) return _Phase.listening;
-    if (_transcribing) return _Phase.transcribing;
-    if (_busy) return _Phase.thinking;
-    if (_speaking) return _Phase.speaking;
-    return conversationId == null ? _Phase.connecting : _Phase.idle;
+  VoiceRealtimePhase _phase(String? conversationId) {
+    final voice = ref.watch(voiceRealtimeProvider).phase;
+    if (voice != VoiceRealtimePhase.idle) return voice;
+    if (_busy) return VoiceRealtimePhase.thinking;
+    if (_speaking) return VoiceRealtimePhase.speaking;
+    return conversationId == null
+        ? VoiceRealtimePhase.connecting
+        : VoiceRealtimePhase.idle;
   }
-
-  NovaAvatarState _avatarState(_Phase phase) => switch (phase) {
-    _Phase.listening => NovaAvatarState.listening,
-    _Phase.transcribing || _Phase.thinking => NovaAvatarState.thinking,
-    _Phase.speaking => NovaAvatarState.speaking,
-    _ => NovaAvatarState.idle,
-  };
 
   /// The saved appearance preferences, or the defaults when the request has not
   /// resolved (or failed) yet — the avatar must render regardless.
@@ -363,26 +310,53 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     ref.watch(avatarPrefsProvider).asData?.value.animationDensity,
   );
 
-  Widget _statusPill(_Phase phase) {
+  /// One notice slot: a voice-session error outranks a REST-path notice.
+  (String, Color, IconData, VoidCallback)? get _activeNotice {
     final c = context.nova;
-    final (label, tone) = switch (phase) {
-      _Phase.listening => ('Listening', c.danger),
-      _Phase.transcribing => ('Transcribing', c.accent),
-      _Phase.thinking => ('Thinking', c.accent),
-      _Phase.speaking => ('Speaking', c.success),
-      _Phase.connecting => ('Connecting', c.warning),
-      _Phase.idle => ('Ready', c.success),
-    };
-    // A repeating pulse would make `pumpAndSettle` hang, so only live voice
-    // states and the connecting state animate.
-    final animate = phase == _Phase.listening ||
-        phase == _Phase.transcribing ||
-        phase == _Phase.connecting;
-    return NovaStatusPill(
-      label: label,
-      tone: tone,
-      animate: animate,
-      icon: phase == _Phase.speaking ? Icons.volume_up_rounded : null,
+    final voiceError = ref.watch(voiceRealtimeProvider).errorMessage;
+    if (voiceError != null) {
+      return (
+        voiceError,
+        c.danger,
+        Icons.error_outline_rounded,
+        _realtime.clearError,
+      );
+    }
+    final local = _notice;
+    if (local == null) return null;
+    return (
+      local,
+      _noticeIsError ? c.danger : c.warning,
+      _noticeIsError ? Icons.error_outline_rounded : Icons.info_outline_rounded,
+      () => setState(() => _showNotice(null)),
+    );
+  }
+
+  /// The provisional bubble for the user's live transcript, if any.
+  Widget? _liveTranscript(VoiceRealtimeState voice) {
+    final partial = voice.partial.trim();
+    if (partial.isEmpty) return null;
+    return NovaMessageBubble(
+      text: partial,
+      role: NovaMessageRole.user,
+      provisional: true,
+      label: voice.micActive ? 'You · listening' : 'You · transcribing',
+    );
+  }
+
+  /// The provisional bubble for the reply as it streams in, if any.
+  Widget? _liveReply(VoiceRealtimeState voice) {
+    final reply = voice.reply.trim();
+    if (reply.isEmpty) return null;
+    if (voice.phase != VoiceRealtimePhase.speaking &&
+        voice.phase != VoiceRealtimePhase.thinking) {
+      return null;
+    }
+    return NovaMessageBubble(
+      text: reply,
+      role: NovaMessageRole.nova,
+      provisional: true,
+      label: 'Nova · speaking',
     );
   }
 
@@ -391,8 +365,19 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     final c = context.nova;
     final messages = ref.watch(transcriptProvider);
     final conversationId = ref.watch(activeConversationProvider);
+    final voice = ref.watch(voiceRealtimeProvider);
     final phase = _phase(conversationId);
-    final busy = _busy || _transcribing || _listening;
+
+    // Drain finished realtime turns into the visible transcript.
+    ref.listen<VoiceRealtimeState>(voiceRealtimeProvider, (previous, next) {
+      final rendered = previous?.commits.length ?? 0;
+      if (next.commits.length > rendered) {
+        _appendVoiceCommits(next.commits.sublist(rendered));
+      }
+    });
+
+    final live = <Widget>[?_liveTranscript(voice), ?_liveReply(voice)];
+    final notice = _activeNotice;
 
     return Scaffold(
       backgroundColor: c.bg,
@@ -404,7 +389,7 @@ class _ConversePageState extends ConsumerState<ConversePage> {
             child: Column(
               children: [
                 NovaConversationTopBar(
-                  status: _statusPill(phase),
+                  status: NovaVoiceStatusPill(phase: phase),
                   speakReplies: _speakReplies,
                   onBack: () => context.go('/'),
                   onHistory: () => context.push('/conversations'),
@@ -412,28 +397,28 @@ class _ConversePageState extends ConsumerState<ConversePage> {
                       setState(() => _speakReplies = !_speakReplies),
                 ),
 
-                if (_notice != null)
+                if (notice != null)
                   NovaChatNotice(
-                    message: _notice!,
-                    tone: _noticeIsError ? c.danger : c.warning,
-                    icon: _noticeIsError
-                        ? Icons.error_outline_rounded
-                        : Icons.info_outline_rounded,
+                    message: notice.$1,
+                    tone: notice.$2,
+                    icon: notice.$3,
+                    onDismiss: notice.$4,
                   ),
 
                 NovaConverseHeader(
-                  state: _avatarState(phase),
+                  state: voiceAvatarState(phase),
                   emotion: _avatarEmotion,
                   animationDensity: _avatarDensity,
                 ),
 
                 Expanded(
-                  child: messages.isEmpty
+                  child: messages.isEmpty && live.isEmpty
                       ? NovaStateView(
                           icon: Icons.forum_outlined,
                           title: 'Start a conversation',
                           message:
-                              'Ask NOVA anything, set a reminder, or just say hello.',
+                              'Tap the mic and just talk, or type a message. '
+                              'NOVA answers out loud as it thinks.',
                           loading: conversationId == null,
                         )
                       : ListView.builder(
@@ -441,8 +426,11 @@ class _ConversePageState extends ConsumerState<ConversePage> {
                           padding: const EdgeInsets.symmetric(
                             horizontal: NovaSpace.gutter,
                           ),
-                          itemCount: messages.length,
+                          itemCount: messages.length + live.length,
                           itemBuilder: (context, i) {
+                            if (i >= messages.length) {
+                              return live[i - messages.length];
+                            }
                             final m = messages[i];
                             return NovaMessageBubble(
                               text: m.content,
@@ -458,30 +446,28 @@ class _ConversePageState extends ConsumerState<ConversePage> {
                         ),
                 ),
 
-                NovaQuickActions(enabled: !busy, onPick: _send),
+                NovaQuickActions(enabled: !_busy, onPick: _send),
 
-                if (_speaking)
+                if (voice.isTurnActive || _speaking)
                   Padding(
                     padding: const EdgeInsets.only(bottom: NovaSpace.xs),
                     child: NovaChip(
-                      label: 'Stop speaking',
+                      label: 'Stop',
                       icon: Icons.stop_rounded,
                       selected: true,
-                      onTap: () => unawaited(_stopSpeaking()),
+                      onTap: () => unawaited(_stopEverything()),
                     ),
                   ),
 
                 NovaComposer(
                   controller: _input,
-                  enabled: !busy,
-                  micActive: _listening,
-                  hint: _listening
+                  enabled: !_busy,
+                  micActive: voice.micActive,
+                  hint: voice.micActive
                       ? 'Listening… tap the mic to stop'
                       : 'Type a message…',
                   onSend: _send,
-                  onMic: busy && !_listening
-                      ? null
-                      : () => unawaited(_toggleMic()),
+                  onMic: () => unawaited(_toggleMic()),
                 ),
               ],
             ),

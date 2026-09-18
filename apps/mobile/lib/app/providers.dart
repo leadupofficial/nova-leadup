@@ -155,21 +155,32 @@ final wakeWordPlatformProvider = Provider<WakeWordPlatform>((ref) {
   return const UnsupportedWakeWordPlatform();
 });
 
-/// Reconnecting WebSocket client for real-time voice streaming.
+/// Reconnecting WebSocket client for real-time voice streaming
+/// (`/api/v1/voice/realtime`).
 ///
 /// The access token travels as a query parameter rather than a header: WebSocket
-/// handshakes cannot set custom headers on every platform Flutter supports, so this is
-/// the portable option. The token is read once when the service is first requested
-/// (after sign-in) and the socket reconnects with the same credentials.
+/// handshakes cannot set custom headers on every platform Flutter supports, so this
+/// is the portable option.
+///
+/// The token is resolved through [VoiceStreamService.uriResolver] on every
+/// connect attempt rather than once at construction. An access token lives 15
+/// minutes, so a URI built once would leave every reconnect after that point
+/// unauthenticated — a dead socket that never recovers. Watching the auth state
+/// as well means signing out disposes this service (and closes its socket)
+/// instead of leaving an authenticated connection alive.
 final voiceStreamServiceProvider = Provider<VoiceStreamService>((ref) {
-  final token = ref.read(authRepositoryProvider).currentToken;
-  final uri = Uri.parse(ApiConfig.voiceWs).replace(
-    queryParameters: <String, String>{
-      if (token != null) 'token': token.accessToken,
+  ref.watch(authStateProvider.select((state) => state.isAuthenticated));
+
+  final service = VoiceStreamService(
+    uriResolver: () {
+      final token = ref.read(authRepositoryProvider).currentToken;
+      return Uri.parse(ApiConfig.voiceWs).replace(
+        queryParameters: <String, String>{
+          if (token != null) 'token': token.accessToken,
+        },
+      );
     },
   );
-
-  final service = VoiceStreamService(uri: uri);
   ref.onDispose(service.close);
   return service;
 });
