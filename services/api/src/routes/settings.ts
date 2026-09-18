@@ -368,25 +368,48 @@ router.get('/avatars', authenticate, async (req: AuthenticatedRequest, res, next
 	}
 });
 
-router.post('/avatars', authenticate, validate(z.object({
-	name: z.string().min(1).max(100),
-	avatarUrl: z.string().url(),
-	isActive: z.boolean().optional(),
-})), async (req: AuthenticatedRequest, res, next: NextFunction) => {
+// The `avatars` table stores an asset reference plus appearance settings —
+// `assetId`, `emotion`, `animationDensity` — and `userId` is UNIQUE (one avatar
+// per user). The previous body accepted `name` / `avatarUrl` / `isActive`,
+// which are not columns: drizzle silently dropped all three, so the route
+// answered 201 having stored nothing the caller sent, and a second call hit the
+// unique constraint and surfaced as a 500. It is an upsert on the real columns.
+const AvatarBodySchema = z.object({
+	assetId: z.string().uuid().nullable().optional(),
+	emotion: z.string().min(1).max(50).optional(),
+	animationDensity: z.enum(['low', 'medium', 'high']).optional(),
+});
+
+router.post('/avatars', authenticate, validate(AvatarBodySchema), async (req: AuthenticatedRequest, res, next: NextFunction) => {
 	try {
-		const body = (req as any).validatedBody as { name: string; avatarUrl: string; isActive?: boolean };
+		const body = (req as any).validatedBody as z.infer<typeof AvatarBodySchema>;
 		const db = getDb();
 		const now = new Date();
 
-		const [created] = await db.insert(avatars).values({
-			userId: req.user!.id,
-			name: body.name,
-			avatarUrl: body.avatarUrl,
-			isActive: body.isActive ?? false,
-			createdAt: now,
-		} as any).returning();
+		const [saved] = await db
+			.insert(avatars)
+			.values({
+				userId: req.user!.id,
+				assetId: body.assetId ?? null,
+				emotion: body.emotion ?? 'neutral',
+				animationDensity: body.animationDensity ?? 'medium',
+				createdAt: now,
+				updatedAt: now,
+			})
+			.onConflictDoUpdate({
+				target: avatars.userId,
+				set: {
+					...(body.assetId !== undefined ? { assetId: body.assetId } : {}),
+					...(body.emotion !== undefined ? { emotion: body.emotion } : {}),
+					...(body.animationDensity !== undefined
+						? { animationDensity: body.animationDensity }
+						: {}),
+					updatedAt: now,
+				},
+			})
+			.returning();
 
-		res.status(201).json({ success: true, data: created });
+		res.status(200).json({ success: true, data: saved });
 	} catch (err) {
 		next(err);
 	}
