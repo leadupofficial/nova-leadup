@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/api/models.dart';
 import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
+import 'reminder_composer.dart';
 
 /// Tasks & reminders. Port of `tasks/tasks.html` and `tasks/empty.html`.
 ///
@@ -149,11 +150,13 @@ class _TasksPageState extends ConsumerState<TasksPage> {
   }
 
   Future<void> _newReminder() async {
-    final title = await _prompt('New reminder', 'Remind me to…');
-    if (title == null || title.isEmpty) return;
-    await _run(
-      () => ref.read(novaMutationsProvider).addReminder(title: title),
-    );
+    // The designed composer collects a date, time and notes; the previous bare
+    // prompt could only capture a title.
+    final created = await ReminderComposer.show(context);
+    if (created == true && mounted) {
+      ref.invalidate(remindersProvider);
+      ref.invalidate(homeOverviewProvider);
+    }
   }
 
   Future<void> _run(Future<void> Function() action) async {

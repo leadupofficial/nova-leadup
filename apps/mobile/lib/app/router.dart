@@ -8,6 +8,7 @@ import '../features/auth/auth_controller.dart';
 import '../features/auth/login_page.dart';
 import '../features/auth/register_page.dart';
 import '../features/activity/activity_page.dart';
+import '../features/converse/conversations_page.dart';
 import '../features/converse/converse_page.dart';
 import '../features/home/home_page.dart';
 import '../features/memory/memory_page.dart';
@@ -139,9 +140,22 @@ final routerProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(
             routes: [
               GoRoute(
+                path: '/conversations',
+                name: 'conversations',
+                builder: (context, state) => const ConversationsPage(),
+              ),
+              GoRoute(
                 path: '/converse',
                 name: 'converse',
                 builder: (context, state) => const ConversePage(),
+                routes: [
+                  GoRoute(
+                    path: ':id',
+                    name: 'converse-thread',
+                    builder: (context, state) =>
+                        ConversePage(conversationId: state.pathParameters['id']),
+                  ),
+                ],
               ),
             ],
           ),

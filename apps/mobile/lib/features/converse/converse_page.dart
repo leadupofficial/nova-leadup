@@ -50,7 +50,11 @@ final transcriptProvider = NotifierProvider<Transcript, List<NovaMessage>>(
 /// server still stores the user's turn and returns a machine-readable
 /// `assistantError`, which this screen surfaces instead of losing the message.
 class ConversePage extends ConsumerStatefulWidget {
-  const ConversePage({super.key});
+  const ConversePage({super.key, this.conversationId});
+
+  /// Opens a specific thread when navigated from the conversation history;
+  /// null means "resume the newest, or start one".
+  final String? conversationId;
 
   @override
   ConsumerState<ConversePage> createState() => _ConversePageState();
@@ -98,14 +102,21 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     }
   }
 
+  Future<NovaConversation> _newestOrNew(NovaApi api) async {
+    final existing = await api.listConversations(limit: 1);
+    return existing.isNotEmpty
+        ? existing.first
+        : await api.createConversation(title: 'New conversation');
+  }
+
   Future<void> _ensureConversation() async {
     if (ref.read(activeConversationProvider) != null) return;
     try {
       final api = ref.read(novaApiProvider);
-      final existing = await api.listConversations(limit: 1);
-      final conversation = existing.isNotEmpty
-          ? existing.first
-          : await api.createConversation(title: 'New conversation');
+      final requested = widget.conversationId;
+      final conversation = requested != null
+          ? await api.getConversation(requested)
+          : await _newestOrNew(api);
       if (!mounted) return;
       ref.read(activeConversationProvider.notifier).set(conversation.id);
       final messages = await api.listMessages(conversation.id);
@@ -232,7 +243,12 @@ class _ConversePageState extends ConsumerState<ConversePage> {
                           animate: conversationId == null,
                         ),
                       const Spacer(),
-                      const SizedBox(width: 36),
+                      NovaIconButton(
+                        icon: Icons.history_rounded,
+                        size: 36,
+                        tooltip: 'Conversation history',
+                        onTap: () => context.push('/conversations'),
+                      ),
                     ],
                   ),
                 ),
