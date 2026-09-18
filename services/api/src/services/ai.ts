@@ -195,38 +195,74 @@ async function withCircuitBreaker<T>(
 
 let anthropic: Anthropic | null = null;
 
+export interface AnthropicHttpConfig {
+	baseURL: string;
+	apiKey: string;
+	/** Aggregators such as AICredits want `Authorization: Bearer`; Anthropic's API wants `x-api-key`. */
+	authStyle: 'bearer' | 'api-key';
+	/**
+	 * The model id to send. Gateways namespace their model ids
+	 * (`anthropic/claude-sonnet-4.6`) while Anthropic's API does not
+	 * (`claude-sonnet-4-20250514`), so this must be configurable rather than
+	 * hardcoded — the previous literal 404'd against every gateway.
+	 */
+	model: string;
+
+	/**
+	 * Model for the realtime voice socket, which trades a little quality for
+	 * latency.
+	 *
+	 * Time-to-first-token dominates a spoken turn: measured on a realistic
+	 * grounded prompt, Sonnet took 1632ms and Haiku 714ms while still answering
+	 * correctly in Tamil. That difference is most of the gap between this
+	 * pipeline and the Siri-class feel it is aiming at, and it is invisible in a
+	 * typed reply where the user is already reading. Defaults to [model] so a
+	 * deployment that sets nothing behaves exactly as before.
+	 */
+	realtimeModel: string;
+}
+
+/**
+ * Provider connection settings, shared by the Anthropic SDK path
+ * (`chatCompletion`) and the raw SSE streaming path the realtime voice socket
+ * needs (`realtime/llm.ts`). Kept in one place so the two cannot drift on base
+ * URL, credential or auth style.
+ */
+export function getAnthropicHttpConfig(): AnthropicHttpConfig {
+	const apiKey = process.env.BROCODE_API_KEY || env.ANTHROPIC_API_KEY || '';
+	const authStyle =
+		(process.env.ANTHROPIC_AUTH_STYLE || '').toLowerCase() === 'bearer' ? 'bearer' : 'api-key';
+	const model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
+	return {
+		baseURL: process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
+		apiKey,
+		authStyle,
+		model,
+		realtimeModel: process.env.ANTHROPIC_REALTIME_MODEL || model,
+	};
+}
+
 function getAnthropic(): Anthropic {
 	if (!anthropic) {
 		// Supports Anthropic's own API and OpenAI-style aggregator gateways
 		// (AICredits, BroCode) via ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY.
-		const baseURL = process.env.ANTHROPIC_BASE_URL;
-		const apiKey = process.env.BROCODE_API_KEY || env.ANTHROPIC_API_KEY;
-		if (!apiKey) throw new Error('Neither BROCODE_API_KEY nor ANTHROPIC_API_KEY is configured');
-		const options: any = { apiKey };
-		if (baseURL) options.baseURL = baseURL;
-		// Gateways authenticate differently. Anthropic's own API reads the key
-		// from `x-api-key` (the SDK's `apiKey` option); aggregators such as
-		// AICredits answer 401 "Missing or invalid Authorization header" for
-		// that and require `Authorization: Bearer`, which the SDK sends only
-		// when the key is passed as `authToken`. Set ANTHROPIC_AUTH_STYLE=bearer
-		// for those.
-		if ((process.env.ANTHROPIC_AUTH_STYLE || '').toLowerCase() === 'bearer') {
-			delete options.apiKey;
-			options.authToken = apiKey;
-		}
+		const cfg = getAnthropicHttpConfig();
+		if (!cfg.apiKey) throw new Error('Neither BROCODE_API_KEY nor ANTHROPIC_API_KEY is configured');
+		const options: any = { baseURL: cfg.baseURL };
+		// Anthropic's own API reads the key from `x-api-key` (the SDK's `apiKey`
+		// option); aggregators such as AICredits answer 401 "Missing or invalid
+		// Authorization header" for that and require `Authorization: Bearer`,
+		// which the SDK sends only when the key is passed as `authToken`. Set
+		// ANTHROPIC_AUTH_STYLE=bearer for those.
+		if (cfg.authStyle === 'bearer') options.authToken = cfg.apiKey;
+		else options.apiKey = cfg.apiKey;
 		anthropic = new Anthropic(options);
 	}
 	return anthropic;
 }
 
-/**
- * The model id to send. Gateways namespace their model ids
- * (`anthropic/claude-sonnet-4.6`) while Anthropic's API does not
- * (`claude-sonnet-4-20250514`), so this must be configurable rather than
- * hardcoded — the previous literal 404'd against every gateway.
- */
 function defaultModel(): string {
-	return process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
+	return getAnthropicHttpConfig().model;
 }
 
 /**
@@ -979,3 +1015,16 @@ export async function synthesizeSpeechForLanguage(
 	const r = await synthesizeSpeech(text, voiceId || '21m00Tcm4TlvDq8ikWAM');
 	return { ...r, provider: 'elevenlabs' };
 }
+
+// ─── Shared chat guardrails (used by the realtime streaming path) ────
+// `realtime/llm.ts` streams tokens straight from the provider over SSE instead
+// of going through the SDK, but it must apply exactly the same pre-flight
+// checks and system-prompt suffix as `chatCompletion` above; exporting them
+// keeps the two paths from drifting.
+export {
+	SAFETY_SYSTEM_PROMPT_SUFFIX,
+	containsJailbreak,
+	containsUnsafeContent,
+	redactPII,
+	looksLikeProviderNotice,
+};

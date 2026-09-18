@@ -110,7 +110,10 @@ export async function streamChatCompletion(
 		: SAFETY_SYSTEM_PROMPT_SUFFIX;
 
 	const body: Record<string, unknown> = {
-		model: options.model || cfg.model,
+		// The realtime model, not the general one: time-to-first-token is the
+		// dominant cost in a spoken turn and a faster model is what closes the
+		// gap to a Siri-class response.
+		model: options.model || cfg.realtimeModel,
 		max_tokens: options.maxTokens ?? 1024,
 		temperature: options.temperature ?? 0.7,
 		// Array-of-blocks `system` is what the REST path sends and what the
