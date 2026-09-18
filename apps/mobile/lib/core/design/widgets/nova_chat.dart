@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/nova_theme.dart';
 import 'nova_avatar.dart';
+import 'nova_markdown.dart';
 
 /// Who authored a transcript entry.
 enum NovaMessageRole { user, nova, system }
@@ -69,8 +70,11 @@ class NovaMessageBubble extends StatelessWidget {
                 ),
               ],
             )
-          : Text(
-              text,
+          : NovaMarkdown(
+              // The assistant answers in markdown; rendering it raw left
+              // literal '**' markers all over the transcript.
+              text: text,
+              tight: true,
               style: NovaTheme.bubble(c).copyWith(
                 color: isUser ? c.onAccent : c.fg,
               ),

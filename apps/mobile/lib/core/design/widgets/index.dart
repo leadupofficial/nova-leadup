@@ -13,5 +13,6 @@ export '../../theme/nova_theme.dart';
 export 'nova_avatar.dart';
 export 'nova_chat.dart';
 export 'nova_controls.dart';
+export 'nova_markdown.dart';
 export 'nova_nav.dart';
 export 'nova_surfaces.dart';

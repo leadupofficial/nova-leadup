@@ -90,13 +90,22 @@ class _TasksPageState extends ConsumerState<TasksPage> {
                 'Could not load tasks',
               ),
               data: (list) => list.isEmpty
-                  ? NovaStateView(
-                      icon: Icons.check_circle_outline_rounded,
-                      title: 'No tasks yet',
-                      message:
-                          'Ask NOVA to create one, or tap + to add it yourself.',
-                      actionLabel: 'New task',
-                      onAction: _newTask,
+                  ? Column(
+                      children: [
+                        NovaStateView(
+                          icon: Icons.check_circle_outline_rounded,
+                          title: 'No tasks yet',
+                          message:
+                              'Ask NOVA to create one, or tap + to add it yourself.',
+                          actionLabel: 'New task',
+                          onAction: _newTask,
+                        ),
+                        // `tasks/empty.html` ends with a "Try saying" block.
+                        // Each chip is wired to the action it names rather than
+                        // being decoration.
+                        const SizedBox(height: NovaSpace.lg),
+                        _suggestions(),
+                      ],
                     )
                   : Column(
                       children: list
@@ -143,10 +152,66 @@ class _TasksPageState extends ConsumerState<TasksPage> {
     onAction: retry,
   );
 
-  Future<void> _newTask() async {
-    final title = await _prompt('New task', 'What needs doing?');
+  Future<void> _newTask({String? initial}) async {
+    final title = await _prompt('New task', 'What needs doing?', initial: initial);
     if (title == null || title.isEmpty) return;
     await _run(() => ref.read(novaMutationsProvider).addTask(title: title));
+  }
+
+  /// The export's `.suggestions` block: an overline and a row of `.chip`s.
+  ///
+  /// Tapping a chip performs the action it quotes, so none of them is inert:
+  /// the task chip opens the composer pre-filled, the reminder chip opens the
+  /// real reminder composer, and the recording chip opens the recorder.
+  Widget _suggestions() {
+    final c = context.nova;
+    return Column(
+      children: [
+        Text('Try saying', style: NovaTheme.msgLabel(c)),
+        const SizedBox(height: NovaSpace.sm),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: NovaSpace.xs,
+          runSpacing: NovaSpace.xs,
+          children: [
+            _suggestionChip(
+              '"Add task: call Kumar Friday"',
+              () => _newTask(initial: 'Call Kumar Friday'),
+            ),
+            _suggestionChip('"Remind me tomorrow at 10"', _newReminder),
+            _suggestionChip(
+              '"Record this meeting"',
+              () => context.push('/tasks/record'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _suggestionChip(String label, VoidCallback onTap) {
+    final c = context.nova;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: c.border),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontFamily: NovaFonts.body,
+            fontSize: NovaType.caption,
+            fontWeight: NovaType.wMedium,
+            color: c.fg,
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _newReminder() async {
@@ -177,8 +242,8 @@ class _TasksPageState extends ConsumerState<TasksPage> {
     }
   }
 
-  Future<String?> _prompt(String title, String hint) {
-    final controller = TextEditingController();
+  Future<String?> _prompt(String title, String hint, {String? initial}) {
+    final controller = TextEditingController(text: initial);
     return showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
