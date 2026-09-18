@@ -222,6 +222,20 @@ void main() {
       expect(harness.state.commits.last.text, 'Hello there.');
     });
 
+    test('a recognised turn is acknowledged before the reply arrives', () async {
+      await harness.controller.startTurn();
+      await settle();
+      expect(harness.playback.acknowledgements, 0);
+
+      harness.socket.push('{"type":"final","text":"what is on my calendar"}');
+      await settle();
+
+      // The blip fires on the final, not on the reply: it is covering the
+      // model's time-to-first-token, so arriving with the answer would defeat it.
+      expect(harness.playback.acknowledgements, 1);
+      expect(harness.state.phase, VoiceRealtimePhase.thinking);
+    });
+
     test('done returns to idle once the microphone has been stopped', () async {
       await harness.controller.startTurn();
       await settle();

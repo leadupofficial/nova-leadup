@@ -149,6 +149,11 @@ class FakeStreamPlayback implements VoiceStreamPlayback {
     isPlaying = false;
   }
 
+  int acknowledgements = 0;
+
+  @override
+  Future<void> acknowledge() async => acknowledgements++;
+
   @override
   Future<void> dispose() async => _playing.close();
 }

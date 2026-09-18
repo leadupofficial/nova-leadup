@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
@@ -32,6 +33,15 @@ abstract interface class VoiceStreamPlayback {
   /// server's `speaking:false`, and for cancellation. Idempotent.
   Future<void> stop();
 
+  /// Plays a very short acknowledgement blip.
+  ///
+  /// Called the instant a turn is recognised, because the gap before NOVA starts
+  /// speaking is dominated by the model's time-to-first-token — measured at
+  /// 0.6-2.5s, which is most of the wait. An immediate sound makes that read as
+  /// "thinking" rather than "nothing happened", which is exactly what Siri and
+  /// Alexa do. It must not disturb an utterance already playing.
+  Future<void> acknowledge();
+
   Future<void> dispose();
 }
 
@@ -43,6 +53,8 @@ class Mp3StreamPlayback implements VoiceStreamPlayback {
   final AudioPlayer Function() _playerFactory;
 
   AudioPlayer? _player;
+  /// A second player so the blip never touches the streaming source's buffer.
+  AudioPlayer? _blipPlayer;
   StreamSubscription<bool>? _playingSub;
   StreamSubscription<ProcessingState>? _stateSub;
   final StreamController<bool> _playing = StreamController<bool>.broadcast();
@@ -101,11 +113,26 @@ class Mp3StreamPlayback implements VoiceStreamPlayback {
   }
 
   @override
+  Future<void> acknowledge() async {
+    if (_disposed) return;
+    try {
+      final player = _blipPlayer ??= _playerFactory();
+      await player.setAudioSource(_BlipSource());
+      unawaited(player.play());
+    } catch (error) {
+      // A missing blip is not worth failing a turn over.
+      debugPrint('[Mp3StreamPlayback] acknowledge failed: $error');
+    }
+  }
+
+  @override
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
     _turnOpen = false;
     await _playingSub?.cancel();
+    await _blipPlayer?.dispose();
+    _blipPlayer = null;
     _playingSub = null;
     await _stateSub?.cancel();
     _stateSub = null;
@@ -217,12 +244,14 @@ class _StreamAudioSource extends StreamAudioSource {
 
   @override
   // ignore: experimental_member_use
+  // ignore: experimental_member_use
   Future<StreamAudioResponse> request([int? start, int? end]) async {
     if (_consumed) {
       // A second request would try to listen to a single-subscription stream
       // twice; answer with an empty body instead of throwing.
       // ignore: experimental_member_use
-      return StreamAudioResponse(
+      // ignore: experimental_member_use
+    return StreamAudioResponse(
         sourceLength: null,
         contentLength: null,
         offset: 0,
@@ -250,3 +279,72 @@ final voiceStreamPlaybackProvider = Provider<VoiceStreamPlayback>((ref) {
   ref.onDispose(playback.dispose);
   return playback;
 });
+
+/// A ~180 ms two-note acknowledgement, generated rather than shipped as an
+/// asset: it is a few hundred bytes of PCM and bundling a file for it would add
+/// an asset to maintain for no benefit.
+// ignore: experimental_member_use
+class _BlipSource extends StreamAudioSource {
+  _BlipSource() : super(tag: 'nova-ack');
+
+  @override
+  // ignore: experimental_member_use
+  Future<StreamAudioResponse> request([int? start, int? end]) async {
+    final bytes = _blipWav();
+    // ignore: experimental_member_use
+    return StreamAudioResponse(
+      sourceLength: bytes.length,
+      contentLength: bytes.length,
+      offset: 0,
+      stream: Stream<List<int>>.value(bytes),
+      contentType: 'audio/wav',
+    );
+  }
+
+  static Uint8List _blipWav() {
+    const sampleRate = 22050;
+    // Rising then falling, quiet enough to sit under speech and short enough
+    // not to delay the reply it is covering for.
+    const notes = <(double, int)>[(880, 70), (1174, 90)];
+    final samples = <int>[];
+    for (final (freq, ms) in notes) {
+      final count = sampleRate * ms ~/ 1000;
+      for (var i = 0; i < count; i++) {
+        // Raised-cosine envelope so there is no click at either edge.
+        final t = i / count;
+        final env = 0.5 - 0.5 * math.cos(2 * math.pi * t);
+        final value = math.sin(2 * math.pi * freq * i / sampleRate) * env * 0.16;
+        samples.add((value * 32767).round().clamp(-32768, 32767));
+      }
+    }
+
+    final data = ByteData(samples.length * 2);
+    for (var i = 0; i < samples.length; i++) {
+      data.setInt16(i * 2, samples[i], Endian.little);
+    }
+    final pcm = data.buffer.asUint8List();
+
+    final header = ByteData(44);
+    void ascii(int offset, String value) {
+      for (var i = 0; i < value.length; i++) {
+        header.setUint8(offset + i, value.codeUnitAt(i));
+      }
+    }
+
+    ascii(0, 'RIFF');
+    header.setUint32(4, 36 + pcm.length, Endian.little);
+    ascii(8, 'WAVE');
+    ascii(12, 'fmt ');
+    header.setUint32(16, 16, Endian.little);
+    header.setUint16(20, 1, Endian.little); // PCM
+    header.setUint16(22, 1, Endian.little); // mono
+    header.setUint32(24, sampleRate, Endian.little);
+    header.setUint32(28, sampleRate * 2, Endian.little); // byte rate
+    header.setUint16(32, 2, Endian.little); // block align
+    header.setUint16(34, 16, Endian.little); // bits
+    ascii(36, 'data');
+    header.setUint32(40, pcm.length, Endian.little);
+
+    return Uint8List.fromList([...header.buffer.asUint8List(), ...pcm]);
+  }
+}

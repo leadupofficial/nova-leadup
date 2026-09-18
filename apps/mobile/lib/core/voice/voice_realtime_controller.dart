@@ -204,6 +204,11 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
       case VoiceFinalEvent(:final text):
         // `final` closes the user's turn and opens the reply; the provisional
         // transcript is replaced by the committed bubble.
+        //
+        // Acknowledge immediately: the wait that follows is the model's
+        // time-to-first-token, which is most of the gap before NOVA speaks, so
+        // an instant blip makes it read as thinking rather than nothing at all.
+        unawaited(_playback.acknowledge());
         _set(
           _appendCommit(
             text,
