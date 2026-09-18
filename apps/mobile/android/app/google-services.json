@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "386562103255",
+    "project_id": "nova-leadup-stagging",
+    "storage_bucket": "nova-leadup-stagging.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:386562103255:android:1ed355528b54d97aab9d92",
+        "android_client_info": {
+          "package_name": "com.leadup.nova"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDmA_sVWOe7u_AL-ETAsGin74PEvUh-05Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

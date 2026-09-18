@@ -1,0 +1,9 @@
+# android/fastlane/Appfile
+# Fastlane Appfile — NOVA Android
+# See https://docs.fastlane.tools/appfile/
+
+app_identifier("com.leadup.nova")
+app_name("NOVA")
+
+# Google Play service account JSON is provided at runtime via the
+# GOOGLE_PLAY_SERVICE_ACCOUNT_JSON environment variable (see Fastfile).

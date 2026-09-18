@@ -1,6 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <string name="app_name">NOVA</string>
-  <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
-  <string name="expo_splash_screen_status_bar_translucent" translatable="false">false</string>
-  <string name="expo_system_ui_user_interface_style" translatable="false">automatic</string>
+    <!--
+      The Porcupine access key placeholder that used to live here has been removed.
+      Wake word detection now uses openWakeWord, which needs no access key or
+      account (see assets/wakeword/README.md).
+    -->
+    <string name="app_name" translatable="false">NOVA</string>
 </resources>

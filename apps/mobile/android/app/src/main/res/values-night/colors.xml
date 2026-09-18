@@ -1,1 +1,6 @@
-<resources/>
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same brand palette in night mode: NOVA is dark-themed on both. -->
+    <color name="iconBackground">#6366F1</color>
+    <color name="launch_background">#0F172A</color>
+</resources>

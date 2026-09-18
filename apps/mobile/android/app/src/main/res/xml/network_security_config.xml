@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Production network policy: cleartext (plain HTTP) traffic is forbidden
+  app-wide, and only system CAs are trusted.
+
+  This is the platform-level counterpart to the ApiConfig._validateUrl() check
+  in lib/config/api_config.dart: even if a release build somehow ends up with an
+  http:// base URL, the OS refuses the request instead of sending it in the
+  clear.
+
+  The debug source set (android/app/src/debug/res/xml/network_security_config.xml)
+  overrides this to additionally permit the emulator loopback hosts that local
+  development uses.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

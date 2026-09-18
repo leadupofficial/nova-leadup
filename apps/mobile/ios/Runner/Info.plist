@@ -2,8 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>en</string>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Nova Tmpl</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -20,8 +24,53 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>FirebaseApp</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>NOVA uses Bluetooth to connect to headsets and earbuds for hands-free voice interaction.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>NOVA needs camera access to take photos and scan documents.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>NOVA uses local network for wake word detection.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>NOVA needs microphone access to hear your voice and have conversations with you.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>NOVA needs permission to save photos to your library.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>NOVA needs access to your photo library to save and retrieve photos.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>NOVA uses speech recognition to understand what you say.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneClassName</key>
+					<string>UIWindowScene</string>
+					<key>UISceneConfigurationName</key>
+					<string>flutter</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+					<key>UISceneStoryboardFile</key>
+					<string>Main</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>processing</string>
+		<string>remote-notification</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
@@ -38,21 +87,6 @@
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UIViewControllerBasedStatusBarAppearance</key>
-	<false/>
-	<key>UIStatusBarHidden</key>
-	<false/>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>NOVA needs microphone access to hear your voice and have conversations with you.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>NOVA uses speech recognition to understand what you say.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>NOVA uses local network for wake word detection.</string>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>audio</string>
-		<string>processing</string>
 	</array>
 </dict>
 </plist>

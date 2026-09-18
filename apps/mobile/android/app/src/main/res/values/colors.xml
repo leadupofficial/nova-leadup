@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
- <color name="iconBackground">#FFFFFF</color>
+    <!--
+      Adaptive-icon background. NOVA's adaptive-icon foreground is a solid white
+      circle, so this must be dark/branded for the icon to be visible at all.
+      It was previously #FFFFFF (white on white = invisible icon).
+    -->
+    <color name="iconBackground">#6366F1</color>
+
+    <!-- Launch/splash window background, matched to NovaTheme.background. -->
+    <color name="launch_background">#0F172A</color>
 </resources>

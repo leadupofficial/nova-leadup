@@ -1,82 +1,108 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
- package="com.leadup.nova">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
- <uses-permission android:name="android.permission.INTERNET" />
- <uses-permission android:name="android.permission.RECORD_AUDIO" />
- <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
- <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
- <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
- <uses-permission android:name="android.permission.USE_BIOMETRICS" />
- <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
- <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
- <uses-permission android:name="android.permission.RECEIVE_NOTIFICATION_LISTENER" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.USE_BIOMETRICS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
- <queries>
- <intent>
- <action android:name="android.intent.action.PROCESS_TEXT"/>
- <data android:mimeType="text/plain"/>
- </intent>
- </queries>
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
 
- <application
- android:label="NOVA"
- android:name=".NovaApplication"
- android:icon="@mipmap/ic_launcher">
+    <!--
+      The `package` attribute is intentionally omitted: the namespace is declared
+      once in app/build.gradle.kts (`namespace = "com.leadup.nova"`). Declaring it
+      in both places is an error on Android Gradle Plugin 8+.
+    -->
+    <application
+        android:label="NOVA"
+        android:icon="@mipmap/ic_launcher"
+        android:networkSecurityConfig="@xml/network_security_config">
 
- <!-- Main Flutter activity -->
- <activity
- android:name=".MainActivity"
- android:exported="true"
- android:launchMode="singleTop"
- android:taskAffinity=""
- android:theme="@style/LaunchTheme"
- android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
- android:hardwareAccelerated="true"
- android:windowSoftInputMode="adjustResize">
- <meta-data
- android:name="io.flutter.embedding.android.NormalTheme"
- android:resource="@style/NormalTheme" />
- <intent-filter>
- <action android:name="android.intent.action.MAIN"/>
- <category android:name="android.intent.category.LAUNCHER"/>
- </intent-filter>
- </activity>
+        <!--
+          REQUIRED. Tells the Flutter tool that this app uses the Android v2
+          embedding. Without it `flutter build apk` aborts with
+          "Build failed due to use of deleted Android v1 embedding."
+        -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
 
- <!-- Wake-word foreground service -->
- <service
- android:name=".WakeWordService"
- android:exported="false"
- android:foregroundServiceType="microphone" />
+        <!-- Firebase Cloud Messaging notification icon. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notification" />
 
- <!-- Wake word Flutter bridge service -->
- <service
- android:name=".NovaWakeService"
- android:exported="false"
- android:foregroundServiceType="microphone" />
+        <!-- Crashlytics: automatic collection. Effective only once a real
+             google-services.json is generated (flutterfire configure); the
+             committed one is still a placeholder. -->
+        <meta-data
+            android:name="firebase_crashlytics_collection_enabled"
+            android:value="true" />
 
- <!-- Boot receiver: starts wake-word service after device boot -->
- <receiver
- android:name=".BootReceiver"
- android:exported="true"
- android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
- <intent-filter>
- <action android:name="android.intent.action.BOOT_COMPLETED" />
- <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
- <category android:name="android.intent.category.DEFAULT" />
- </intent-filter>
- </receiver>
+        <!-- Main Flutter activity. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
 
- <!-- Notification listener: relays incoming notifications to the agent -->
- <receiver
- android:name=".NotificationListener"
- android:exported="false">
- <intent-filter>
- <action android:name="nova.notification.POSTED" />
- </intent-filter>
- </receiver>
+        <!--
+          Wake-word foreground service. This is the ONLY wake-word service in the
+          app: `.WakeWordForegroundService`, `.NovaWakeService` and their
+          duplicates were removed.
+        -->
+        <service
+            android:name=".WakeWordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
- <meta-data
- android:name="flutterEmbedding"
- android:value="2" />
- </application>
+        <!-- Boot receiver: restarts the wake-word service after a reboot. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <!--
+              Only BOOT_COMPLETED: LOCKED_BOOT_COMPLETED would additionally require
+              android:directBootAware="true", and the wake word needs the user's
+              unlocked credential storage to know whether they opted in.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Notification listener: relays in-app notifications to the agent. -->
+        <receiver
+            android:name=".NotificationListener"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="nova.notification.POSTED" />
+            </intent-filter>
+        </receiver>
+
+    </application>
 </manifest>

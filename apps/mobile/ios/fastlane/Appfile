@@ -1,0 +1,9 @@
+# ios/fastlane/Appfile
+# Fastlane Appfile — NOVA iOS
+# See https://docs.fastlane.tools/appfile/
+
+app_identifier("com.leadup.nova")
+app_name("NOVA")
+
+# Apple App Store Connect API key credentials are provided at runtime
+# via environment variables (see Fastfile).
