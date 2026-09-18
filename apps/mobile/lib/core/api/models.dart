@@ -362,6 +362,11 @@ class NovaPrivacyPrefs {
     bool? localProcessing,
     int? autoDeleteRecordingsDays,
     int? autoDeleteTranscriptsDays,
+    // `null` for the day fields means "leave unchanged" (the usual Dart
+    // convention), so clearing a retention period — the design's "Never" —
+    // needs its own explicit signal. Without these, picking Never was a no-op.
+    bool clearAutoDeleteRecordingsDays = false,
+    bool clearAutoDeleteTranscriptsDays = false,
   }) => NovaPrivacyPrefs(
     saveConversations: saveConversations ?? this.saveConversations,
     saveRecordings: saveRecordings ?? this.saveRecordings,
@@ -369,10 +374,12 @@ class NovaPrivacyPrefs {
     saveMemories: saveMemories ?? this.saveMemories,
     cloudProcessing: cloudProcessing ?? this.cloudProcessing,
     localProcessing: localProcessing ?? this.localProcessing,
-    autoDeleteRecordingsDays:
-        autoDeleteRecordingsDays ?? this.autoDeleteRecordingsDays,
-    autoDeleteTranscriptsDays:
-        autoDeleteTranscriptsDays ?? this.autoDeleteTranscriptsDays,
+    autoDeleteRecordingsDays: clearAutoDeleteRecordingsDays
+        ? null
+        : (autoDeleteRecordingsDays ?? this.autoDeleteRecordingsDays),
+    autoDeleteTranscriptsDays: clearAutoDeleteTranscriptsDays
+        ? null
+        : (autoDeleteTranscriptsDays ?? this.autoDeleteTranscriptsDays),
   );
 
   Map<String, dynamic> toJson() => {
@@ -382,10 +389,10 @@ class NovaPrivacyPrefs {
     'saveMemories': saveMemories,
     'cloudProcessing': cloudProcessing,
     'localProcessing': localProcessing,
-    if (autoDeleteRecordingsDays != null)
-      'autoDeleteRecordingsDays': autoDeleteRecordingsDays,
-    if (autoDeleteTranscriptsDays != null)
-      'autoDeleteTranscriptsDays': autoDeleteTranscriptsDays,
+    // Always sent, including when null: a null is what clears a retention
+    // period. Omitting them meant a saved 30 days could never be removed.
+    'autoDeleteRecordingsDays': autoDeleteRecordingsDays,
+    'autoDeleteTranscriptsDays': autoDeleteTranscriptsDays,
   };
 }
 

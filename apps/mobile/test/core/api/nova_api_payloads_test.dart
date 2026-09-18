@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nova_mobile/core/api/models.dart';
 import 'package:nova_mobile/core/api/nova_api.dart';
 
 import '../../helpers/test_harness.dart';
@@ -102,6 +103,40 @@ void main() {
       final options = captured.single;
       expect(options.path, endsWith('/memories'));
       expect(options.queryParameters.containsKey('search'), isFalse);
+    });
+  });
+
+  group('NovaPrivacyPrefs auto-delete', () {
+    test('serialises an unset retention as an explicit null', () {
+      // The server treats null as "Never" and clears the column. Omitting the
+      // key instead meant a saved retention period could never be removed.
+      final json = const NovaPrivacyPrefs().toJson();
+      expect(json.containsKey('autoDeleteRecordingsDays'), isTrue);
+      expect(json['autoDeleteRecordingsDays'], isNull);
+      expect(json.containsKey('autoDeleteTranscriptsDays'), isTrue);
+      expect(json['autoDeleteTranscriptsDays'], isNull);
+    });
+
+    test('copyWith can actively clear a retention period', () {
+      const prefs = NovaPrivacyPrefs(
+        autoDeleteRecordingsDays: 30,
+        autoDeleteTranscriptsDays: 7,
+      );
+
+      // A plain null argument means "unchanged", per the usual Dart convention.
+      expect(prefs.copyWith().autoDeleteRecordingsDays, 30);
+
+      final cleared = prefs.copyWith(clearAutoDeleteRecordingsDays: true);
+      expect(cleared.autoDeleteRecordingsDays, isNull);
+      // Clearing one must not disturb the other.
+      expect(cleared.autoDeleteTranscriptsDays, 7);
+    });
+
+    test('round-trips a numeric retention', () {
+      final prefs = const NovaPrivacyPrefs().copyWith(
+        autoDeleteRecordingsDays: 90,
+      );
+      expect(prefs.toJson()['autoDeleteRecordingsDays'], 90);
     });
   });
 }

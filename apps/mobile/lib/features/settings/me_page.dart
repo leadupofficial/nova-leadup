@@ -239,6 +239,40 @@ class MePage extends ConsumerWidget {
           'localProcessing' => p.copyWith(localProcessing: value),
           _ => p,
         },
+        // `settings/privacy.html` also has an Auto-delete section. Both fields
+        // are supported by the API and the model but were never exposed, so a
+        // supported privacy control was unreachable.
+        extras: (p, update) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: NovaSpace.sm),
+            Divider(height: 1, color: context.nova.border),
+            const SizedBox(height: NovaSpace.md),
+            Text('Auto-delete', style: NovaTheme.sectionHeading(context.nova)),
+            const SizedBox(height: NovaSpace.sm),
+            _RetentionRow(
+              label: 'Delete recordings after',
+              choices: const [30, 60, 90],
+              value: p.autoDeleteRecordingsDays,
+              onChanged: (days) => update(
+                days == null
+                    ? p.copyWith(clearAutoDeleteRecordingsDays: true)
+                    : p.copyWith(autoDeleteRecordingsDays: days),
+              ),
+            ),
+            const SizedBox(height: NovaSpace.sm),
+            _RetentionRow(
+              label: 'Delete transcripts after',
+              choices: const [7, 30, 90],
+              value: p.autoDeleteTranscriptsDays,
+              onChanged: (days) => update(
+                days == null
+                    ? p.copyWith(clearAutoDeleteTranscriptsDays: true)
+                    : p.copyWith(autoDeleteTranscriptsDays: days),
+              ),
+            ),
+          ],
+        ),
         save: (p) => ref.read(novaMutationsProvider).savePrivacy(p),
       ),
     );
@@ -397,6 +431,71 @@ class _Toggle<T> {
 ///
 /// Shows a spinner while the write is in flight and only closes on success, so a
 /// failed save leaves the sheet open with the values the server rejected.
+/// One `settings/privacy.html` auto-delete row: a label and a row of day
+/// choices plus "Never". `null` means never auto-delete, which is how both the
+/// model and the API represent it.
+class _RetentionRow extends StatelessWidget {
+  const _RetentionRow({
+    required this.label,
+    required this.choices,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String label;
+  final List<int> choices;
+  final int? value;
+  final ValueChanged<int?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: NovaSpace.xs,
+          runSpacing: NovaSpace.xs,
+          children: [
+            for (final days in choices)
+              _choice(context, '$days days', value == days, () => onChanged(days)),
+            _choice(context, 'Never', value == null, () => onChanged(null)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _choice(
+    BuildContext context,
+    String label,
+    bool selected,
+    VoidCallback onTap,
+  ) {
+    final c = context.nova;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? c.accent.withValues(alpha: 0.16) : c.surface,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: selected ? c.accent : c.border),
+        ),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.bodySmall!.copyWith(
+            color: selected ? c.accent : c.fg,
+            fontWeight: selected ? NovaType.wSemiBold : NovaType.wRegular,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ToggleSheet<T> extends StatefulWidget {
   const _ToggleSheet({
     required this.title,
@@ -404,6 +503,7 @@ class _ToggleSheet<T> extends StatefulWidget {
     required this.toggles,
     required this.apply,
     required this.save,
+    this.extras,
   });
 
   final String title;
@@ -411,6 +511,10 @@ class _ToggleSheet<T> extends StatefulWidget {
   final List<_Toggle<T>> toggles;
   final T Function(T current, String key, bool value) apply;
   final Future<void> Function(T value) save;
+
+  /// Optional extra controls rendered under the toggles, for sheets that have
+  /// more than booleans. Receives the current value and a setter.
+  final Widget Function(T value, void Function(T value) update)? extras;
 
   @override
   State<_ToggleSheet<T>> createState() => _ToggleSheetState<T>();
@@ -449,6 +553,11 @@ class _ToggleSheetState<T> extends State<_ToggleSheet<T>> {
                   : (v) => setState(() => _value = widget.apply(_value, t.key, v)),
             );
           }),
+          if (widget.extras != null)
+            widget.extras!(
+              _value,
+              (v) => setState(() => _value = v),
+            ),
           if (_error != null) ...[
             const SizedBox(height: NovaSpace.xs),
             Text(

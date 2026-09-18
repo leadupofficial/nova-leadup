@@ -77,8 +77,15 @@ const PrivacyPrefsSchema = z.object({
 	saveRecordings: z.boolean().optional(),
 	saveTranscripts: z.boolean().optional(),
 	saveMemories: z.boolean().optional(),
-	autoDeleteRecordingsDays: z.coerce.number().int().positive().optional(),
-	autoDeleteTranscriptsDays: z.coerce.number().int().positive().optional(),
+	// `null` is meaningful here: it is the design's "Never", and the column is
+	// nullable. `z.coerce.number()` maps null to 0, which then fails
+	// `.positive()`, so null must be matched before the coercion is attempted.
+	autoDeleteRecordingsDays: z
+		.union([z.literal(null), z.coerce.number().int().positive()])
+		.optional(),
+	autoDeleteTranscriptsDays: z
+		.union([z.literal(null), z.coerce.number().int().positive()])
+		.optional(),
 	cloudProcessing: z.boolean().optional(),
 	localProcessing: z.boolean().optional(),
 });
