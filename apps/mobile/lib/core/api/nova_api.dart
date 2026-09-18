@@ -427,6 +427,24 @@ class NovaApi {
     return NovaPersona.fromJson(_object(data));
   }
 
+  /// The user's avatar appearance. `userId` is unique server-side, so this is
+  /// at most one row; null means none has been saved yet.
+  Future<NovaAvatarPrefs?> getAvatar() async {
+    final data = await _get(ApiConfig.settingsAvatars);
+    final rows = data is List ? data : _object(data)['avatars'];
+    if (rows is! List || rows.isEmpty) return null;
+    return NovaAvatarPrefs.fromJson(
+      Map<String, dynamic>.from(rows.first as Map),
+    );
+  }
+
+  /// Saves the avatar appearance. The route upserts, so a partial body leaves
+  /// the fields it omits untouched.
+  Future<NovaAvatarPrefs> saveAvatar(NovaAvatarPrefs prefs) async {
+    final data = await _post(ApiConfig.settingsAvatars, prefs.toJson());
+    return NovaAvatarPrefs.fromJson(_object(data));
+  }
+
   /// Companion settings (name, voice, wake word). Returns the raw map because
   /// the server owns the shape and the screen only reflects it.
   Future<Map<String, dynamic>> getCompanion() async {

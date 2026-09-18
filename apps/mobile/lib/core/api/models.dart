@@ -243,8 +243,59 @@ class NovaReminder {
   );
 }
 
-// ─── Voice ────────────────────────────────────────────────────────────────────
+/// The assistant's avatar appearance (`GET/POST /api/v1/settings/avatars`).
+///
+/// `userId` is UNIQUE on the server, so there is at most one per user. The
+/// table has no name or image URL column — the export's "Avatar & Appearance"
+/// maps onto these three fields.
+class NovaAvatarPrefs {
+  const NovaAvatarPrefs({
+    this.id,
+    this.assetId,
+    this.emotion = 'neutral',
+    this.animationDensity = 'medium',
+  });
 
+  final String? id;
+  final String? assetId;
+  final String emotion;
+  final String animationDensity;
+
+  static const emotions = <String>[
+    'neutral',
+    'happy',
+    'calm',
+    'curious',
+    'focused',
+  ];
+  static const densities = <String>['low', 'medium', 'high'];
+
+  factory NovaAvatarPrefs.fromJson(Map<String, dynamic> j) => NovaAvatarPrefs(
+    id: j['id']?.toString(),
+    assetId: j['assetId'] as String?,
+    emotion: (j['emotion'] ?? 'neutral').toString(),
+    animationDensity: (j['animationDensity'] ?? 'medium').toString(),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'assetId': assetId,
+    'emotion': emotion,
+    'animationDensity': animationDensity,
+  };
+
+  NovaAvatarPrefs copyWith({
+    String? assetId,
+    String? emotion,
+    String? animationDensity,
+  }) => NovaAvatarPrefs(
+    id: id,
+    assetId: assetId ?? this.assetId,
+    emotion: emotion ?? this.emotion,
+    animationDensity: animationDensity ?? this.animationDensity,
+  );
+}
+
+// ─── Voice ────────────────────────────────────────────────────────────────────
 /// One translation result from `POST /api/v1/voice/translate`.
 class NovaTranslation {
   const NovaTranslation({

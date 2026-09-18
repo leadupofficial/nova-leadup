@@ -153,6 +153,15 @@ final personaProvider = FutureProvider.autoDispose<NovaPersona>((ref) async {
   return api.getPersona();
 });
 
+/// The saved avatar appearance, or a default when none has been stored yet.
+/// The route upserts, so the default here is a legitimate blank slate rather
+/// than a fabricated saved value.
+final avatarPrefsProvider =
+    FutureProvider.autoDispose<NovaAvatarPrefs>((ref) async {
+      final api = ref.watch(novaApiProvider);
+      return await api.getAvatar() ?? const NovaAvatarPrefs();
+    });
+
 /// Combined counts for the Home dashboard's "Today's Overview" cards.
 ///
 /// Fetches the three lists in parallel; a failure in any one is surfaced rather
@@ -298,6 +307,11 @@ class NovaMutations {
   Future<void> savePersona(NovaPersona persona) async {
     await _api.updatePersona(persona);
     _ref.invalidate(personaProvider);
+  }
+
+  Future<void> saveAvatar(NovaAvatarPrefs prefs) async {
+    await _api.saveAvatar(prefs);
+    _ref.invalidate(avatarPrefsProvider);
   }
 
   // ── Recordings ────────────────────────────────────────────────────────────

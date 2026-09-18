@@ -134,6 +134,13 @@ class MePage extends ConsumerWidget {
                 ),
                 Divider(height: 1, color: c.border),
                 NovaListRow(
+                  title: 'Avatar & appearance',
+                  subtitle: 'Expression and animation density',
+                  icon: Icons.face_retouching_natural_rounded,
+                  onTap: () => _editAvatar(context, ref),
+                ),
+                Divider(height: 1, color: c.border),
+                NovaListRow(
                   title: 'Wake word',
                   subtitle: 'Say "Hey Nova" to start listening',
                   icon: Icons.hearing_rounded,
@@ -202,6 +209,123 @@ class MePage extends ConsumerWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// "Avatar & Appearance" from `settings/profile.html`.
+  ///
+  /// The avatars table stores an expression plus an animation density; the
+  /// route upserts, so this both creates and edits. It previously accepted
+  /// name/avatarUrl/isActive and discarded them, which is why nothing was
+  /// wired to it before.
+  static Future<void> _editAvatar(BuildContext context, WidgetRef ref) async {
+    final current = await ref.read(avatarPrefsProvider.future);
+    if (!context.mounted) return;
+
+    var emotion = current.emotion;
+    var density = current.animationDensity;
+    var saving = false;
+    String? error;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) {
+          final c = sheetContext.nova;
+          Future<void> save() async {
+            setSheetState(() {
+              saving = true;
+              error = null;
+            });
+            try {
+              await ref
+                  .read(novaMutationsProvider)
+                  .saveAvatar(
+                    current.copyWith(
+                      emotion: emotion,
+                      animationDensity: density,
+                    ),
+                  );
+              if (sheetContext.mounted) Navigator.pop(sheetContext);
+            } catch (e) {
+              if (!sheetContext.mounted) return;
+              setSheetState(() {
+                saving = false;
+                error = e.toString();
+              });
+            }
+          }
+
+          return Padding(
+            padding: EdgeInsets.only(
+              left: NovaSpace.gutter,
+              right: NovaSpace.gutter,
+              top: NovaSpace.lg,
+              bottom: MediaQuery.viewInsetsOf(sheetContext).bottom + NovaSpace.lg,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Avatar & appearance',
+                  style: NovaTheme.sectionHeading(c),
+                ),
+                const SizedBox(height: NovaSpace.md),
+                Text('Expression', style: NovaTheme.overline(c)),
+                const SizedBox(height: NovaSpace.xs),
+                Wrap(
+                  spacing: NovaSpace.xs,
+                  runSpacing: NovaSpace.xs,
+                  children: [
+                    for (final option in NovaAvatarPrefs.emotions)
+                      _AvatarChoice(
+                        label: option,
+                        selected: emotion == option,
+                        onTap: saving
+                            ? null
+                            : () => setSheetState(() => emotion = option),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: NovaSpace.md),
+                Text('Animation density', style: NovaTheme.overline(c)),
+                const SizedBox(height: NovaSpace.xs),
+                Wrap(
+                  spacing: NovaSpace.xs,
+                  runSpacing: NovaSpace.xs,
+                  children: [
+                    for (final option in NovaAvatarPrefs.densities)
+                      _AvatarChoice(
+                        label: option,
+                        selected: density == option,
+                        onTap: saving
+                            ? null
+                            : () => setSheetState(() => density = option),
+                      ),
+                  ],
+                ),
+                if (error != null) ...[
+                  const SizedBox(height: NovaSpace.sm),
+                  Text(
+                    error!,
+                    style: Theme.of(
+                      sheetContext,
+                    ).textTheme.bodySmall!.copyWith(color: c.danger),
+                  ),
+                ],
+                const SizedBox(height: NovaSpace.lg),
+                NovaPrimaryButton(
+                  label: 'Save',
+                  busy: saving,
+                  onPressed: saving ? null : save,
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -431,6 +555,46 @@ class _Toggle<T> {
 ///
 /// Shows a spinner while the write is in flight and only closes on success, so a
 /// failed save leaves the sheet open with the values the server rejected.
+/// One chip in the avatar sheet.
+class _AvatarChoice extends StatelessWidget {
+  const _AvatarChoice({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.nova;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Opacity(
+        opacity: onTap == null ? 0.5 : 1,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? c.accent.withValues(alpha: 0.16) : c.surface,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: selected ? c.accent : c.border),
+          ),
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall!.copyWith(
+              color: selected ? c.accent : c.fg,
+              fontWeight: selected ? NovaType.wSemiBold : NovaType.wRegular,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// One `settings/privacy.html` auto-delete row: a label and a row of day
 /// choices plus "Never". `null` means never auto-delete, which is how both the
 /// model and the API represent it.
