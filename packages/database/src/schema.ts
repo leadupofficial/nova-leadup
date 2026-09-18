@@ -489,6 +489,31 @@ export const privacyPreferences = pgTable('privacy_preferences', {
  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// ─── Notification & Appearance Preferences ──────────────────────
+//
+// Backs `GET/PATCH /api/v1/settings/preferences`, which previously had no
+// storage at all — the GET returned hardcoded values and the PATCH echoed its
+// body back without writing, so every notification toggle silently reverted.
+//
+// NOTE: the deployed database already has this table (created directly, since
+// this package's dist cannot currently be rebuilt — see lead.repository.ts type
+// errors). This entry keeps schema.ts as the source of truth for a future
+// migration run.
+export const notificationPreferences = pgTable('notification_preferences', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull()
+    .unique(),
+  push: boolean('push').default(true).notNull(),
+  email: boolean('email').default(true).notNull(),
+  sms: boolean('sms').default(false).notNull(),
+  inApp: boolean('in_app').default(true).notNull(),
+  theme: varchar('theme', { length: 20 }).default('system').notNull(),
+  fontSize: varchar('font_size', { length: 20 }).default('medium').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // ─── Retention Policies ─────────────────────────────────────────
 
 export const retentionPolicies = pgTable('retention_policies', {

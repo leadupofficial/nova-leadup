@@ -83,13 +83,13 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       await onboarding.saveProfile(
         ProfileFormData(name: name, emergencyContacts: contacts),
       );
-      await onboarding.setCurrentStep(OnboardingStep.healthSetup);
+      await onboarding.setCurrentStep(OnboardingStep.companion);
       await ref.read(analyticsServiceProvider).logEvent(
             AnalyticsService.eventOnboardingStep,
             parameters: const <String, Object?>{'step': 'profile', 'action': 'completed'},
           );
       if (!mounted) return;
-      context.go(OnboardingStep.healthSetup.routeName);
+      context.go(OnboardingStep.companion.routeName);
     } catch (error) {
       if (!mounted) return;
       setState(() {

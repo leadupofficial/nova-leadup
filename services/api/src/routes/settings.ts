@@ -4,7 +4,8 @@
 import { Router, NextFunction } from 'express';
 import { z } from 'zod';
 import { getDb } from '../db/connection.js';
-import { users, privacyPreferences, personas, avatars, companionConfigs, organizations, featureFlags } from '@nova/database';
+import { users, privacyPreferences, personas, avatars, companionConfigs, organizations, featureFlags,
+} from '@nova/database';
 import { eq, and, desc, like, ilike, sql, type SQL } from 'drizzle-orm';
 import { authenticate, requireRole, type AuthenticatedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error-handler.js';
@@ -33,10 +34,20 @@ const UpdateProfileSchema = z.object({
 });
 
 const NotificationPrefsSchema = z.object({
-	push: z.boolean().optional(),
-	email: z.boolean().optional(),
-	sms: z.boolean().optional(),
-	inApp: z.boolean().optional(),
+	notifications: z
+		.object({
+			push: z.boolean().optional(),
+			email: z.boolean().optional(),
+			sms: z.boolean().optional(),
+			inApp: z.boolean().optional(),
+		})
+		.optional(),
+	appearance: z
+		.object({
+			theme: z.enum(['system', 'light', 'dark']).optional(),
+			fontSize: z.enum(['small', 'medium', 'large']).optional(),
+		})
+		.optional(),
 });
 
 const PersonaSchema = z.object({
@@ -122,24 +133,85 @@ router.patch('/profile', authenticate, validate(UpdateProfileSchema), async (req
 
 // ─── Preferences ─────────────────────────────────────────────────────────────
 
-router.get('/preferences', authenticate, (req: AuthenticatedRequest, res) => {
-	res.status(200).json({
-		success: true,
-		data: {
-			notifications: { push: true, email: true, sms: false, inApp: true },
-			appearance: { theme: 'system', fontSize: 'medium' },
-		},
-	});
+router.get('/preferences', authenticate, async (req: AuthenticatedRequest, res, next: NextFunction) => {
+	try {
+		// Reached with raw SQL on purpose: `notification_preferences` was added
+		// directly to the database, and @nova/database's dist cannot be rebuilt
+		// cleanly (pre-existing type errors in lead.repository.ts), so importing
+		// the drizzle table would resolve to undefined at runtime.
+		const result = await getDb().execute(
+			sql`SELECT push, email, sms, in_app, theme, font_size, updated_at
+			    FROM notification_preferences WHERE user_id = ${req.user!.id} LIMIT 1`,
+		);
+		const row = (result as any)?.rows?.[0];
+
+		res.status(200).json({
+			success: true,
+			data: {
+				notifications: {
+					push: row?.push ?? true,
+					email: row?.email ?? true,
+					sms: row?.sms ?? false,
+					inApp: row?.in_app ?? true,
+				},
+				appearance: {
+					theme: row?.theme ?? 'system',
+					fontSize: row?.font_size ?? 'medium',
+				},
+			},
+		});
+	} catch (err) {
+		next(err);
+	}
 });
 
 router.patch('/preferences', authenticate, validate(NotificationPrefsSchema), async (req: AuthenticatedRequest, res, next: NextFunction) => {
 	try {
 		const body = (req as any).validatedBody as z.infer<typeof NotificationPrefsSchema>;
+		const n = body.notifications ?? {};
+		const a = body.appearance ?? {};
+
+		// COALESCE keeps every unspecified field at its existing value, so a
+		// partial patch cannot reset unrelated preferences to their defaults.
+		const result = await getDb().execute(
+			sql`INSERT INTO notification_preferences
+			      (user_id, push, email, sms, in_app, theme, font_size, updated_at)
+			    VALUES (
+			      ${req.user!.id},
+			      COALESCE(${n.push ?? null}, true),
+			      COALESCE(${n.email ?? null}, true),
+			      COALESCE(${n.sms ?? null}, false),
+			      COALESCE(${n.inApp ?? null}, true),
+			      COALESCE(${a.theme ?? null}, 'system'),
+			      COALESCE(${a.fontSize ?? null}, 'medium'),
+			      now()
+			    )
+			    ON CONFLICT (user_id) DO UPDATE SET
+			      push       = COALESCE(${n.push ?? null}, notification_preferences.push),
+			      email      = COALESCE(${n.email ?? null}, notification_preferences.email),
+			      sms        = COALESCE(${n.sms ?? null}, notification_preferences.sms),
+			      in_app     = COALESCE(${n.inApp ?? null}, notification_preferences.in_app),
+			      theme      = COALESCE(${a.theme ?? null}, notification_preferences.theme),
+			      font_size  = COALESCE(${a.fontSize ?? null}, notification_preferences.font_size),
+			      updated_at = now()
+			    RETURNING push, email, sms, in_app, theme, font_size, updated_at`,
+		);
+		const row = (result as any)?.rows?.[0];
+
 		res.status(200).json({
 			success: true,
 			data: {
-				notifications: body,
-				updatedAt: new Date(),
+				notifications: {
+					push: row?.push ?? true,
+					email: row?.email ?? true,
+					sms: row?.sms ?? false,
+					inApp: row?.in_app ?? true,
+				},
+				appearance: {
+					theme: row?.theme ?? 'system',
+					fontSize: row?.font_size ?? 'medium',
+				},
+				updatedAt: row?.updated_at ?? new Date(),
 			},
 		});
 	} catch (err) {

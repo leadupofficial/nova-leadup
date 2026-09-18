@@ -6,6 +6,10 @@ enum OnboardingStep {
   welcome,
   permissions,
   profileSetup,
+  // Added from the OpenDesign export (`onboarding/companion.html`, blueprint
+  // §5.4 "Create Your Companion"): name, personality, speech style and voice.
+  // It writes the real `/api/v1/settings/persona` resource.
+  companion,
   healthSetup,
   complete;
 
@@ -17,10 +21,12 @@ enum OnboardingStep {
         return 1;
       case OnboardingStep.profileSetup:
         return 2;
-      case OnboardingStep.healthSetup:
+      case OnboardingStep.companion:
         return 3;
-      case OnboardingStep.complete:
+      case OnboardingStep.healthSetup:
         return 4;
+      case OnboardingStep.complete:
+        return 5;
     }
   }
 
@@ -33,6 +39,8 @@ enum OnboardingStep {
       case 2:
         return OnboardingStep.profileSetup;
       case 3:
+        return OnboardingStep.companion;
+      case 4:
         return OnboardingStep.healthSetup;
       default:
         return OnboardingStep.complete;
@@ -47,6 +55,8 @@ enum OnboardingStep {
         return '/onboarding/permissions';
       case OnboardingStep.profileSetup:
         return '/onboarding/profile';
+      case OnboardingStep.companion:
+        return '/onboarding/companion';
       case OnboardingStep.healthSetup:
         return '/onboarding/health';
       case OnboardingStep.complete:
@@ -55,11 +65,7 @@ enum OnboardingStep {
   }
 }
 
-enum OnboardingStatus {
-  notStarted,
-  inProgress,
-  complete,
-}
+enum OnboardingStatus { notStarted, inProgress, complete }
 
 class EmergencyContact {
   final String name;
@@ -73,12 +79,13 @@ class EmergencyContact {
   });
 
   Map<String, dynamic> toJson() => {
-        'name': name,
-        'phoneNumber': phoneNumber,
-        if (relationship != null) 'relationship': relationship,
-      };
+    'name': name,
+    'phoneNumber': phoneNumber,
+    if (relationship != null) 'relationship': relationship,
+  };
 
-  factory EmergencyContact.fromJson(Map<String, dynamic> json) => EmergencyContact(
+  factory EmergencyContact.fromJson(Map<String, dynamic> json) =>
+      EmergencyContact(
         name: json['name'] as String,
         phoneNumber: json['phoneNumber'] as String,
         relationship: json['relationship'] as String?,
@@ -109,16 +116,20 @@ class ProfileFormData {
   }
 
   Map<String, dynamic> toJson() => {
-        if (name != null) 'name': name,
-        if (avatarAsset != null) 'avatarAsset': avatarAsset,
-        'emergencyContacts': emergencyContacts.map((c) => c.toJson()).toList(),
-      };
+    if (name != null) 'name': name,
+    if (avatarAsset != null) 'avatarAsset': avatarAsset,
+    'emergencyContacts': emergencyContacts.map((c) => c.toJson()).toList(),
+  };
 
-  factory ProfileFormData.fromJson(Map<String, dynamic> json) => ProfileFormData(
+  factory ProfileFormData.fromJson(Map<String, dynamic> json) =>
+      ProfileFormData(
         name: json['name'] as String?,
         avatarAsset: json['avatarAsset'] as String?,
-        emergencyContacts: (json['emergencyContacts'] as List<dynamic>?)
-                ?.map((e) => EmergencyContact.fromJson(e as Map<String, dynamic>))
+        emergencyContacts:
+            (json['emergencyContacts'] as List<dynamic>?)
+                ?.map(
+                  (e) => EmergencyContact.fromJson(e as Map<String, dynamic>),
+                )
                 .toList() ??
             const [],
       );
@@ -151,28 +162,30 @@ class HealthFormData {
       notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
       voiceCommandsEnabled: voiceCommandsEnabled ?? this.voiceCommandsEnabled,
       healthDataAccess: healthDataAccess ?? this.healthDataAccess,
-      enabledNotificationCategories: enabledNotificationCategories ?? this.enabledNotificationCategories,
+      enabledNotificationCategories:
+          enabledNotificationCategories ?? this.enabledNotificationCategories,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'dailyStepGoal': dailyStepGoal,
-        'notificationsEnabled': notificationsEnabled,
-        'voiceCommandsEnabled': voiceCommandsEnabled,
-        'healthDataAccess': healthDataAccess,
-        'enabledNotificationCategories': enabledNotificationCategories,
-      };
+    'dailyStepGoal': dailyStepGoal,
+    'notificationsEnabled': notificationsEnabled,
+    'voiceCommandsEnabled': voiceCommandsEnabled,
+    'healthDataAccess': healthDataAccess,
+    'enabledNotificationCategories': enabledNotificationCategories,
+  };
 
   factory HealthFormData.fromJson(Map<String, dynamic> json) => HealthFormData(
-        dailyStepGoal: json['dailyStepGoal'] as int? ?? 10000,
-        notificationsEnabled: json['notificationsEnabled'] as bool? ?? true,
-        voiceCommandsEnabled: json['voiceCommandsEnabled'] as bool? ?? true,
-        healthDataAccess: json['healthDataAccess'] as bool? ?? false,
-        enabledNotificationCategories: (json['enabledNotificationCategories'] as List<dynamic>?)
-                ?.map((e) => e.toString())
-                .toList() ??
-            const [],
-      );
+    dailyStepGoal: json['dailyStepGoal'] as int? ?? 10000,
+    notificationsEnabled: json['notificationsEnabled'] as bool? ?? true,
+    voiceCommandsEnabled: json['voiceCommandsEnabled'] as bool? ?? true,
+    healthDataAccess: json['healthDataAccess'] as bool? ?? false,
+    enabledNotificationCategories:
+        (json['enabledNotificationCategories'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const [],
+  );
 }
 
 class OnboardingFormData {
@@ -254,7 +267,8 @@ class OnboardingService {
     await _prefs.setString(_profileKey, jsonEncode(profile.toJson()));
   }
 
-  ProfileFormData? getProfile() => _decode(_profileKey, ProfileFormData.fromJson);
+  ProfileFormData? getProfile() =>
+      _decode(_profileKey, ProfileFormData.fromJson);
 
   Future<void> saveHealth(HealthFormData health) async {
     await _prefs.setString(_healthKey, jsonEncode(health.toJson()));

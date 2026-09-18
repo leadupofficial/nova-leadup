@@ -10,6 +10,7 @@ import '../features/auth/register_page.dart';
 import '../features/converse/converse_page.dart';
 import '../features/home/home_page.dart';
 import '../features/memory/memory_page.dart';
+import '../features/onboarding/companion_page.dart';
 import '../features/onboarding/health_page.dart';
 import '../features/onboarding/onboarding_service.dart';
 import '../features/onboarding/permissions_page.dart';
@@ -92,6 +93,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/onboarding/profile',
         name: 'onboarding-profile',
         builder: (context, state) => const ProfilePage(),
+      ),
+      GoRoute(
+        path: '/onboarding/companion',
+        name: 'onboarding-companion',
+        builder: (context, state) => const CompanionPage(),
       ),
       GoRoute(
         path: '/onboarding/health',

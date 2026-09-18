@@ -7,15 +7,19 @@ void main() {
       expect(OnboardingStep.welcome.stepIndex, 0);
       expect(OnboardingStep.permissions.stepIndex, 1);
       expect(OnboardingStep.profileSetup.stepIndex, 2);
-      expect(OnboardingStep.healthSetup.stepIndex, 3);
-      expect(OnboardingStep.complete.stepIndex, 4);
+      // `companion` was inserted from the OpenDesign export, shifting the two
+      // steps after it.
+      expect(OnboardingStep.companion.stepIndex, 3);
+      expect(OnboardingStep.healthSetup.stepIndex, 4);
+      expect(OnboardingStep.complete.stepIndex, 5);
     });
 
     test('fromIndex maps correctly', () {
       expect(OnboardingStep.fromIndex(0), OnboardingStep.welcome);
       expect(OnboardingStep.fromIndex(1), OnboardingStep.permissions);
       expect(OnboardingStep.fromIndex(2), OnboardingStep.profileSetup);
-      expect(OnboardingStep.fromIndex(3), OnboardingStep.healthSetup);
+      expect(OnboardingStep.fromIndex(3), OnboardingStep.companion);
+      expect(OnboardingStep.fromIndex(4), OnboardingStep.healthSetup);
       expect(OnboardingStep.fromIndex(99), OnboardingStep.complete);
     });
 
@@ -23,6 +27,7 @@ void main() {
       expect(OnboardingStep.welcome.routeName, '/onboarding/welcome');
       expect(OnboardingStep.permissions.routeName, '/onboarding/permissions');
       expect(OnboardingStep.profileSetup.routeName, '/onboarding/profile');
+      expect(OnboardingStep.companion.routeName, '/onboarding/companion');
       expect(OnboardingStep.healthSetup.routeName, '/onboarding/health');
       expect(OnboardingStep.complete.routeName, '/onboarding/complete');
     });

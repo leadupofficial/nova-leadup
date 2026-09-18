@@ -126,7 +126,7 @@ class MePage extends ConsumerWidget {
                   ),
                   data: (p) => NovaListRow(
                     title: p.name,
-                    subtitle: 'Name, tone and language policy',
+                    subtitle: 'Name, personality and speech style',
                     icon: Icons.auto_awesome_rounded,
                     onTap: () => _editPersona(context, ref, p),
                   ),
@@ -281,19 +281,19 @@ class MePage extends ConsumerWidget {
       builder: (sheetContext) => _ToggleSheet<NovaNotificationPrefs>(
         title: 'Notifications',
         initial: current,
+        // Field names verified against GET /api/v1/settings/preferences, which
+        // nests these under `notifications`.
         toggles: [
-          _Toggle('reminders', '⏰', 'Reminders', (p) => p.reminders),
-          _Toggle('proactiveNudges', '💡', 'Proactive nudges',
-              (p) => p.proactiveNudges),
-          _Toggle('dailyBriefing', '📰', 'Daily briefing',
-              (p) => p.dailyBriefing),
+          _Toggle('push', '🔔', 'Push notifications', (p) => p.push),
+          _Toggle('inApp', '📱', 'In-app notifications', (p) => p.inApp),
           _Toggle('email', '✉️', 'Email notifications', (p) => p.email),
+          _Toggle('sms', '💬', 'SMS notifications', (p) => p.sms),
         ],
         apply: (p, key, value) => switch (key) {
-          'reminders' => p.copyWith(reminders: value),
-          'proactiveNudges' => p.copyWith(proactiveNudges: value),
-          'dailyBriefing' => p.copyWith(dailyBriefing: value),
+          'push' => p.copyWith(push: value),
+          'inApp' => p.copyWith(inApp: value),
           'email' => p.copyWith(email: value),
+          'sms' => p.copyWith(sms: value),
           _ => p,
         },
         save: (p) => ref.read(novaMutationsProvider).saveNotificationPrefs(p),
@@ -308,7 +308,10 @@ class MePage extends ConsumerWidget {
   ) async {
     final c = context.nova;
     final controller = TextEditingController(text: persona.name);
-    var tone = persona.tone;
+    // `personality` is the API field; there is no `tone`.
+    var personality = persona.personality;
+    var voiceSpeed = persona.voiceSpeed;
+    var languagePolicy = persona.languagePolicy;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -333,30 +336,64 @@ class MePage extends ConsumerWidget {
                 hint: 'Nova',
               ),
               const SizedBox(height: NovaSpace.md),
-              Text('Tone', style: NovaTheme.overline(c)),
+              Text('Personality', style: NovaTheme.overline(c)),
               const SizedBox(height: NovaSpace.xs),
               Wrap(
                 spacing: NovaSpace.xs,
-                children: ['warm', 'concise', 'playful', 'professional']
+                children: ['friendly', 'professional', 'executive', 'companion']
                     .map(
                       (t) => NovaChip(
                         label: t,
-                        selected: tone == t,
-                        onTap: () => setSheetState(() => tone = t),
+                        selected: personality == t,
+                        onTap: () => setSheetState(() => personality = t),
                       ),
                     )
                     .toList(),
               ),
-              const SizedBox(height: NovaSpace.lg),
+              const SizedBox(height: NovaSpace.md),
+              Text('Speech style', style: NovaTheme.overline(c)),
+              const SizedBox(height: NovaSpace.xs),
+              Wrap(
+                spacing: NovaSpace.xs,
+                children: const [
+                  ('auto', 'Auto Tamil–English'),
+                  ('ta', 'Tamil'),
+                  ('en', 'English'),
+                  ('tanglish', 'Tanglish'),
+                ]
+                    .map(
+                      (e) => NovaChip(
+                        label: e.$2,
+                        selected: languagePolicy == e.$1,
+                        onTap: () =>
+                            setSheetState(() => languagePolicy = e.$1),
+                      ),
+                    )
+                    .toList(),
+              ),
+              const SizedBox(height: NovaSpace.md),
+              Text('Voice speed · $voiceSpeed%',
+                  style: NovaTheme.overline(c)),
+              Slider(
+                value: voiceSpeed.toDouble(),
+                min: 50,
+                max: 200,
+                divisions: 15,
+                activeColor: c.accent,
+                label: '$voiceSpeed%',
+                onChanged: (v) =>
+                    setSheetState(() => voiceSpeed = v.round()),
+              ),
               NovaPrimaryButton(
                 label: 'Save',
                 onPressed: () async {
-                  final updated = NovaPersona(
+                  final updated = persona.copyWith(
                     name: controller.text.trim().isEmpty
                         ? 'Nova'
                         : controller.text.trim(),
-                    tone: tone,
-                    languagePolicy: persona.languagePolicy,
+                    personality: personality,
+                    languagePolicy: languagePolicy,
+                    voiceSpeed: voiceSpeed,
                   );
                   await ref.read(novaMutationsProvider).savePersona(updated);
                   if (sheetContext.mounted) Navigator.pop(sheetContext);

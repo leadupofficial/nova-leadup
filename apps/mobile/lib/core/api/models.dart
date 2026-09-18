@@ -287,8 +287,8 @@ class NovaPrivacyPrefs {
     this.saveMemories = true,
     this.cloudProcessing = true,
     this.localProcessing = false,
-    this.recordingRetentionDays,
-    this.transcriptRetentionDays,
+    this.autoDeleteRecordingsDays,
+    this.autoDeleteTranscriptsDays,
   });
 
   final bool saveConversations;
@@ -297,8 +297,8 @@ class NovaPrivacyPrefs {
   final bool saveMemories;
   final bool cloudProcessing;
   final bool localProcessing;
-  final int? recordingRetentionDays;
-  final int? transcriptRetentionDays;
+  final int? autoDeleteRecordingsDays;
+  final int? autoDeleteTranscriptsDays;
 
   factory NovaPrivacyPrefs.fromJson(Map<String, dynamic> j) => NovaPrivacyPrefs(
     saveConversations: _parseBool(j['saveConversations'], true),
@@ -307,12 +307,12 @@ class NovaPrivacyPrefs {
     saveMemories: _parseBool(j['saveMemories'], true),
     cloudProcessing: _parseBool(j['cloudProcessing'], true),
     localProcessing: _parseBool(j['localProcessing']),
-    recordingRetentionDays: j['recordingRetentionDays'] == null
+    autoDeleteRecordingsDays: j['autoDeleteRecordingsDays'] == null
         ? null
-        : _parseInt(j['recordingRetentionDays']),
-    transcriptRetentionDays: j['transcriptRetentionDays'] == null
+        : _parseInt(j['autoDeleteRecordingsDays']),
+    autoDeleteTranscriptsDays: j['autoDeleteTranscriptsDays'] == null
         ? null
-        : _parseInt(j['transcriptRetentionDays']),
+        : _parseInt(j['autoDeleteTranscriptsDays']),
   );
 
   NovaPrivacyPrefs copyWith({
@@ -322,8 +322,8 @@ class NovaPrivacyPrefs {
     bool? saveMemories,
     bool? cloudProcessing,
     bool? localProcessing,
-    int? recordingRetentionDays,
-    int? transcriptRetentionDays,
+    int? autoDeleteRecordingsDays,
+    int? autoDeleteTranscriptsDays,
   }) => NovaPrivacyPrefs(
     saveConversations: saveConversations ?? this.saveConversations,
     saveRecordings: saveRecordings ?? this.saveRecordings,
@@ -331,10 +331,10 @@ class NovaPrivacyPrefs {
     saveMemories: saveMemories ?? this.saveMemories,
     cloudProcessing: cloudProcessing ?? this.cloudProcessing,
     localProcessing: localProcessing ?? this.localProcessing,
-    recordingRetentionDays:
-        recordingRetentionDays ?? this.recordingRetentionDays,
-    transcriptRetentionDays:
-        transcriptRetentionDays ?? this.transcriptRetentionDays,
+    autoDeleteRecordingsDays:
+        autoDeleteRecordingsDays ?? this.autoDeleteRecordingsDays,
+    autoDeleteTranscriptsDays:
+        autoDeleteTranscriptsDays ?? this.autoDeleteTranscriptsDays,
   );
 
   Map<String, dynamic> toJson() => {
@@ -344,88 +344,151 @@ class NovaPrivacyPrefs {
     'saveMemories': saveMemories,
     'cloudProcessing': cloudProcessing,
     'localProcessing': localProcessing,
-    if (recordingRetentionDays != null)
-      'recordingRetentionDays': recordingRetentionDays,
-    if (transcriptRetentionDays != null)
-      'transcriptRetentionDays': transcriptRetentionDays,
+    if (autoDeleteRecordingsDays != null)
+      'autoDeleteRecordingsDays': autoDeleteRecordingsDays,
+    if (autoDeleteTranscriptsDays != null)
+      'autoDeleteTranscriptsDays': autoDeleteTranscriptsDays,
   };
 }
 
+/// Notification and appearance preferences.
+///
+/// VERIFIED shape (`GET /api/v1/settings/preferences`) — the server nests these:
+///   {"notifications":{"push":true,"email":true,"sms":false,"inApp":true},
+///    "appearance":{"theme":"system","fontSize":"medium"}}
+///
+/// An earlier version of this model used flat booleans (`reminders`,
+/// `proactiveNudges`…). Zod strips unknown keys rather than rejecting them, so
+/// every write would have been silently discarded with a 200 response — the UI
+/// would have shown the toggle as saved while nothing persisted.
 class NovaNotificationPrefs {
   const NovaNotificationPrefs({
-    this.reminders = true,
-    this.proactiveNudges = true,
-    this.dailyBriefing = false,
-    this.email = false,
-    this.quietHoursStart,
-    this.quietHoursEnd,
+    this.push = true,
+    this.email = true,
+    this.sms = false,
+    this.inApp = true,
+    this.theme = 'system',
+    this.fontSize = 'medium',
   });
 
-  final bool reminders;
-  final bool proactiveNudges;
-  final bool dailyBriefing;
+  final bool push;
   final bool email;
-  final String? quietHoursStart;
-  final String? quietHoursEnd;
+  final bool sms;
+  final bool inApp;
+  final String theme; // 'system' | 'light' | 'dark'
+  final String fontSize; // 'small' | 'medium' | 'large'
 
-  factory NovaNotificationPrefs.fromJson(Map<String, dynamic> j) =>
-      NovaNotificationPrefs(
-        reminders: _parseBool(j['reminders'], true),
-        proactiveNudges: _parseBool(j['proactiveNudges'], true),
-        dailyBriefing: _parseBool(j['dailyBriefing']),
-        email: _parseBool(j['email']),
-        quietHoursStart: j['quietHoursStart'] as String?,
-        quietHoursEnd: j['quietHoursEnd'] as String?,
-      );
+  factory NovaNotificationPrefs.fromJson(Map<String, dynamic> j) {
+    final n = j['notifications'] is Map
+        ? Map<String, dynamic>.from(j['notifications'] as Map)
+        : const <String, dynamic>{};
+    final a = j['appearance'] is Map
+        ? Map<String, dynamic>.from(j['appearance'] as Map)
+        : const <String, dynamic>{};
+    return NovaNotificationPrefs(
+      push: _parseBool(n['push'], true),
+      email: _parseBool(n['email'], true),
+      sms: _parseBool(n['sms']),
+      inApp: _parseBool(n['inApp'], true),
+      theme: (a['theme'] ?? 'system').toString(),
+      fontSize: (a['fontSize'] ?? 'medium').toString(),
+    );
+  }
 
   NovaNotificationPrefs copyWith({
-    bool? reminders,
-    bool? proactiveNudges,
-    bool? dailyBriefing,
+    bool? push,
     bool? email,
+    bool? sms,
+    bool? inApp,
+    String? theme,
+    String? fontSize,
   }) => NovaNotificationPrefs(
-    reminders: reminders ?? this.reminders,
-    proactiveNudges: proactiveNudges ?? this.proactiveNudges,
-    dailyBriefing: dailyBriefing ?? this.dailyBriefing,
+    push: push ?? this.push,
     email: email ?? this.email,
-    quietHoursStart: quietHoursStart,
-    quietHoursEnd: quietHoursEnd,
+    sms: sms ?? this.sms,
+    inApp: inApp ?? this.inApp,
+    theme: theme ?? this.theme,
+    fontSize: fontSize ?? this.fontSize,
   );
 
+  /// Rebuilds the nested envelope the API expects.
   Map<String, dynamic> toJson() => {
-    'reminders': reminders,
-    'proactiveNudges': proactiveNudges,
-    'dailyBriefing': dailyBriefing,
-    'email': email,
+    'notifications': {
+      'push': push,
+      'email': email,
+      'sms': sms,
+      'inApp': inApp,
+    },
+    'appearance': {'theme': theme, 'fontSize': fontSize},
   };
 }
 
-/// The companion's persona — name, tone and language policy (blueprint §5.16).
+/// The companion's persona.
+///
+/// VERIFIED shape (`GET /api/v1/settings/persona`):
+///   {"name":"Assistant","personality":"friendly","voiceSpeed":100,
+///    "voiceTone":"neutral","languagePolicy":"auto","wakeWordEnabled":true}
+///
+/// The field is `personality`, not `tone`, and there is no `avatarId` — the
+/// avatar catalogue is a separate resource (`/settings/avatars`).
 class NovaPersona {
   const NovaPersona({
     this.name = 'Nova',
-    this.tone = 'warm',
+    this.personality = 'friendly',
+    this.voiceSpeed = 100,
+    this.voiceTone = 'neutral',
     this.languagePolicy = 'auto',
-    this.avatarId,
+    this.wakeWordEnabled = false,
   });
 
   final String name;
-  final String tone;
+
+  /// friendly | professional | executive | companion
+  final String personality;
+
+  /// 50–200 (the API clamps to this range).
+  final int voiceSpeed;
+
+  /// neutral | warm | calm | …
+  final String voiceTone;
+
+  /// auto | en | ta | tanglish
   final String languagePolicy;
-  final String? avatarId;
+
+  final bool wakeWordEnabled;
 
   factory NovaPersona.fromJson(Map<String, dynamic> j) => NovaPersona(
     name: (j['name'] ?? 'Nova').toString(),
-    tone: (j['tone'] ?? 'warm').toString(),
+    personality: (j['personality'] ?? 'friendly').toString(),
+    voiceSpeed: _parseInt(j['voiceSpeed'], 100),
+    voiceTone: (j['voiceTone'] ?? 'neutral').toString(),
     languagePolicy: (j['languagePolicy'] ?? 'auto').toString(),
-    avatarId: j['avatarId'] as String?,
+    wakeWordEnabled: _parseBool(j['wakeWordEnabled']),
+  );
+
+  NovaPersona copyWith({
+    String? name,
+    String? personality,
+    int? voiceSpeed,
+    String? voiceTone,
+    String? languagePolicy,
+    bool? wakeWordEnabled,
+  }) => NovaPersona(
+    name: name ?? this.name,
+    personality: personality ?? this.personality,
+    voiceSpeed: voiceSpeed ?? this.voiceSpeed,
+    voiceTone: voiceTone ?? this.voiceTone,
+    languagePolicy: languagePolicy ?? this.languagePolicy,
+    wakeWordEnabled: wakeWordEnabled ?? this.wakeWordEnabled,
   );
 
   Map<String, dynamic> toJson() => {
     'name': name,
-    'tone': tone,
+    'personality': personality,
+    'voiceSpeed': voiceSpeed,
+    'voiceTone': voiceTone,
     'languagePolicy': languagePolicy,
-    if (avatarId != null) 'avatarId': avatarId,
+    'wakeWordEnabled': wakeWordEnabled,
   };
 }
 
