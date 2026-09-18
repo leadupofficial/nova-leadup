@@ -3,6 +3,7 @@
 /// 22 Indian languages + English, with mixed-language detection and
 /// provider routing metadata. Any change here must be reflected in the
 /// shared-types TypeScript module so server and client agree.
+library;
 
 /// Provider identifiers used by the voice pipeline.
 enum VoiceProvider { elevenlabs, sarvam, google, azure }
