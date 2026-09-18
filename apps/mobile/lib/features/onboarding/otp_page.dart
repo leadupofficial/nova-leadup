@@ -11,8 +11,8 @@ import '../../services/network_service.dart';
 import 'offline_page.dart' show OnboardingAura;
 import 'splash_page.dart' show NovaGradientText;
 
-/// The phone-OTP endpoints, as function types so a caller can point them at
-/// whichever host serves them, or at a test fake.
+/// The phone-OTP endpoints as function types, so a caller can point them at
+/// whichever host serves them.
 typedef OtpRequestCode = Future<void> Function(String phone);
 typedef OtpVerifyCode =
     Future<Map<String, dynamic>> Function(String phone, String code);
@@ -43,15 +43,14 @@ class OtpPage extends ConsumerStatefulWidget {
     this.requestOnStart = true,
   });
 
-  /// The number the code was sent to, in E.164. Required for any real request;
-  /// when null the copy keeps the export's masked placeholder.
+  /// The number the code was sent to, in E.164; required for a real request.
   final String? phone;
 
   /// Called once, and only after the server confirmed the code. The payload is
-  /// the verify response as-is; persisting a session belongs to the caller.
+  /// the verify response as-is; the caller owns session persistence.
   final ValueChanged<Map<String, dynamic>>? onVerified;
 
-  /// The back chevron. Defaults to popping the route when one is present.
+  /// The back chevron; defaults to popping the route when one is present.
   final VoidCallback? onBack;
 
   /// Overrides the real transport, which POSTs `{ phoneNumber, channel }` to
@@ -63,8 +62,7 @@ class OtpPage extends ConsumerStatefulWidget {
   final OtpRequestCode? requestCode;
   final OtpVerifyCode? verifyCode;
 
-  /// The export shows six boxes, opens mid-countdown and so sends a code on
-  /// first build.
+  /// The export shows six boxes and opens mid-countdown, so send on first build.
   final int codeLength;
   final int resendSeconds;
   final bool requestOnStart;
@@ -83,7 +81,8 @@ class _OtpPageState extends ConsumerState<OtpPage> {
   bool _resending = false;
 
   static const _noPhone =
-      'No phone number was supplied. Pass `phone` to OtpPage to use a real code.';
+      'No phone number was supplied. Pass `phone` to OtpPage to use a real '
+      'code.';
 
   @override
   void initState() {
@@ -132,7 +131,9 @@ class _OtpPageState extends ConsumerState<OtpPage> {
           data: <String, dynamic>{'phoneNumber': phone, 'code': _code},
         );
     final raw = response.data;
-    final body = raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+    final body = raw is Map
+        ? Map<String, dynamic>.from(raw)
+        : <String, dynamic>{};
     final data = body['data'];
     return data is Map ? Map<String, dynamic>.from(data) : body;
   }
@@ -193,8 +194,8 @@ class _OtpPageState extends ConsumerState<OtpPage> {
   /// already prefers the server's problem+json `detail`.
   String _describe(NetworkException error) {
     if (error.statusCode == 404) {
-      return 'This server has no phone-OTP endpoint, so the code cannot be '
-          'checked. Sign in with email and password instead.';
+      return 'This server has no phone-OTP endpoint; sign in with email and '
+          'password instead.';
     }
     if (error.statusCode == 429) return 'Too many attempts. Wait a minute.';
     if (error is NetworkConnectionException) {
@@ -290,8 +291,7 @@ class _OtpPageState extends ConsumerState<OtpPage> {
                     busy: _verifying,
                     onPressed: _verify,
                   ),
-                  // `.security` copy, bottom-anchored as the export's card
-                  // is. The card's surface, border and lock chip are dropped.
+                  // `.security` copy, bottom-anchored; card chrome dropped.
                   const Spacer(),
                   Text(
                     'This code expires in 5 minutes. NOVA never stores it.',
@@ -307,23 +307,21 @@ class _OtpPageState extends ConsumerState<OtpPage> {
     );
   }
 
-  /// `.resend` — counting down while the code is fresh, then a live link.
+  /// `.resend` — counting down, then a live link.
   Widget _resend(BuildContext context) {
     final c = context.nova;
     final base = Theme.of(
       context,
     ).textTheme.bodyLarge!.copyWith(fontSize: 13, color: c.muted);
     if (_secondsLeft > 0) {
+      final clock =
+          '${_secondsLeft ~/ 60}:'
+          '${(_secondsLeft % 60).toString().padLeft(2, '0')}';
       return Text.rich(
         TextSpan(
           children: [
             const TextSpan(text: 'Resend code in '),
-            TextSpan(
-              text:
-                  '${_secondsLeft ~/ 60}:'
-                  '${(_secondsLeft % 60).toString().padLeft(2, '0')}',
-              style: base,
-            ),
+            TextSpan(text: clock, style: base),
           ],
         ),
         textAlign: TextAlign.center,
@@ -367,6 +365,7 @@ class _OtpBoxesState extends State<_OtpBoxes> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   String _code = '';
+  bool _focused = false;
 
   @override
   void dispose() {
@@ -392,9 +391,8 @@ class _OtpBoxesState extends State<_OtpBoxes> {
     final c = context.nova;
     final digit = i < _code.length ? _code[i] : null;
     final filled = digit != null;
-    final last = widget.length - 1;
-    final active = _code.length > last ? last : _code.length;
-    final focused = _focusNode.hasFocus && i == active;
+    final active = _code.length.clamp(0, widget.length - 1).toInt();
+    final focused = _focused && i == active;
     final tint = widget.invalid
         ? c.danger
         : (filled || focused)
@@ -451,31 +449,35 @@ class _OtpBoxesState extends State<_OtpBoxes> {
                 ),
               ),
               Positioned.fill(
-                child: TextField(
-                  controller: _controller,
-                  focusNode: _focusNode,
-                  autofocus: true,
-                  showCursor: false,
-                  textAlign: TextAlign.center,
-                  keyboardType: TextInputType.number,
-                  autofillHints: const [AutofillHints.oneTimeCode],
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(widget.length),
-                  ],
-                  onChanged: _onChanged,
-                  style: const TextStyle(color: Colors.transparent, height: 1),
-                  // The theme fills and outlines inputs; this one is only the
-                  // transparent hit target for the boxes underneath.
-                  decoration: const InputDecoration(
-                    filled: false,
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    errorBorder: InputBorder.none,
-                    contentPadding: EdgeInsets.zero,
-                    isDense: true,
-                    counterText: '',
+                // Rebuilds on focus so the active cell's `.otp-cell:focus` ring
+                // appears before the first digit is typed.
+                child: Focus(
+                  onFocusChange: (value) => setState(() => _focused = value),
+                  child: TextField(
+                    controller: _controller,
+                    focusNode: _focusNode,
+                    autofocus: true,
+                    showCursor: false,
+                    keyboardType: TextInputType.number,
+                    autofillHints: const [AutofillHints.oneTimeCode],
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(widget.length),
+                    ],
+                    onChanged: _onChanged,
+                    style: const TextStyle(color: Colors.transparent),
+                    // The theme fills and outlines inputs; this one is only the
+                    // transparent hit target for the boxes underneath.
+                    decoration: const InputDecoration(
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      errorBorder: InputBorder.none,
+                      contentPadding: EdgeInsets.zero,
+                      isDense: true,
+                      counterText: '',
+                    ),
                   ),
                 ),
               ),

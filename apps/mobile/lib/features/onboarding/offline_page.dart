@@ -221,9 +221,9 @@ class _OfflinePageState extends ConsumerState<OfflinePage> {
                             child: Text(
                               online
                                   ? 'Live AI is available again.'
-                                  : 'Your saved reminders still work. Live AI '
-                                        'is unavailable — reconnect to restore '
-                                        'conversation.',
+                                  : 'Your saved reminders still work. Live '
+                                        'AI is unavailable — reconnect to '
+                                        'restore conversation.',
                               textAlign: TextAlign.center,
                               style: text.bodyLarge!.copyWith(
                                 color: c.muted,

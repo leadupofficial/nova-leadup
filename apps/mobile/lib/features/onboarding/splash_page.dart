@@ -101,7 +101,9 @@ final splashReadinessProvider = FutureProvider<SplashReadiness>((ref) async {
     location: location,
     statusLabel: health == null
         ? 'Slow connection — continuing'
-        : (health.healthy ? 'Connected securely' : 'Offline — saved data only'),
+        : (health.healthy
+              ? 'Connected securely'
+              : 'Offline — saved data only'),
     authenticated: authenticated,
     user: repository.currentUser,
     onboardingStep: done ? null : step,
@@ -270,7 +272,6 @@ class _LogoGroupState extends _LoopingState<_LogoGroup> {
           ),
         ),
         const SizedBox(height: 36),
-        // `.wordmark` — 44px 800, -0.04em, fg -> fg@0.72 top to bottom.
         // `.wordmark` — 44px 800, -0.04em, fg -> fg@0.72 down the glyphs.
         NovaGradientText(
           'NOVA',
@@ -280,7 +281,9 @@ class _LogoGroupState extends _LoopingState<_LogoGroup> {
         Text(
           'Private companion, on your terms.',
           textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.bodyLarge!.copyWith(color: c.muted),
+          style: Theme.of(
+            context,
+          ).textTheme.bodyLarge!.copyWith(color: c.muted),
         ),
       ],
     );

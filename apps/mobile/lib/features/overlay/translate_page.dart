@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -34,15 +34,32 @@ class _TranslatePageState extends ConsumerState<TranslatePage> {
   static const String _exportSample = 'நாளைக்கு quotation அனுப்புங்கள்';
 
   /// Target-pane `.text-action`s: emoji, label, why each is off.
-  static const List<(String, String, String)> _targetActions = [
-    ('📋', 'Copy', 'There is no translation to copy yet.'),
-    ('✏', 'Edit', 'There is no translation to edit yet.'),
-    ('🔊', 'Speak', 'The server has TTS, but this app has no speech client yet.'),
-    ('↗', 'Share', 'This app has no share integration yet.'),
-  ];
-
   static const String _speakReason =
       'On-device speech capture is not implemented in this build.';
+
+  /// Target-pane `.text-action`s: emoji, label, why it is off, and its handler.
+  ///
+  /// Copy becomes real as soon as a translation exists. The other three stay
+  /// disabled with the reason that is actually true for each.
+  List<(String, String, String?, VoidCallback?)> _actions() {
+    final hasResult = _translation != null;
+    return [
+      (
+        '📋',
+        'Copy',
+        hasResult ? null : 'Translate something first.',
+        hasResult ? _copyResult : null,
+      ),
+      (
+        '✏',
+        'Edit',
+        'The result is read-only — edit the source text and translate again.',
+        null,
+      ),
+      ('🔊', 'Speak', _speakReason, null),
+      ('↗', 'Share', 'This app has no share integration yet.', null),
+    ];
+  }
 
   late final TextEditingController _source = TextEditingController(
     text: widget.sourceText ?? _exportSample,
@@ -254,8 +271,14 @@ class _TranslatePageState extends ConsumerState<TranslatePage> {
                       c,
                       label: '$targetName translation',
                       actions: [
-                        for (final (emoji, label, reason) in _targetActions)
-                          _textAction(c, emoji, label, reason: reason),
+                        for (final (emoji, label, reason, onTap) in _actions())
+                          _textAction(
+                            c,
+                            emoji,
+                            label,
+                            onTap: onTap,
+                            reason: reason,
+                          ),
                       ],
                       child: _targetPane(c),
                     ),
@@ -390,6 +413,17 @@ class _TranslatePageState extends ConsumerState<TranslatePage> {
     );
     if (enabled || reason == null) return hit;
     return Tooltip(message: reason, child: hit);
+  }
+
+  /// Copies the real translation to the system clipboard.
+  Future<void> _copyResult() async {
+    final text = _translation?.translatedText;
+    if (text == null || text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(
+      context,
+    )?.showSnackBar(const SnackBar(content: Text('Translation copied.')));
   }
 
   /// The target pane: a real translation from the API, with real loading and
