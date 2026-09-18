@@ -114,106 +114,80 @@ export async function buildUserContext(
 
 	const counts = { tasks: 0, reminders: 0, memories: 0 };
 	const sections: string[] = [];
-
-	try {
-		// `tasks` has no priority column — CreateTaskSchema accepts one, but the
-		// table does not store it, so selecting it would be a lie.
-		const rows = await db
-			.select({
-				title: tasks.title,
-				status: tasks.status,
-				dueAt: tasks.dueAt,
-			})
-			.from(tasks)
-			.where(
-				and(
-					eq(tasks.userId, userId),
-					inArray(tasks.status, ['pending', 'in_progress'])
-				)
-			)
-			.orderBy(asc(tasks.dueAt), desc(tasks.createdAt))
-			.limit(l.maxTasks);
-
-		counts.tasks = rows.length;
-		if (rows.length) {
-			sections.push(
-				`Open tasks:\n${rows
+	// The three reads are independent, so they run together. Sequentially they
+	// sat directly in the latency path of every spoken turn — this runs before
+	// the model is even called — and three round trips where one would do is
+	// pure added delay.
+	const [taskSection, reminderSection, memorySection] = await Promise.all([
+		(async () => {
+			try {
+				// `tasks` has no priority column — CreateTaskSchema accepts one, but
+				// the table does not store it, so selecting it would be a lie.
+				const rows = await db
+					.select({ title: tasks.title, status: tasks.status, dueAt: tasks.dueAt })
+					.from(tasks)
+					.where(and(eq(tasks.userId, userId), inArray(tasks.status, ['pending', 'in_progress'])))
+					.orderBy(asc(tasks.dueAt), desc(tasks.createdAt))
+					.limit(l.maxTasks);
+				counts.tasks = rows.length;
+				if (!rows.length) return null;
+				return `Open tasks:\n${rows
 					.map((t) => {
 						const due = t.dueAt ? ` (due ${formatWhen(t.dueAt)})` : ' (no due date)';
 						const state = t.status === 'in_progress' ? 'in progress' : 'pending';
 						return `- ${truncate(t.title, l.maxCharsPerItem)} — ${state}${due}`;
 					})
-					.join('\n')}`
-			);
-		}
-	} catch {
-		sections.push('Open tasks: unavailable right now.');
-	}
-
-	try {
-		// Only reminders that have not been dismissed and are not in the past by
-		// more than a day, so the block stays about what is actually coming up.
-		const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-		const rows = await db
-			.select({
-				title: reminders.title,
-				triggerAt: reminders.triggerAt,
-				dismissed: reminders.dismissed,
-			})
-			.from(reminders)
-			.where(
-				and(
-					eq(reminders.userId, userId),
-					eq(reminders.dismissed, false),
-					gte(reminders.triggerAt, since)
-				)
-			)
-			.orderBy(asc(reminders.triggerAt))
-			.limit(l.maxReminders);
-
-		counts.reminders = rows.length;
-		if (rows.length) {
-			sections.push(
-				`Upcoming reminders:\n${rows
+					.join('\n')}`;
+			} catch {
+				return 'Open tasks: unavailable right now.';
+			}
+		})(),
+		(async () => {
+			try {
+				// Only reminders that have not been dismissed and are not in the past
+				// by more than a day, so the block stays about what is coming up.
+				const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+				const rows = await db
+					.select({ title: reminders.title, triggerAt: reminders.triggerAt, dismissed: reminders.dismissed })
+					.from(reminders)
+					.where(and(eq(reminders.userId, userId), eq(reminders.dismissed, false), gte(reminders.triggerAt, since)))
+					.orderBy(asc(reminders.triggerAt))
+					.limit(l.maxReminders);
+				counts.reminders = rows.length;
+				if (!rows.length) return null;
+				return `Upcoming reminders:\n${rows
 					.map((r) => `- ${formatWhen(r.triggerAt)} — ${truncate(r.title, l.maxCharsPerItem)}`)
-					.join('\n')}`
-			);
-		}
-	} catch {
-		sections.push('Upcoming reminders: unavailable right now.');
-	}
-
-	try {
-		// `memories` has no deletedAt; it is archived through `status`. New
-		// memories default to 'proposed', so excluding archived/rejected is the
-		// right filter rather than demanding 'approved'.
-		const rows = await db
-			.select({
-				content: memories.content,
-				category: memories.category,
-				importance: memories.importance,
-			})
-			.from(memories)
-			.where(
-				and(
-					eq(memories.userId, userId),
-					inArray(memories.status, ['proposed', 'approved', 'active', 'corrected'])
-				)
-			)
-			.orderBy(desc(memories.importance), desc(memories.createdAt))
-			.limit(l.maxMemories);
-
-		counts.memories = rows.length;
-		if (rows.length) {
-			sections.push(
-				`Things you remember about the user:\n${rows
+					.join('\n')}`;
+			} catch {
+				return 'Upcoming reminders: unavailable right now.';
+			}
+		})(),
+		(async () => {
+			try {
+				// `memories` has no deletedAt; it is archived through `status`. New
+				// memories default to 'proposed', so this is the right filter rather
+				// than demanding 'approved'.
+				const rows = await db
+					.select({ content: memories.content, category: memories.category, importance: memories.importance })
+					.from(memories)
+					.where(and(eq(memories.userId, userId), inArray(memories.status, ['proposed', 'approved', 'active', 'corrected'])))
+					.orderBy(desc(memories.importance), desc(memories.createdAt))
+					.limit(l.maxMemories);
+				counts.memories = rows.length;
+				if (!rows.length) return null;
+				return `Things you remember about the user:\n${rows
 					.map((m) => `- [${m.category}] ${truncate(m.content, l.maxCharsPerItem)}`)
-					.join('\n')}`
-			);
-		}
-	} catch {
-		sections.push('Saved memories: unavailable right now.');
+					.join('\n')}`;
+			} catch {
+				return 'Saved memories: unavailable right now.';
+			}
+		})(),
+	]);
+
+	for (const section of [taskSection, reminderSection, memorySection]) {
+		if (section) sections.push(section);
 	}
+
 
 	if (!sections.length) {
 		return { text: '', counts, now };

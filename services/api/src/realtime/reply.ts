@@ -17,6 +17,7 @@
  */
 import { getLanguageByCode } from '@nova/shared-types';
 import { buildUserContext, composeSystemPrompt } from '../services/user-context.js';
+import { logger } from '../utils/logger.js';
 import { ASSISTANT_TOOLS_PROMPT } from '../services/assistant-tools.js';
 import { buildSystemPromptForLanguage } from '../routes/voice.js';
 import type { ChatMessage } from '../services/ai.js';
@@ -124,7 +125,11 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 
 	check();
 
+	// Timed because this sits in front of the model on every spoken turn, so its
+	// cost is added directly to how long the user waits for a reply.
+	const contextStartedAt = Date.now();
 	const context = await buildUserContext(options.userId);
+	const contextMs = Date.now() - contextStartedAt;
 	check();
 
 	const languageInfo = getLanguageByCode(options.language);
@@ -138,11 +143,14 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 	});
 
 	const messages: ChatMessage[] = [...options.history, { role: 'user', content: options.userText }];
+	const modelStartedAt = Date.now();
+	let firstTokenMs: number | null = null;
 	const result = await runStreamingAssistantLoop(
 		options.userId,
 		messages,
 		{ systemPrompt, maxTokens: 1024, temperature: 0.7, signal },
 		(delta) => {
+			if (firstTokenMs === null) firstTokenMs = Date.now() - modelStartedAt;
 			streamed += delta;
 			handlers.onToken(delta);
 			for (const sentence of chunker.push(delta)) enqueue(sentence);
@@ -150,6 +158,16 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 	);
 
 	check();
+	logger.info(
+		{
+			userId: options.userId,
+			contextMs,
+			groundedChars: context.text.length,
+			firstTokenMs,
+			modelMs: Date.now() - modelStartedAt,
+		},
+		'Realtime turn timings',
+	);
 	const tail = chunker.flush();
 	if (tail) enqueue(tail);
 	await ttsChain;
