@@ -25,6 +25,9 @@ dependencies:
  rive: ^0.14.11
  audio_session: ^0.2.4
  just_audio: ^0.10.6
+ # Microphone capture for the Converse voice loop (tap the mic, speak, get a
+ # transcript). Spoken replies still play through just_audio above.
+ record: ^7.1.1
  permission_handler: ^13.0.2
  sensors_plus: ^6.1.0
  local_auth: ^3.0.2

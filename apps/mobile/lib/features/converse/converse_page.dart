@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -6,12 +8,12 @@ import '../../core/api/models.dart';
 import '../../core/api/nova_api.dart';
 import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
+import '../../core/voice/voice_capture.dart';
+import '../../core/voice/voice_playback.dart';
 import 'tool_confirm_sheet.dart';
 
-/// The active conversation id for this Converse session.
-///
-/// `null` means "not yet resolved": the screen loads the newest conversation, or
-/// creates one, on first build.
+/// The active conversation id for this Converse session; `null` means "not yet
+/// resolved" — the screen loads the newest conversation, or creates one.
 class ActiveConversation extends Notifier<String?> {
   @override
   String? build() => null;
@@ -37,23 +39,18 @@ final transcriptProvider = NotifierProvider<Transcript, List<NovaMessage>>(
   Transcript.new,
 );
 
+enum _Phase { idle, connecting, listening, transcribing, thinking, speaking }
+
 /// Converse — the primary live-companion screen. Port of `chat/converse.html`.
 ///
-/// Structure from the export: `.top-bar` with the red `RECORDING` pill, the
-/// avatar ring + `.avatar-state` badge, the `.recording-indicator` waveform, the
-/// `.transcript` of `.msg` bubbles, the horizontally scrolling `.quick-actions`
-/// chips, the `.controls` row and the `.input-bar`.
-///
-/// The AI reply is real: it comes from
-/// `POST /api/v1/conversations/:id/messages`, which the API now wires into
-/// `services/api/src/services/ai.ts`. When no provider key is configured the
-/// server still stores the user's turn and returns a machine-readable
-/// `assistantError`, which this screen surfaces instead of losing the message.
+/// The voice loop is real: the mic drives [VoiceCapture] (the `record` plugin),
+/// `POST /api/v1/voice/stt` transcribes it, the transcription goes through the
+/// same [_send] path as typed text, and the reply is read aloud through
+/// [VoicePlayback] (`just_audio`) when "speak replies" is on (default: off).
 class ConversePage extends ConsumerStatefulWidget {
   const ConversePage({super.key, this.conversationId});
 
-  /// Opens a specific thread when navigated from the conversation history;
-  /// null means "resume the newest, or start one".
+  /// Opens a specific thread when navigated from the conversation history.
   final String? conversationId;
 
   @override
@@ -63,13 +60,33 @@ class ConversePage extends ConsumerStatefulWidget {
 class _ConversePageState extends ConsumerState<ConversePage> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
-  bool _recording = false;
+
+  late final VoiceCapture _capture;
+  late final VoicePlayback _playback;
+  StreamSubscription<VoiceCaptureEvent>? _captureSub;
+  StreamSubscription<bool>? _speakingSub;
+
   bool _busy = false;
-  String? _banner;
+  bool _listening = false;
+  bool _transcribing = false;
+  bool _speaking = false;
+
+  /// Off by default: NOVA must never start talking at a user unprompted.
+  bool _speakReplies = false;
+
+  String? _notice;
+  bool _noticeIsError = false;
+  bool _promptedApproval = false;
 
   @override
   void initState() {
     super.initState();
+    _capture = ref.read(voiceCaptureProvider);
+    _playback = ref.read(voicePlaybackProvider);
+    _captureSub = _capture.events.listen(_onCaptureEvent);
+    _speakingSub = _playback.playingStream.listen((playing) {
+      if (mounted && _speaking != playing) setState(() => _speaking = playing);
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _ensureConversation();
       _maybePromptApproval();
@@ -78,23 +95,33 @@ class _ConversePageState extends ConsumerState<ConversePage> {
 
   @override
   void dispose() {
+    _captureSub?.cancel();
+    _speakingSub?.cancel();
+    // Never leave the microphone open or NOVA talking behind the screen.
+    unawaited(_capture.cancel());
+    unawaited(_playback.stop());
     _input.dispose();
     _scroll.dispose();
     super.dispose();
   }
 
-  /// Blueprint §5.7: a side-effecting action must be confirmed before it runs.
-  /// The server queues it as a `tool_approvals` row; this raises the sheet for
-  /// the oldest pending one once, per visit.
-  bool _promptedApproval = false;
+  void _showNotice(String? message, {bool error = false}) {
+    _notice = message;
+    _noticeIsError = error;
+  }
 
+  void _noticeError(String message) {
+    setState(() => _showNotice(message, error: true));
+  }
+
+  /// Blueprint §5.7: a side-effecting action must be confirmed before it runs.
   Future<void> _maybePromptApproval() async {
     if (_promptedApproval || !mounted) return;
     try {
-      final approvals = await ref.read(novaApiProvider).listApprovals();
-      if (!mounted) return;
-      final pending = approvals.where((a) => a.isPending).toList();
-      if (pending.isEmpty) return;
+      final pending = (await ref.read(novaApiProvider).listApprovals())
+          .where((a) => a.isPending)
+          .toList();
+      if (!mounted || pending.isEmpty) return;
       _promptedApproval = true;
       await ToolConfirmSheet.show(context, pending.first);
     } catch (_) {
@@ -124,46 +151,124 @@ class _ConversePageState extends ConsumerState<ConversePage> {
       ref.read(transcriptProvider.notifier).set(messages);
       _scrollToEnd();
     } catch (e) {
-      if (mounted) setState(() => _banner = _friendly(e));
+      if (mounted) _noticeError(_friendly(e));
     }
+  }
+
+  /// Resolves the thread id, creating the conversation on the first send.
+  Future<String?> _threadId() async {
+    final existing = ref.read(activeConversationProvider);
+    if (existing != null) return existing;
+    try {
+      final created = await ref
+          .read(novaMutationsProvider)
+          .startConversation(title: 'New conversation');
+      ref.read(activeConversationProvider.notifier).set(created.id);
+      return created.id;
+    } catch (e) {
+      if (mounted) _noticeError(_friendly(e));
+      return null;
+    }
+  }
+
+  /// Starts or stops a real recording. The clip arrives through
+  /// [_onCaptureEvent] rather than as a return value, so a stop triggered by
+  /// the max-duration safety cap takes the same path as a user stop.
+  Future<void> _toggleMic() async {
+    if (_transcribing) return;
+    if (_capture.isRecording) {
+      await _capture.stop();
+      return;
+    }
+    // Do not let the mic hear NOVA still talking.
+    await _playback.stop();
+    if (mounted) setState(() => _showNotice(null));
+    try {
+      await _capture.start();
+      if (mounted) setState(() => _listening = true);
+    } on VoiceCaptureException catch (error) {
+      // Permission denials, a missing mic and start failures each carry their
+      // own user-facing message. Nothing is swallowed.
+      if (mounted) _noticeError(error.message);
+    }
+  }
+
+  void _onCaptureEvent(VoiceCaptureEvent event) {
+    if (!mounted) return;
+    switch (event) {
+      case VoiceClipCaptured(:final clip):
+        setState(() {
+          _listening = false;
+          _transcribing = true;
+          _showNotice(null);
+        });
+        unawaited(_transcribe(clip));
+      case VoiceCaptureFailed(:final error):
+        setState(() {
+          _listening = false;
+          _transcribing = false;
+        });
+        _noticeError(error.message);
+    }
+  }
+
+  Future<void> _transcribe(VoiceClip clip) async {
+    final String transcript;
+    try {
+      // The requested language picks the STT provider: 'en' routes to Deepgram.
+      transcript = await ref
+          .read(novaApiProvider)
+          .transcribeAudio(audioBase64: clip.base64Data);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _transcribing = false);
+      _noticeError('Could not transcribe that recording. ${_friendly(error)}');
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() => _transcribing = false);
+    final text = transcript.trim();
+    if (text.isEmpty) {
+      _noticeError('No speech was detected. Try again a little closer.');
+      return;
+    }
+    await _send(text);
+  }
+
+  /// Reads [text] aloud if "speak replies" is on.
+  Future<void> _speak(String text) async {
+    if (text.trim().isEmpty) return;
+    try {
+      final bytes = await ref
+          .read(novaApiProvider)
+          .synthesizeSpeech(text: text);
+      if (mounted) await _playback.play(bytes);
+    } catch (error) {
+      // Covers the server's `audioData: null` + `error` TTS fallback (thrown by
+      // NovaApiException) and any playback failure. Both are shown, not eaten.
+      if (mounted) _noticeError('NOVA could not speak: ${_friendly(error)}');
+    }
+  }
+
+  Future<void> _stopSpeaking() async {
+    await _playback.stop();
+    if (mounted) setState(() => _speaking = false);
   }
 
   Future<void> _send(String text) async {
     if (text.trim().isEmpty || _busy) return;
+    setState(() { _busy = true; _showNotice(null); });
 
-    // A conversation has to exist before a message can be attached to it. The
-    // Converse tab opens on a brand-new thread with no id, and this used to bail
-    // out here, so the composer and every quick action were dead on arrival —
-    // "Start a conversation" was unreachable by text. Create the thread on the
-    // first send instead.
-    var conversationId = ref.read(activeConversationProvider);
+    final conversationId = await _threadId();
+    if (!mounted) return;
     if (conversationId == null) {
-      setState(() {
-        _busy = true;
-        _banner = null;
-      });
-      try {
-        final created = await ref
-            .read(novaMutationsProvider)
-            .startConversation(title: 'New conversation');
-        conversationId = created.id;
-        ref.read(activeConversationProvider.notifier).set(conversationId);
-      } catch (e) {
-        if (!mounted) return;
-        setState(() {
-          _busy = false;
-          _banner = _friendly(e);
-        });
-        return;
-      }
-      if (!mounted) return;
+      setState(() => _busy = false);
+      return;
     }
 
+    unawaited(_playback.stop());
     _input.clear();
-    setState(() {
-      _busy = true;
-      _banner = null;
-    });
 
     // Optimistic user bubble so the transcript responds immediately.
     final optimistic = NovaMessage(
@@ -185,28 +290,30 @@ class _ConversePageState extends ConsumerState<ConversePage> {
       if (!mounted) return;
 
       final updated = [...ref.read(transcriptProvider)];
-      // Replace the optimistic bubble with the server's stored turn.
       final idx = updated.indexWhere((m) => m.id == optimistic.id);
       if (idx != -1 && result.userMessage != null) {
         updated[idx] = result.userMessage!;
       }
-      if (result.assistantMessage != null) {
-        updated.add(result.assistantMessage!);
-      }
+      final reply = result.assistantMessage;
+      if (reply != null) updated.add(reply);
       ref.read(transcriptProvider.notifier).set(updated);
 
       setState(() {
-        _banner = result.assistantError == null
-            ? null
-            : _explainAssistantError(result.assistantError!);
+        if (result.assistantError != null) {
+          _showNotice(_explainAssistantError(result.assistantError!));
+        } else {
+          _showNotice(null);
+        }
       });
+      if (_speakReplies && reply != null) unawaited(_speak(reply.content));
     } catch (e) {
       if (!mounted) return;
+      // Keep the user's turn visible and retryable rather than losing it.
       final updated = [...ref.read(transcriptProvider)];
       final idx = updated.indexWhere((m) => m.id == optimistic.id);
       if (idx != -1) updated[idx] = optimistic.copyWith(failed: true);
       ref.read(transcriptProvider.notifier).set(updated);
-      setState(() => _banner = _friendly(e));
+      _noticeError(_friendly(e));
     } finally {
       if (mounted) setState(() => _busy = false);
       _scrollToEnd();
@@ -225,16 +332,51 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     });
   }
 
+  _Phase _phase(String? conversationId) {
+    if (_listening) return _Phase.listening;
+    if (_transcribing) return _Phase.transcribing;
+    if (_busy) return _Phase.thinking;
+    if (_speaking) return _Phase.speaking;
+    return conversationId == null ? _Phase.connecting : _Phase.idle;
+  }
+
+  NovaAvatarState _avatarState(_Phase phase) => switch (phase) {
+    _Phase.listening => NovaAvatarState.listening,
+    _Phase.transcribing || _Phase.thinking => NovaAvatarState.thinking,
+    _Phase.speaking => NovaAvatarState.speaking,
+    _ => NovaAvatarState.idle,
+  };
+
+  Widget _statusPill(_Phase phase) {
+    final c = context.nova;
+    final (label, tone) = switch (phase) {
+      _Phase.listening => ('Listening', c.danger),
+      _Phase.transcribing => ('Transcribing', c.accent),
+      _Phase.thinking => ('Thinking', c.accent),
+      _Phase.speaking => ('Speaking', c.success),
+      _Phase.connecting => ('Connecting', c.warning),
+      _Phase.idle => ('Ready', c.success),
+    };
+    // A repeating pulse would make `pumpAndSettle` hang, so only live voice
+    // states and the connecting state animate.
+    final animate = phase == _Phase.listening ||
+        phase == _Phase.transcribing ||
+        phase == _Phase.connecting;
+    return NovaStatusPill(
+      label: label,
+      tone: tone,
+      animate: animate,
+      icon: phase == _Phase.speaking ? Icons.volume_up_rounded : null,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.nova;
     final messages = ref.watch(transcriptProvider);
     final conversationId = ref.watch(activeConversationProvider);
-    final state = _recording
-        ? NovaAvatarState.recording
-        : _busy
-        ? NovaAvatarState.thinking
-        : NovaAvatarState.idle;
+    final phase = _phase(conversationId);
+    final busy = _busy || _transcribing || _listening;
 
     return Scaffold(
       backgroundColor: c.bg,
@@ -245,80 +387,25 @@ class _ConversePageState extends ConsumerState<ConversePage> {
             top: false,
             child: Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.only(
-                    top: 44,
-                    bottom: 8,
-                    left: NovaSpace.gutter,
-                    right: NovaSpace.gutter,
-                  ),
-                  child: Row(
-                    children: [
-                      NovaIconButton(
-                        icon: Icons.arrow_back_rounded,
-                        size: 36,
-                        tooltip: 'Back',
-                        onTap: () => context.go('/'),
-                      ),
-                      const Spacer(),
-                      if (_recording)
-                        const NovaStatusPill(label: 'Recording')
-                      else
-                        NovaStatusPill(
-                          label: conversationId == null ? 'Connecting' : 'Ready',
-                          tone: conversationId == null ? c.warning : c.success,
-                          animate: conversationId == null,
-                        ),
-                      const Spacer(),
-                      NovaIconButton(
-                        icon: Icons.history_rounded,
-                        size: 36,
-                        tooltip: 'Conversation history',
-                        onTap: () => context.push('/conversations'),
-                      ),
-                    ],
-                  ),
+                NovaConversationTopBar(
+                  status: _statusPill(phase),
+                  speakReplies: _speakReplies,
+                  onBack: () => context.go('/'),
+                  onHistory: () => context.push('/conversations'),
+                  onToggleSpeak: () =>
+                      setState(() => _speakReplies = !_speakReplies),
                 ),
 
-                if (_banner != null)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: NovaSpace.gutter,
-                      vertical: NovaSpace.xs,
-                    ),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(NovaSpace.sm),
-                      decoration: BoxDecoration(
-                        color: c.warning.withValues(alpha: 0.12),
-                        borderRadius: NovaRadius.rControl,
-                        border: Border.all(
-                          color: c.warning.withValues(alpha: 0.35),
-                        ),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(
-                            Icons.info_outline_rounded,
-                            size: 16,
-                            color: c.warning,
-                          ),
-                          const SizedBox(width: NovaSpace.xs),
-                          Expanded(
-                            child: Text(
-                              _banner!,
-                              style: Theme.of(
-                                context,
-                              ).textTheme.bodySmall!.copyWith(color: c.fg),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                if (_notice != null)
+                  NovaChatNotice(
+                    message: _notice!,
+                    tone: _noticeIsError ? c.danger : c.warning,
+                    icon: _noticeIsError
+                        ? Icons.error_outline_rounded
+                        : Icons.info_outline_rounded,
                   ),
 
-                NovaConverseHeader(state: state),
+                NovaConverseHeader(state: _avatarState(phase)),
 
                 Expanded(
                   child: messages.isEmpty
@@ -351,19 +438,30 @@ class _ConversePageState extends ConsumerState<ConversePage> {
                         ),
                 ),
 
-                _QuickActions(
-                  // Enabled with no conversation too: the first pick creates the
-                  // thread (see _send).
-                  enabled: !_busy,
-                  onPick: _send,
-                ),
+                NovaQuickActions(enabled: !busy, onPick: _send),
+
+                if (_speaking)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: NovaSpace.xs),
+                    child: NovaChip(
+                      label: 'Stop speaking',
+                      icon: Icons.stop_rounded,
+                      selected: true,
+                      onTap: () => unawaited(_stopSpeaking()),
+                    ),
+                  ),
 
                 NovaComposer(
                   controller: _input,
-                  enabled: !_busy,
-                  micActive: _recording,
+                  enabled: !busy,
+                  micActive: _listening,
+                  hint: _listening
+                      ? 'Listening… tap the mic to stop'
+                      : 'Type a message…',
                   onSend: _send,
-                  onMic: () => setState(() => _recording = !_recording),
+                  onMic: busy && !_listening
+                      ? null
+                      : () => unawaited(_toggleMic()),
                 ),
               ],
             ),
@@ -389,46 +487,5 @@ class _ConversePageState extends ConsumerState<ConversePage> {
       return 'NOVA declined to answer that one.';
     }
     return 'NOVA could not generate a reply: $code';
-  }
-}
-
-/// `.quick-actions` — horizontally scrolling suggestion chips.
-class _QuickActions extends StatelessWidget {
-  const _QuickActions({required this.enabled, required this.onPick});
-
-  final bool enabled;
-  final ValueChanged<String> onPick;
-
-  static const _actions = <(IconData, String, String)>[
-    (Icons.check_circle_outline_rounded, 'Create task', 'Create a task: '),
-    (Icons.alarm_add_rounded, 'Set reminder', 'Remind me to '),
-    (Icons.search_rounded, 'Search memory', 'What do you remember about '),
-    (Icons.translate_rounded, 'Translate', 'Translate this to Tamil: '),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 48,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: NovaSpace.gutter),
-        itemCount: _actions.length,
-        separatorBuilder: (_, _) => const SizedBox(width: NovaSpace.xs),
-        itemBuilder: (context, i) {
-          final (icon, label, prefix) = _actions[i];
-          return Center(
-            child: Opacity(
-              opacity: enabled ? 1 : 0.5,
-              child: NovaChip(
-                label: label,
-                icon: icon,
-                onTap: enabled ? () => onPick(prefix) : null,
-              ),
-            ),
-          );
-        },
-      ),
-    );
   }
 }

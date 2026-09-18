@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../theme/nova_theme.dart';
 import 'nova_avatar.dart';
+import 'nova_controls.dart';
 import 'nova_markdown.dart';
+import 'nova_surfaces.dart';
 
 /// Who authored a transcript entry.
 enum NovaMessageRole { user, nova, system }
@@ -323,6 +325,170 @@ class NovaConverseHeader extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// `.top-bar` from the converse screen: back, the live status, the
+/// "speak replies" toggle, and history. [status] is passed in because the
+/// Converse screen owns the voice state machine.
+class NovaConversationTopBar extends StatelessWidget {
+  const NovaConversationTopBar({
+    super.key,
+    required this.status,
+    this.speakReplies = false,
+    this.onBack,
+    this.onHistory,
+    this.onToggleSpeak,
+  });
+
+  final Widget status;
+
+  /// Whether NOVA reads replies aloud. Defaults to off — never surprise a user
+  /// with audio.
+  final bool speakReplies;
+
+  final VoidCallback? onBack;
+  final VoidCallback? onHistory;
+  final VoidCallback? onToggleSpeak;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.nova;
+
+    return Padding(
+      padding: const EdgeInsets.only(
+        top: 44,
+        bottom: 8,
+        left: NovaSpace.gutter,
+        right: NovaSpace.gutter,
+      ),
+      child: Row(
+        children: [
+          NovaIconButton(
+            icon: Icons.arrow_back_rounded,
+            size: 36,
+            tooltip: 'Back',
+            onTap: onBack,
+          ),
+          Expanded(
+            child: Center(
+              child: FittedBox(fit: BoxFit.scaleDown, child: status),
+            ),
+          ),
+          NovaIconButton(
+            icon: speakReplies
+                ? Icons.volume_up_rounded
+                : Icons.volume_off_rounded,
+            size: 36,
+            tooltip: speakReplies ? 'Speak replies: on' : 'Speak replies: off',
+            color: speakReplies ? c.accent : c.fg,
+            onTap: onToggleSpeak,
+          ),
+          const SizedBox(width: NovaSpace.xxs),
+          NovaIconButton(
+            icon: Icons.history_rounded,
+            size: 36,
+            tooltip: 'Conversation history',
+            onTap: onHistory,
+          ),
+        ],
+      ),
+    );
+  }
+}
+/// The inline notice Converse shows for a recoverable failure (mic denied,
+/// transcription failed, speech unavailable); never swallowed.
+class NovaChatNotice extends StatelessWidget {
+  const NovaChatNotice({
+    super.key,
+    required this.message,
+    this.tone,
+    this.icon = Icons.info_outline_rounded,
+  });
+
+  final String message;
+  final Color? tone;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.nova;
+    final color = tone ?? c.warning;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: NovaSpace.gutter,
+        vertical: NovaSpace.xs,
+      ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(NovaSpace.sm),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: NovaRadius.rControl,
+          border: Border.all(color: color.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: NovaSpace.xs),
+            Expanded(
+              child: Text(
+                message,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall!.copyWith(color: c.fg),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+/// `.quick-actions` — horizontally scrolling suggestion chips.
+class NovaQuickActions extends StatelessWidget {
+  const NovaQuickActions({
+    super.key,
+    required this.enabled,
+    required this.onPick,
+  });
+
+  final bool enabled;
+  final ValueChanged<String> onPick;
+
+  static const _actions = <(IconData, String, String)>[
+    (Icons.check_circle_outline_rounded, 'Create task', 'Create a task: '),
+    (Icons.alarm_add_rounded, 'Set reminder', 'Remind me to '),
+    (Icons.search_rounded, 'Search memory', 'What do you remember about '),
+    (Icons.translate_rounded, 'Translate', 'Translate this to Tamil: '),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 48,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: NovaSpace.gutter),
+        itemCount: _actions.length,
+        separatorBuilder: (_, _) => const SizedBox(width: NovaSpace.xs),
+        itemBuilder: (context, i) {
+          final (icon, label, prefix) = _actions[i];
+          return Center(
+            child: Opacity(
+              opacity: enabled ? 1 : 0.5,
+              child: NovaChip(
+                label: label,
+                icon: icon,
+                onTap: enabled ? () => onPick(prefix) : null,
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
