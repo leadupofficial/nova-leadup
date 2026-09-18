@@ -236,6 +236,20 @@ export interface ChatOptions {
  * Timeout (P0-06):
  * - Uses AbortSignal with 120s timeout for chat completions.
  */
+/**
+ * True when a nominally-successful completion actually carries a provider
+ * credential, quota or billing notice rather than an answer.
+ *
+ * Only consulted when the response reported zero output tokens, so a genuine
+ * reply that happens to discuss API keys is never suppressed.
+ */
+function looksLikeProviderNotice(content: string): boolean {
+	if (!content) return false;
+	return /api[\s_-]?key|quota|credit|billing|rate limit|expired|unauthori[sz]ed|invalid.*(token|key)|contact your administrator/i.test(
+		content
+	);
+}
+
 export async function chatCompletion(
 	messages: ChatMessage[],
 	options: ChatOptions = {}
@@ -293,6 +307,16 @@ export async function chatCompletion(
 			.filter((b): b is Anthropic.TextBlock => b.type === 'text')
 			.map((b) => b.text)
 			.join('');
+
+		// Some Anthropic-compatible proxies (the BroCode gateway among them)
+		// answer HTTP 200 with the credential/quota problem as ordinary message
+		// text and zero output tokens. Left alone, that text reaches the client
+		// as NOVA's reply, so the assistant appears to say "your API key
+		// expired". Treat it as a provider failure and let the callers map it
+		// onto stable AI_* error codes.
+		if (response.usage.output_tokens === 0 && looksLikeProviderNotice(content)) {
+			throw new Error(`AI provider rejected the request: ${content.slice(0, 200)}`);
+		}
 
 		return {
 			content,
@@ -780,7 +804,11 @@ export async function translateText(
 		translatedText: result.translated_text || result.translation || text,
 		sourceLanguage: result.source_language_code || sourceLanguage,
 		targetLanguage: result.target_language_code || targetLanguage,
-		detectedLanguage: result.detected_language_code || sourceLanguage,
+		// When the caller asked for 'auto', Sarvam reports what it detected in
+		// `source_language_code` and sends no `detected_language_code`. Falling
+		// back to the *input* here would report the literal string "auto".
+		detectedLanguage:
+			result.detected_language_code || result.source_language_code || sourceLanguage,
 	};
 }
 

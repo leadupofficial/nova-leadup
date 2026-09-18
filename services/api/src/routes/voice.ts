@@ -24,12 +24,14 @@ import {
 	synthesizeSpeechSarvam,
 	synthesizeSpeechGoogle,
 	chatCompletion,
+	translateText,
 	ChatMessage,
 } from '../services/ai.js';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
 import { env } from '../utils/env.js';
+import { toAssistantError } from '../services/assistant.js';
 import { validate } from '../middleware/validate.js';
 
 const router: ReturnType<typeof Router> = Router();
@@ -179,7 +181,17 @@ router.post('/chat', authenticate, validate(ChatSchema), async (req: Authenticat
 		});
 	} catch (err) {
 		logger.warn({ err }, 'Voice chat failed');
-		next(err instanceof HttpError ? err : new HttpError(500, 'Chat completion failed', 'CHAT_ERROR'));
+		// Surface the stable AI_* code so the client can distinguish "provider
+		// not configured / credential rejected" from a generic failure instead
+		// of rendering the provider's own error text as NOVA's reply.
+		const assistantError = toAssistantError(err);
+		next(
+			new HttpError(
+				assistantError.code === 'AI_NOT_CONFIGURED' ? 503 : 502,
+				assistantError.message,
+				assistantError.code
+			)
+		);
 	}
 });
 
@@ -188,6 +200,25 @@ const TtsSchema = z.object({
 	voiceId: z.string().optional(),
 	language: z.string().optional(),
 });
+
+const TranslateSchema = z.object({
+	text: z.string().min(1).max(5000),
+	// 'auto' asks Sarvam to detect the source language itself.
+	sourceLanguage: z.string().optional(),
+	targetLanguage: z.string().min(2),
+});
+
+/**
+ * Sarvam expects region-tagged codes (`ta-IN`). The app works in bare ISO
+ * codes (`ta`) and may hand us 'auto', so normalise here and leave anything
+ * already tagged alone.
+ */
+function toSarvamLanguageCode(code: string): string {
+	const value = (code || '').trim();
+	if (!value) return 'auto';
+	if (value === 'auto' || value.includes('-')) return value;
+	return `${value}-IN`;
+}
 
 // POST /voice/tts — synthesize speech; routes by language provider
 router.post('/tts', authenticate, validate(TtsSchema), async (req: AuthenticatedRequest, res, next) => {
@@ -284,6 +315,33 @@ router.post('/tts', authenticate, validate(TtsSchema), async (req: Authenticated
 		}
 	} catch (err) {
 		next(err instanceof HttpError ? err : new HttpError(500, 'Speech synthesis failed', 'TTS_ERROR'));
+	}
+});
+
+// POST /voice/translate — Sarvam translation, with 'auto' source detection.
+//
+// `translateText` has existed in services/ai.ts all along but was mounted
+// nowhere, so the Translate screen had no endpoint to call.
+router.post('/translate', authenticate, validate(TranslateSchema), async (req: AuthenticatedRequest, res, next) => {
+	try {
+		const body = (req as any).validatedBody as z.infer<typeof TranslateSchema>;
+		const result = await translateText(
+			body.text,
+			toSarvamLanguageCode(body.sourceLanguage || 'auto'),
+			toSarvamLanguageCode(body.targetLanguage)
+		);
+		res.status(200).json({
+			success: true,
+			data: {
+				translatedText: result.translatedText,
+				sourceLanguage: result.sourceLanguage,
+				targetLanguage: result.targetLanguage,
+				detectedLanguage: result.detectedLanguage,
+			},
+		});
+	} catch (err) {
+		logger.warn({ err }, 'Translate failed');
+		next(new HttpError(502, 'Translation failed', 'TRANSLATE_ERROR'));
 	}
 });
 
