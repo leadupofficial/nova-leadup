@@ -14,6 +14,8 @@ import { HttpError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
 import { validate } from '../middleware/validate.js';
 import { chatCompletion } from '../services/ai.js';
+import { buildUserContext, composeSystemPrompt } from '../services/user-context.js';
+import { getLanguageByCode } from '@nova/shared-types';
 import {
 	HISTORY_MESSAGE_LIMIT,
 	NOVA_SYSTEM_PROMPT,
@@ -267,8 +269,23 @@ router.post('/:id/messages', authenticate, validate(SendMessageSchema), async (r
 
 				history.reverse();
 
+				// Ground the reply in the user's own tasks, reminders and
+				// memories. Without this the assistant truthfully answered that
+				// it had no way to see them, which makes "what do I have
+				// tomorrow?" and "remind me" impossible.
+				const context = await buildUserContext(req.user!.id);
+				const languageInfo = body.language
+					? getLanguageByCode(body.language)
+					: undefined;
+
 				const completion = await chatCompletion(toChatMessages(history), {
-					systemPrompt: NOVA_SYSTEM_PROMPT,
+					systemPrompt: composeSystemPrompt({
+						basePrompt: NOVA_SYSTEM_PROMPT,
+						context: context.text,
+						language: body.language,
+						languageName: languageInfo?.name,
+						languageNative: languageInfo?.native,
+					}),
 					maxTokens: 1024,
 					temperature: 0.7,
 				});

@@ -107,6 +107,9 @@ export const SendMessageSchema = z.object({
 	role: z.enum(['user', 'assistant']),
 	content: z.string().min(1),
 	model: z.string().max(100).optional(),
+	// The app's configured language, so the assistant can be told explicitly
+	// which language to answer in instead of inferring it every turn.
+	language: z.string().max(20).optional(),
 	toolCalls: z.any().optional(),
 	toolResults: z.any().optional(),
 });

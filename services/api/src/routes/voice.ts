@@ -32,6 +32,7 @@ import { HttpError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
 import { env } from '../utils/env.js';
 import { toAssistantError } from '../services/assistant.js';
+import { buildUserContext, composeSystemPrompt } from '../services/user-context.js';
 import { validate } from '../middleware/validate.js';
 
 const router: ReturnType<typeof Router> = Router();
@@ -158,9 +159,19 @@ router.post('/chat', authenticate, validate(ChatSchema), async (req: Authenticat
 	try {
 		const body = (req as any).validatedBody as z.infer<typeof ChatSchema>;
 		const language = body.language || 'en';
-		const systemPrompt = buildSystemPromptForLanguage(language);
 
 		const messages: ChatMessage[] = body.messages.map((m) => ({ role: m.role, content: m.content }));
+
+		// Spoken turns get the same grounding as typed ones: a voice companion
+		// that cannot see your reminders is not a companion.
+		const context = await buildUserContext(req.user!.id);
+		const systemPrompt = composeSystemPrompt({
+			basePrompt: buildSystemPromptForLanguage(language),
+			context: context.text,
+			language,
+			languageName: getLanguageByCode(language)?.name,
+			languageNative: getLanguageByCode(language)?.native,
+		});
 
 		const result = await chatCompletion(messages, {
 			systemPrompt,
