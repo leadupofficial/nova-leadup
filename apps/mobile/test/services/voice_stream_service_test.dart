@@ -4,6 +4,22 @@ import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/services/voice_stream_service.dart';
 
+/// Waits until [condition] holds, or gives up after [timeout].
+///
+/// The reconnect schedule is driven by real timers, so a fixed `delayed` is a
+/// race: under load the last attempt can succeed after the sleep has already
+/// elapsed and the status still reads `reconnecting`. Polling waits for the
+/// state the test is actually about without loosening the assertion.
+Future<void> _waitFor(
+  bool Function() condition, {
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!condition() && DateTime.now().isBefore(deadline)) {
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
 /// A socket whose lifecycle the test drives by hand.
 class FakeVoiceSocket implements VoiceSocket {
   final StreamController<dynamic> controller = StreamController<dynamic>.broadcast();
@@ -157,7 +173,7 @@ void main() {
       service.errors.listen(errors.add);
 
       await service.connect();
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await _waitFor(() => service.status == VoiceStreamStatus.connected);
 
       expect(connector.connectCalls, 4);
       expect(errors, hasLength(3));
@@ -178,7 +194,7 @@ void main() {
       );
 
       await service.connect();
-      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await _waitFor(() => service.status == VoiceStreamStatus.disconnected);
 
       expect(service.status, VoiceStreamStatus.disconnected);
       // One initial attempt plus two retries.
