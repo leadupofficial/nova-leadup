@@ -16,7 +16,8 @@
 'use client';
 
 import { type ReactNode, useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
+import AdminSidebar from '../app/AdminSidebar';
 
 const TOKEN_KEY = 'admin_token';
 const REFRESH_TOKEN_KEY = 'admin_refresh_token';
@@ -93,11 +94,18 @@ export function readRefreshToken(): string | null {
  }
 }
 
-export function clearTokens(): void {
- if (typeof window === 'undefined') return;
- window.localStorage.removeItem(TOKEN_KEY);
- window.localStorage.removeItem(REFRESH_TOKEN_KEY);
-}
+/**
+ * Sign-out helper — re-exported from lib/api so there is exactly one definition.
+ *
+ * This file used to define its own `clearTokens` that removed the localStorage
+ * entries but left the `admin_token` COOKIE in place, and AdminSidebar/LoginForm
+ * import from here. Signing out therefore cleared localStorage and navigated to
+ * /login, where the middleware still saw the cookie, treated the visitor as
+ * authenticated, and redirected straight back to /. Logout silently did nothing.
+ */
+import { clearTokens } from '../lib/api';
+
+export { clearTokens };
 
 // ---------------------------------------------------------------------------
 // Auth state type
@@ -122,7 +130,17 @@ interface AdminAuthGuardProps {
 
 export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuardProps) {
  const router = useRouter();
+ const pathname = usePathname();
  const [state, setState] = useState<AuthState>({ status: 'loading' });
+
+ /**
+ * The guard sits in the root layout, so it wraps /login as well. Without this
+ * exemption the login page was unreachable: it rendered the guard's spinner, the
+ * guard found no token and called router.replace('/login'), and /login rendered
+ * the same spinner again. The server HTML for the page was literally
+ * "NOVA Admin Verifying session…" with no <form> or <input> in it at all.
+ */
+ const isPublicRoute = pathname === '/login';
 
  const roles = allowedRoles
  ? new Set(allowedRoles)
@@ -167,6 +185,9 @@ export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuar
  // Validate auth on mount
  // -------------------------------------------------------------------------
  useEffect(() => {
+ // Public routes (the login page) must never be gated or redirected.
+ if (isPublicRoute) return;
+
  const validate = async () => {
  let token = readToken();
  if (!token) {
@@ -204,11 +225,17 @@ export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuar
  };
 
  validate();
- }, [router, attemptRefresh, roles]);
+ }, [router, attemptRefresh, roles, isPublicRoute]);
 
  // -------------------------------------------------------------------------
  // Render
  // -------------------------------------------------------------------------
+
+ // Public route: render the page bare — no chrome, no spinner, no redirect.
+ if (isPublicRoute) {
+ return <>{children}</>;
+ }
+
  if (state.status === 'loading' || state.status === 'refreshing') {
  return (
  <div
@@ -327,8 +354,21 @@ export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuar
  );
  }
 
- // Authenticated — expose payload via context if needed
- return <AuthenticatedProvider payload={state.payload}>{children}</AuthenticatedProvider>;
+ // Authenticated — expose the payload via context and apply the console chrome.
+ // The chrome lives here rather than in the layout so that it cannot wrap /login.
+ //
+ // marginLeft matches AdminSidebar's width. The sidebar is `position: fixed`, so
+ // it takes no space in the flow and the first 240px of every page was rendering
+ // underneath it — the dashboard's first card and each table's first column were
+ // hidden behind the nav.
+ return (
+ <AuthenticatedProvider payload={state.payload}>
+ <div style={{ display: 'flex', minHeight: '100vh' }}>
+ <AdminSidebar />
+ <main style={{ flex: 1, padding: '2rem', overflow: 'auto', marginLeft: '240px' }}>{children}</main>
+ </div>
+ </AuthenticatedProvider>
+ );
 }
 
 // ---------------------------------------------------------------------------

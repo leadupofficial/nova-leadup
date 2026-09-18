@@ -7,19 +7,31 @@
 
 import { getHealth } from '../lib/api';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getServerHealth(): Promise<any> {
+/**
+ * Shape of the health payload the dashboard renders.
+ *
+ * `checks` and `timestamp` are optional on purpose: the admin service's
+ * /health/ready answers with only { status, timestamp }. An earlier revision
+ * declared `checks` as required and then called `health.checks.map(...)`, so the
+ * dashboard threw "Cannot read properties of undefined (reading 'map')" and
+ * rendered a server-side exception instead of the overview.
+ */
+type HealthPayload = {
+ status: string;
+ checks?: { name: string; status: string; message?: string; durationMs?: number }[];
+ timestamp?: string;
+};
+
+async function getServerHealth(): Promise<HealthPayload | null> {
  try {
- // eslint-disable-next-line @typescript-eslint/no-explicit-any
- const health: { status: string; checks: { name: string; status: string; message?: string; durationMs?: number }[]; timestamp: string } = await getHealth() as any;
- return health;
+ return (await getHealth()) as HealthPayload;
  } catch {
  return null;
  }
 }
 
 export default async function DashboardPage() {
- const health: { status: string; checks: { name: string; status: string; message?: string; durationMs?: number }[]; timestamp: string } | null = await getServerHealth();
+ const health: HealthPayload | null = await getServerHealth();
 
  return (
  <div>
@@ -79,7 +91,7 @@ export default async function DashboardPage() {
  );
 }
 
-function HealthCard({ health }: { health: { status: string; checks: { name: string; status: string; message?: string; durationMs?: number }[]; timestamp: string } | null }) {
+function HealthCard({ health }: { health: HealthPayload | null }) {
  if (!health) {
  return (
  <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '1.5rem' }}>
@@ -88,17 +100,20 @@ function HealthCard({ health }: { health: { status: string; checks: { name: stri
  );
  }
 
+ // Never assume `checks` exists — this is the line that used to crash the page.
+ const checks = health.checks ?? [];
+
  return (
  <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '1.5rem' }}>
  <p style={{ margin: '0 0 0.5rem', fontSize: '0.85rem', color: '#6b7280', fontWeight: 500 }}>Health Status</p>
  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
  <StatusBadge status={health.status} />
  <span style={{ fontSize: '0.8rem', color: '#9ca3af' }}>
- {new Date(health.timestamp).toLocaleTimeString()}
+ {health.timestamp ? new Date(health.timestamp).toLocaleTimeString() : '—'}
  </span>
  </div>
  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
- {health.checks.map((check) => (
+ {checks.map((check) => (
  <div key={check.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
  <span style={{ color: '#6b7280', textTransform: 'capitalize' }}>{check.name}</span>
  <StatusBadge status={check.status} />

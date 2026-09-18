@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import AdminSidebar from './AdminSidebar';
 import AdminAuthGuard from '../components/AdminAuthGuard';
 import './globals.css';
 
@@ -8,18 +7,19 @@ export const metadata: Metadata = {
  description: 'NOVA platform admin console',
 };
 
+/**
+ * The sidebar/main chrome is applied by AdminAuthGuard, not here.
+ *
+ * It previously lived in this file, inside the guard, so every route — including
+ * /login — was wrapped in the console shell. That is what made the login page
+ * unreachable: the guard rendered its "Verifying session…" spinner on /login,
+ * found no token, then redirected to /login again, forever.
+ */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
  return (
  <html lang="en">
  <body style={{ margin: 0, fontFamily: 'system-ui, sans-serif', background: '#f5f5f5' }}>
- <AdminAuthGuard>
- <div style={{ display: 'flex', minHeight: '100vh' }}>
- <AdminSidebar />
- <main style={{ flex: 1, padding: '2rem', overflow: 'auto' }}>
- {children}
- </main>
- </div>
- </AdminAuthGuard>
+ <AdminAuthGuard>{children}</AdminAuthGuard>
  </body>
  </html>
  );
