@@ -14,11 +14,10 @@ import '../../core/permissions/permission_service.dart';
 import 'onboarding_service.dart';
 
 /// `onboarding/consent.html` — the "Permissions" step, at the export's copy,
-/// 18px card radius, 52px action indent, 12/16/28px rhythm and 120ms press.
-/// The mock grants with `classList.add('granted')`; this asks the genuine OS
-/// permission, records every decision with `NovaApi.recordConsent`, reads prior
-/// state with `NovaApi.listConsent`, and blocks Continue until every row is
-/// resolved.
+/// radii, spacing and press motion. The mock grants with
+/// `classList.add('granted')`; this asks the genuine OS permission, records every
+/// decision with `NovaApi.recordConsent` / `listConsent`, and blocks Continue
+/// until every row is resolved.
 class ConsentPage extends ConsumerStatefulWidget {
   const ConsentPage({super.key, this.onDone});
 
@@ -34,7 +33,6 @@ class ConsentPage extends ConsumerStatefulWidget {
 /// OS granted it, or the user allowed an in-app setting.
 typedef ConsentOutcome = Map<String, bool>;
 
-// ─── Providers (owned by this screen; core/api is untouched) ─────────────────
 /// Prior consent records — the screen's only remote read. Not `autoDispose`:
 /// [_ConsentPageState._bootstrap] resolves `.future` from `initState`, before
 /// `build` installs the `ref.watch` subscription.
@@ -42,19 +40,12 @@ final consentHistoryProvider = FutureProvider<List<NovaConsentRecord>>((ref) {
   return ref.watch(novaApiProvider).listConsent();
 });
 
-// ─── The export's five rows, mapped to real backends ─────────────────────────
 /// One `.perm-card`. [permissions] is empty when the row is an in-app setting
 /// with no OS gate at all; [purpose] is also what the consent API is told.
 @immutable
 class _RowSpec {
-  const _RowSpec(
-    this.purpose,
-    this.emoji,
-    this.title,
-    this.description, {
-    this.permissions = const <Permission>[],
-    this.canPromptOs = true,
-  });
+  const _RowSpec(this.purpose, this.emoji, this.title, this.description,
+      {this.permissions = const <Permission>[], this.canPromptOs = true});
 
   final String purpose;
   final String emoji;
@@ -69,11 +60,10 @@ class _RowSpec {
 }
 
 /// Android's manifest declares no `READ_CONTACTS`/`READ_CALENDAR` and iOS's
-/// `Runner/Info.plist` has no contacts/calendar usage description; both are
-/// pre-existing files outside this screen's scope. On Android the request is
-/// still issued — the OS answers "denied" for an undeclared permission, which is
-/// its own honest answer — but on iOS it would terminate the process instead of
-/// returning, so there the row only reads the status.
+/// `Info.plist` has no contacts/calendar usage description — both pre-existing
+/// files outside this screen's scope. On Android the request is still issued (the
+/// OS answers "denied" for an undeclared permission); on iOS it would terminate
+/// the process, so there the row only reads the status.
 bool get _canPromptContacts => defaultTargetPlatform != TargetPlatform.iOS;
 
 final List<_RowSpec> _rows = <_RowSpec>[
@@ -85,7 +75,6 @@ final List<_RowSpec> _rows = <_RowSpec>[
       permissions: const <Permission>[Permission.contacts, Permission.calendarFullAccess], canPromptOs: _canPromptContacts),
 ];
 
-// ─── State ───────────────────────────────────────────────────────────────────
 class _ConsentPageState extends ConsumerState<ConsentPage> {
   /// Genuine OS status per device row; [_decided] holds consent decisions, seeded
   /// from the server for in-app rows and always set by an explicit tap.
@@ -110,11 +99,8 @@ class _ConsentPageState extends ConsumerState<ConsentPage> {
     final device = <String, NovaPermissionStatus>{};
     final errors = <String, String>{};
     for (final row in _rows.where((row) => row.isDevice)) {
-      try {
-        device[row.purpose] = await _readStatus(service, row);
-      } catch (error) {
-        errors[row.purpose] = 'Could not read device access: ${_friendly(error)}';
-      }
+      try { device[row.purpose] = await _readStatus(service, row); }
+      catch (error) { errors[row.purpose] = 'Could not read device access: ${_friendly(error)}'; }
     }
     final seeded = <String, bool>{};
     try {
@@ -157,12 +143,11 @@ class _ConsentPageState extends ConsumerState<ConsentPage> {
   /// Strictest answer wins, so a half-granted pair never reads as granted.
   NovaPermissionStatus _combine(Iterable<NovaPermissionStatus> statuses) {
     final list = statuses.toList();
-    for (final status in const <NovaPermissionStatus>[
-      NovaPermissionStatus.permanentlyDenied,
-      NovaPermissionStatus.restricted,
-      NovaPermissionStatus.denied,
-      NovaPermissionStatus.notDetermined,
-    ]) {
+    const worst = <NovaPermissionStatus>[
+      NovaPermissionStatus.permanentlyDenied, NovaPermissionStatus.restricted,
+      NovaPermissionStatus.denied, NovaPermissionStatus.notDetermined,
+    ];
+    for (final status in worst) {
       if (list.contains(status)) return status;
     }
     return NovaPermissionStatus.granted;
@@ -173,10 +158,7 @@ class _ConsentPageState extends ConsumerState<ConsentPage> {
   /// did not grant.
   Future<void> _allow(_RowSpec row) async {
     if (_busy[row.purpose] ?? false) return;
-    setState(() {
-      _busy[row.purpose] = true;
-      _error.remove(row.purpose);
-    });
+    setState(() { _busy[row.purpose] = true; _error.remove(row.purpose); });
     try {
       final service = ref.read(permissionServiceProvider);
       // An in-app setting has no OS gate, so only the consent API hears about it.
@@ -250,28 +232,21 @@ class _ConsentPageState extends ConsumerState<ConsentPage> {
     final c = context.nova;
     final error = _error[row.purpose];
     if (error != null) return (error, c.danger, false);
-    if (_busy[row.purpose] ?? false) {
-      return (row.isDevice ? 'Asking the system…' : 'Saving your choice…', c.muted, false);
-    }
+    if (_busy[row.purpose] ?? false) return (row.isDevice ? 'Asking the system…' : 'Saving your choice…', c.muted, false);
     if (row.isDevice && status == null && _checkingDevice) return ('Checking device access…', c.muted, false);
-    if (row.isDevice && !row.canPromptOs && status == NovaPermissionStatus.notDetermined) {
-      return ('This build cannot ask the system for this permission.', c.warning, false);
-    }
+    if (row.isDevice && !row.canPromptOs && status == NovaPermissionStatus.notDetermined) return ('This build cannot ask the system for this permission.', c.warning, false);
     return switch (status) {
-      NovaPermissionStatus.denied || NovaPermissionStatus.restricted =>
-        ('The system did not grant this. You can allow it later.', c.muted, false),
-      NovaPermissionStatus.permanentlyDenied =>
-        ('Blocked by the system. Tap to open Settings.', c.danger, true),
-      _ when !row.isDevice && _decided[row.purpose] == false =>
-        ('Not now — nothing is stored for this.', c.muted, false),
+      NovaPermissionStatus.denied || NovaPermissionStatus.restricted => ('The system did not grant this. You can allow it later.', c.muted, false),
+      NovaPermissionStatus.permanentlyDenied => ('Blocked by the system. Tap to open Settings.', c.danger, true),
+      _ when !row.isDevice && _decided[row.purpose] == false => ('Not now — nothing is stored for this.', c.muted, false),
       _ => (null, c.muted, false),
     };
   }
 
-  void _retry() {
+  Future<void> _retry() async {
     setState(() => _checkingDevice = true);
     ref.invalidate(consentHistoryProvider);
-    unawaited(_bootstrap());
+    await _bootstrap();
   }
 
   void _back() {
@@ -295,8 +270,7 @@ class _ConsentPageState extends ConsumerState<ConsentPage> {
     final status = _caption(row, _device[row.purpose]).$1 ?? 'access granted by this device';
     final message = row.isDevice
         ? '${row.title}: $status'
-        : '${row.title}: your choice is saved to your account. Change it any '
-              'time in Profile → Privacy controls.';
+        : '${row.title}: your choice is saved to your account; change it in Profile → Privacy controls.';
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
@@ -398,7 +372,7 @@ class _ConsentPageState extends ConsumerState<ConsentPage> {
         : null;
 
     return NovaScaffold(
-      refresh: () async => _retry(),
+      refresh: _retry,
       topBar: Row(children: <Widget>[
         NovaIconButton(icon: Icons.chevron_left_rounded, size: 36, color: c.muted, tooltip: 'Back', onTap: _back),
         // `.top-bar h1` — 19px display 700.
@@ -410,11 +384,10 @@ class _ConsentPageState extends ConsumerState<ConsentPage> {
         color: c.bg,
         padding: const EdgeInsets.fromLTRB(NovaSpace.gutter, NovaSpace.md, NovaSpace.gutter, NovaSpace.md),
         child: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[
-          if (note != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: NovaSpace.xs),
-              child: Text(note, textAlign: TextAlign.center, style: text.bodySmall?.copyWith(fontSize: NovaType.caption, height: 1.4, color: history.hasError ? c.danger : c.muted)),
-            ),
+          if (note != null) Padding(
+            padding: const EdgeInsets.only(bottom: NovaSpace.xs),
+            child: Text(note, textAlign: TextAlign.center, style: text.bodySmall?.copyWith(fontSize: NovaType.caption, height: 1.4, color: history.hasError ? c.danger : c.muted)),
+          ),
           NovaPrimaryButton(label: 'Continue', busy: anyBusy, onPressed: canContinue ? _finish : null),
         ]),
       ),
@@ -424,20 +397,13 @@ class _ConsentPageState extends ConsumerState<ConsentPage> {
         // second stop (`oklch(0.70 0.01 260)`) has no token, so the equivalent
         // point between --fg and --muted is used.
         ShaderMask(
-          shaderCallback: (bounds) => LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: <Color>[c.fg, Color.lerp(c.fg, c.muted, 0.65)!],
-          ).createShader(bounds),
+          shaderCallback: (bounds) => LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: <Color>[c.fg, Color.lerp(c.fg, c.muted, 0.65)!]).createShader(bounds),
           blendMode: BlendMode.srcIn,
           child: Text('Choose what NOVA can access', style: text.displayLarge?.copyWith(fontSize: 34, height: 1.1, letterSpacing: -1.02)),
         ),
         const SizedBox(height: NovaSpace.sm),
-        Text(
-          'Every permission is purpose-specific. You can change these later '
-          'in Privacy Center.',
-          style: text.bodyLarge?.copyWith(color: c.muted, height: 1.5),
-        ),
+        Text('Every permission is purpose-specific. You can change these later in Privacy Center.',
+            style: text.bodyLarge?.copyWith(color: c.muted, height: 1.5)),
         // `.sub` margin-bottom: 28px.
         const SizedBox(height: NovaSpace.lg + NovaSpace.xxs),
         for (final row in _rows) _card(row),
@@ -467,6 +433,20 @@ class _PillButtonState extends State<_PillButton> {
     final c = context.nova;
     final enabled = widget.onTap != null;
     final foreground = widget.primary ? c.onAccent : c.muted;
+    final pill = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      decoration: BoxDecoration(
+        gradient: widget.primary ? c.accentGradient : null,
+        color: widget.primary ? null : c.surfaceRaised,
+        borderRadius: NovaRadius.rPill,
+        border: widget.primary ? null : Border.all(color: c.border),
+        // `.btn-allow` — `0 12px 30px -10px accent/40%`.
+        boxShadow: widget.primary
+            ? <BoxShadow>[BoxShadow(color: c.accent.withValues(alpha: 0.4), blurRadius: 30, spreadRadius: -10, offset: const Offset(0, 12))]
+            : null,
+      ),
+      child: Text(widget.label, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 13, color: foreground)),
+    );
 
     return GestureDetector(
       onTapDown: enabled ? (_) => setState(() => _pressed = true) : null,
@@ -474,31 +454,18 @@ class _PillButtonState extends State<_PillButton> {
       onTapCancel: enabled ? () => setState(() => _pressed = false) : null,
       onTap: widget.onTap,
       behavior: HitTestBehavior.opaque,
-      child: SizedBox(
+      // brand-spec rule 5: the pill keeps its designed size inside a 44px target.
+      child: Container(
         height: NovaMotion.minTouchTarget,
-        child: Center(
-          child: AnimatedScale(
-            scale: _pressed ? 0.96 : 1,
-            duration: NovaMotion.fast,
-            curve: Curves.easeOut,
-            child: AnimatedOpacity(
-              opacity: enabled ? 1 : 0.55,
-              duration: NovaMotion.uiMin,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                decoration: BoxDecoration(
-                  gradient: widget.primary ? c.accentGradient : null,
-                  color: widget.primary ? null : c.surfaceRaised,
-                  borderRadius: NovaRadius.rPill,
-                  border: widget.primary ? null : Border.all(color: c.border),
-                  // `.btn-allow` — `0 12px 30px -10px accent/40%`.
-                  boxShadow: widget.primary
-                      ? <BoxShadow>[BoxShadow(color: c.accent.withValues(alpha: 0.4), blurRadius: 30, spreadRadius: -10, offset: const Offset(0, 12))]
-                      : null,
-                ),
-                child: Text(widget.label, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 13, color: foreground)),
-              ),
-            ),
+        alignment: Alignment.center,
+        child: AnimatedScale(
+          scale: _pressed ? 0.96 : 1,
+          duration: NovaMotion.fast,
+          curve: Curves.easeOut,
+          child: AnimatedOpacity(
+            opacity: enabled ? 1 : 0.55,
+            duration: NovaMotion.uiMin,
+            child: pill,
           ),
         ),
       ),
@@ -506,7 +473,6 @@ class _PillButtonState extends State<_PillButton> {
   }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 /// `NovaApiException(401): Unauthorized` → `Unauthorized`.
 String _friendly(Object error) =>
     error.toString().replaceFirst(RegExp(r'^NovaApiException\(\d*\): '), '');
