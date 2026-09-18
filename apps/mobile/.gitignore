@@ -46,3 +46,18 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Release signing — never commit secrets or keystores.
+# `android/.gitignore` already covers apps/mobile/android/keystore.properties, but a
+# stray copy at apps/mobile/keystore.properties was NOT ignored and held a real
+# keystore password, one `git add .` away from being committed.
+keystore.properties
+**/keystore.properties
+*.jks
+*.keystore
+
+# Local environment overrides (the committed .env.production.example documents the
+# required variables; real values must never be committed).
+.env
+.env.local
+.env.*.local
