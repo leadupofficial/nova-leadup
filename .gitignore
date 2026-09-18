@@ -6,6 +6,7 @@ coverage/
 .env
 .env.local
 .env.*.local
+.env.production
 *.log
 .DS_Store
 .cache
@@ -22,3 +23,33 @@ docker-compose.override.yml
 *.tfplan
 .terraform.lock.hcl
 terraform.tfvars
+
+# Mobile — Expo / React Native
+apps/mobile/.expo/
+apps/mobile/dist/
+apps/mobile/node_modules/
+
+# Android signing credentials (NEVER commit real secrets)
+apps/mobile/android/keystore.properties
+apps/mobile/android/*.jks
+apps/mobile/android/*.keystore
+
+# iOS signing credentials
+apps/mobile/ios/fastlane/report.xml
+apps/mobile/ios/fastlane/Preview.html
+apps/mobile/ios/fastlane/screenshots/
+apps/mobile/ios/fastlane/test_output/
+
+# Stray TypeScript build output. These were sitting untracked and would have been
+# swept into a commit by `git add .`:
+#   packages/shared-types/src/languages.js        (tsc emitted next to the source)
+#   packages/shared-types/src/languages.d.ts.map
+#   packages/shared-types/packages/               (nested accidental output dir)
+#   **/tsconfig.tsbuildinfo                       (incremental build cache)
+*.tsbuildinfo
+packages/shared-types/src/*.js
+packages/shared-types/src/*.d.ts.map
+packages/shared-types/packages/
+# Byte-identical duplicate of packages/database/drizzle/0000_regular_colossus.sql.
+# `pnpm db:migrate` reads ./drizzle, so this copy is unused and misleading.
+packages/database/migrations/
