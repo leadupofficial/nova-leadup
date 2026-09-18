@@ -38,9 +38,16 @@ const SARVAM_STT_URL = 'wss://api.sarvam.ai/speech-to-text-realtime/ws';
 const MAX_PENDING_BYTES = 1_000_000;
 
 /**
- * Silence that ends a turn. The provider defaults to 500 ms; below roughly
- * 350 ms a normal sentence breaks at its own clause pauses, which is exactly the
- * failure the legacy provider hit.
+ * Silence that ends a turn. The provider defaults to 500 ms, and this is the
+ * single largest fixed cost in the wait for a reply: the boundary cannot fire
+ * until that much silence has been observed, so it lands directly in the latency.
+ *
+ * Tried tightening this to 350 ms to shave the boundary and reverted: across
+ * three measured turns it produced no final at all once, and the two that
+ * completed were no faster (553 ms and 1660 ms boundaries, against 635 ms
+ * before) because the wait is dominated by the provider's own processing rather
+ * than by the configured threshold. Not worth a reliability regression for no
+ * measurable gain.
  */
 const SILENCE_DURATION_MS = 500;
 
