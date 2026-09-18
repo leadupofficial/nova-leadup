@@ -19,11 +19,11 @@ import '../features/recording/recording_page.dart';
 import '../features/recording/summary_page.dart';
 import '../features/reminders/reminders_page.dart';
 import '../features/onboarding/companion_page.dart';
+import '../features/onboarding/consent_page.dart';
 import '../features/onboarding/health_page.dart';
 import '../features/onboarding/offline_page.dart';
 import '../features/onboarding/onboarding_service.dart';
 import '../features/onboarding/otp_page.dart';
-import '../features/onboarding/permissions_page.dart';
 import '../features/onboarding/profile_page.dart';
 import '../features/onboarding/splash_page.dart';
 import '../features/onboarding/welcome_page.dart';
@@ -137,10 +137,31 @@ final routerProvider = Provider<GoRouter>((ref) {
         name: 'onboarding-welcome',
         builder: (context, state) => const WelcomePage(),
       ),
+      // The permissions step. The path stays `/onboarding/permissions` because
+      // OnboardingStep.permissions.routeName is asserted by a test and drives
+      // resume-on-relaunch, but the screen rendered here is now the port of
+      // `onboarding/consent.html`, which is wired to the real consent API as
+      // well as the device permissions. The older PermissionsPage is superseded
+      // by it and is no longer reachable from the router.
       GoRoute(
         path: '/onboarding/permissions',
         name: 'onboarding-permissions',
-        builder: (context, state) => const PermissionsPage(),
+        builder: (context, state) => Consumer(
+          builder: (context, ref, _) => ConsentPage(
+            onDone: (outcome) async {
+              final granted = outcome.entries
+                  .where((entry) => entry.value)
+                  .map((entry) => entry.key)
+                  .toList(growable: false);
+              await ref
+                  .read(onboardingServiceProvider)
+                  .saveGrantedPermissions(granted);
+              if (context.mounted) {
+                context.go(OnboardingStep.profileSetup.routeName);
+              }
+            },
+          ),
+        ),
       ),
       GoRoute(
         path: '/onboarding/profile',
