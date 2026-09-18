@@ -243,6 +243,35 @@ class NovaReminder {
   );
 }
 
+// ─── Voice ────────────────────────────────────────────────────────────────────
+
+/// One translation result from `POST /api/v1/voice/translate`.
+class NovaTranslation {
+  const NovaTranslation({
+    required this.translatedText,
+    required this.sourceLanguage,
+    required this.targetLanguage,
+    required this.detectedLanguage,
+  });
+
+  final String translatedText;
+  final String sourceLanguage;
+  final String targetLanguage;
+
+  /// What the server detected; equals [sourceLanguage] when it was explicit.
+  final String detectedLanguage;
+
+  factory NovaTranslation.fromJson(Map<String, dynamic> j) {
+    final source = (j['sourceLanguage'] ?? '').toString();
+    return NovaTranslation(
+      translatedText: (j['translatedText'] ?? '').toString(),
+      sourceLanguage: source,
+      targetLanguage: (j['targetLanguage'] ?? '').toString(),
+      detectedLanguage: (j['detectedLanguage'] ?? source).toString(),
+    );
+  }
+}
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 class NovaProfile {

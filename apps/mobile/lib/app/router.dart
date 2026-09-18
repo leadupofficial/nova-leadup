@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/design/widgets/index.dart';
+import '../features/admin/admin_page.dart';
 import '../features/auth/auth_controller.dart';
 import '../features/auth/login_page.dart';
 import '../features/auth/register_page.dart';
@@ -12,14 +13,21 @@ import '../features/converse/conversations_page.dart';
 import '../features/converse/converse_page.dart';
 import '../features/home/home_page.dart';
 import '../features/memory/memory_page.dart';
+import '../features/overlay/translate_page.dart';
+import '../features/overlay/wakeword_page.dart';
 import '../features/recording/recording_page.dart';
 import '../features/recording/summary_page.dart';
+import '../features/reminders/reminders_page.dart';
 import '../features/onboarding/companion_page.dart';
 import '../features/onboarding/health_page.dart';
+import '../features/onboarding/offline_page.dart';
 import '../features/onboarding/onboarding_service.dart';
+import '../features/onboarding/otp_page.dart';
 import '../features/onboarding/permissions_page.dart';
 import '../features/onboarding/profile_page.dart';
+import '../features/onboarding/splash_page.dart';
 import '../features/onboarding/welcome_page.dart';
+import '../features/settings/integrations_page.dart';
 import '../features/settings/me_page.dart';
 import '../features/tasks/tasks_page.dart';
 import 'providers.dart';
@@ -57,6 +65,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       final location = state.matchedLocation;
       final inOnboarding = location.startsWith('/onboarding');
 
+      // Utility surfaces stay reachable under every gate so the app can always
+      // explain its own state: the offline screen when connectivity drops, and
+      // the splash while startup work is still running.
+      if (location == '/offline' || location == '/splash') {
+        return null;
+      }
+
       // Gate 1: onboarding must be finished first.
       if (status != OnboardingStatus.complete) {
         return inOnboarding ? null : onboarding.resumeStep().routeName;
@@ -82,6 +97,40 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/register',
         name: 'register',
         builder: (context, state) => const RegisterPage(),
+      ),
+      // Startup and connectivity surfaces. Reachable under every gate.
+      GoRoute(
+        path: '/splash',
+        name: 'splash',
+        builder: (context, state) => const SplashPage(),
+      ),
+      GoRoute(
+        path: '/offline',
+        name: 'offline',
+        builder: (context, state) => const OfflinePage(),
+      ),
+      // The OTP step sits between registering and sign-in, so it lives with the
+      // auth routes rather than inside the onboarding step machine.
+      GoRoute(
+        path: '/onboarding/otp',
+        name: 'onboarding-otp',
+        builder: (context, state) => const OtpPage(),
+      ),
+      GoRoute(
+        path: '/translate',
+        name: 'translate',
+        builder: (context, state) =>
+            TranslatePage(sourceText: state.uri.queryParameters['text']),
+      ),
+      GoRoute(
+        path: '/wakeword',
+        name: 'wakeword',
+        builder: (context, state) => const WakeWordPage(),
+      ),
+      GoRoute(
+        path: '/admin',
+        name: 'admin',
+        builder: (context, state) => const AdminPage(),
       ),
       GoRoute(
         path: '/onboarding/welcome',
@@ -176,6 +225,11 @@ final routerProvider = Provider<GoRouter>((ref) {
                     name: 'activity',
                     builder: (context, state) => const ActivityPage(),
                   ),
+                  GoRoute(
+                    path: 'reminders',
+                    name: 'reminders',
+                    builder: (context, state) => const RemindersPage(),
+                  ),
                 ],
               ),
             ],
@@ -195,6 +249,13 @@ final routerProvider = Provider<GoRouter>((ref) {
                 path: '/me',
                 name: 'me',
                 builder: (context, state) => const MePage(),
+                routes: [
+                  GoRoute(
+                    path: 'integrations',
+                    name: 'integrations',
+                    builder: (context, state) => const IntegrationsPage(),
+                  ),
+                ],
               ),
             ],
           ),

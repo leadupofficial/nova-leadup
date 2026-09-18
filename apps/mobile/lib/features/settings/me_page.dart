@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/api/models.dart';
 import '../../core/api/providers.dart';
@@ -136,14 +137,7 @@ class MePage extends ConsumerWidget {
                   title: 'Wake word',
                   subtitle: 'Say "Hey Nova" to start listening',
                   icon: Icons.hearing_rounded,
-                  onTap: () => _info(
-                    context,
-                    'Wake word',
-                    'The wake word runs on-device in a foreground service. '
-                        'Toggle it from the Home screen. The recognition model '
-                        'currently installed is the openWakeWord "hey_jarvis" '
-                        'model, pending a trained "Hey Nova" model.',
-                  ),
+                  onTap: () => context.push('/wakeword'),
                 ),
               ],
             ),
@@ -173,15 +167,9 @@ class MePage extends ConsumerWidget {
                 Divider(height: 1, color: c.border),
                 NovaListRow(
                   title: 'Integrations',
-                  subtitle: 'Calendar, contacts and email (coming in V1)',
+                  subtitle: 'Connected services and available tools',
                   icon: Icons.extension_outlined,
-                  iconTone: c.muted,
-                  onTap: () => _info(
-                    context,
-                    'Integrations',
-                    'Calendar, contacts and approved email are V1 features '
-                        '(blueprint §4.2) and are not implemented in this build.',
-                  ),
+                  onTap: () => context.push('/me/integrations'),
                 ),
               ],
             ),
@@ -196,6 +184,13 @@ class MePage extends ConsumerWidget {
             child: Column(
               children: [
                 NovaListRow(
+                  title: 'Admin console',
+                  subtitle: 'Users, audit log and system health',
+                  icon: Icons.admin_panel_settings_outlined,
+                  onTap: () => context.push('/admin'),
+                ),
+                Divider(height: 1, color: c.border),
+                NovaListRow(
                   title: 'Sign out',
                   subtitle: 'Ends this session on this device',
                   icon: Icons.logout_rounded,
@@ -207,25 +202,6 @@ class MePage extends ConsumerWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  static void _info(BuildContext context, String title, String body) {
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (sheetContext) => Padding(
-        padding: const EdgeInsets.all(NovaSpace.gutter),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: NovaTheme.sectionHeading(context.nova)),
-            const SizedBox(height: NovaSpace.sm),
-            Text(body, style: Theme.of(context).textTheme.bodyMedium),
-            const SizedBox(height: NovaSpace.lg),
-          ],
-        ),
       ),
     );
   }

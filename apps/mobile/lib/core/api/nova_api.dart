@@ -310,6 +310,21 @@ class NovaApi {
     return (_object(data)['text'] ?? '').toString();
   }
 
+  /// Translates [text] between languages. Pass `sourceLanguage: 'auto'` to let
+  /// the server detect the source; the detected code comes back in the result.
+  Future<NovaTranslation> translate({
+    required String text,
+    required String targetLanguage,
+    String sourceLanguage = 'auto',
+  }) async {
+    final data = await _post(ApiConfig.voiceTranslate, {
+      'text': text,
+      'sourceLanguage': sourceLanguage,
+      'targetLanguage': targetLanguage,
+    });
+    return NovaTranslation.fromJson(_object(data));
+  }
+
   /// Language catalogue with each language's STT/TTS provider routing.
   Future<List<Map<String, dynamic>>> voiceLanguages() async {
     final data = await _get(ApiConfig.voiceLanguages);

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/design/widgets/index.dart';
+import '../features/overlay/floating_overlay.dart';
+import '../features/tasks/reminder_composer.dart';
 
 /// Bottom-navigation shell for the authenticated app.
 ///
@@ -45,7 +47,23 @@ class NovaShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: navigationShell,
+      // The designed floating assistant orb rides above the whole authenticated
+      // app, not one tab, so it is mounted here rather than per screen. Its
+      // primary action keeps the overlay's own voice behaviour (onAskNova is
+      // left null on purpose); the action chips route to real destinations.
+      body: Stack(
+        children: [
+          navigationShell,
+          // FloatingOverlay already fills and positions itself, and only its
+          // orb captures taps, so it can sit directly in this stack. Do not wrap
+          // it in another Positioned.fill.
+          FloatingOverlay(
+            onTranslate: () => context.push('/translate'),
+            onReminder: () => ReminderComposer.show(context),
+            onTask: () => navigationShell.goBranch(2),
+          ),
+        ],
+      ),
       bottomNavigationBar: NovaBottomNav(
         destinations: destinations,
         index: navigationShell.currentIndex,

@@ -140,6 +140,7 @@ class ApiConfig {
   static String get voiceStt => '$baseUrl/api/v1/voice/stt';
   static String get voiceTts => '$baseUrl/api/v1/voice/tts';
   static String get voiceChat => '$baseUrl/api/v1/voice/chat';
+  static String get voiceTranslate => '$baseUrl/api/v1/voice/translate';
   static String get voiceLanguages => '$baseUrl/api/v1/voice/languages';
 
   static String get healthz => '$baseUrl/healthz';

@@ -129,6 +129,13 @@ void main() {
       '/memory',
       '/me',
       '/converse',
+      // Added alongside the OpenDesign screens that were still unbuilt. Every
+      // one of these is a route a user can reach from the UI.
+      '/tasks/reminders',
+      '/me/integrations',
+      '/admin',
+      '/translate',
+      '/wakeword',
     ]) {
       // NovaApp sits ABOVE the router it creates, so GoRouter.of() cannot find
       // it from that context; read it from the provider container instead.
