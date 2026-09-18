@@ -1,4 +1,5 @@
 // dotenv removed — env injected by docker / CI
+import http from 'node:http';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -23,6 +24,7 @@ import { biometricRoutes } from './routes/biometric.js';
 import adminRoutes from './routes/admin.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { rateLimitMiddleware } from './middleware/rateLimit.js';
+import { attachRealtimeVoice } from './realtime/index.js';
 
 // ─── Env validation (fail fast) ────────────────────────────────────────────
 validateEnv();
@@ -97,8 +99,19 @@ app.use(errorHandler);
 // to migrate the same database on a rolling deploy.
 
 // ─── Start server ──────────────────────────────────────────────────────────
+// The Express app is mounted on an explicit HTTP server rather than
+// `app.listen()` so the realtime voice WebSocket can take over the `upgrade`
+// event for `/api/v1/voice/realtime`. Every REST route is served exactly as
+// before — `http.createServer(app)` is what `app.listen()` does internally.
+const server = http.createServer(app);
+
+// Realtime voice (WebSocket). Registers an `upgrade` listener only; it opens no
+// port of its own and rejects upgrade requests for any other path.
+attachRealtimeVoice(server);
+
 if (process.env.NODE_ENV !== 'test') {
- app.listen(PORT, () => console.log(`[API] Listening on :${PORT}`));
+ server.listen(PORT, () => console.log(`[API] Listening on :${PORT}`));
 }
 
+export { server };
 export default app;
