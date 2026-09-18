@@ -41,7 +41,7 @@ export default function AdminSidebar() {
 
  const handleLogout = useCallback(() => {
  clearTokens();
- router.replace('/admin/login');
+ router.replace('/login');
  }, [router]);
 
  const handleDropdownToggle = useCallback(() => {

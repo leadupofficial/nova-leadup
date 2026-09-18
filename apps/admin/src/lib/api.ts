@@ -103,10 +103,31 @@ export type ApiResult<T> =
 const TOKEN_KEY = 'admin_token';
 const REFRESH_TOKEN_KEY = 'admin_refresh_token';
 
-function readToken(): string | null {
- if (typeof window === 'undefined') return null;
+/**
+ * Reads the admin access token.
+ *
+ * In the browser this is localStorage. During server rendering the pages in
+ * `src/app/**` are server components, so there is no localStorage — the access
+ * token the client mirrors into the `admin_token` cookie (see `writeTokens`) is
+ * read back through `next/headers` instead. Without this every server-rendered
+ * table silently rendered empty, because the API answered 401 and each page
+ * swallowed the error.
+ *
+ * `next/headers` is imported dynamically and only on the server so this module
+ * stays importable from client components (e.g. `LoginForm`).
+ */
+async function readToken(): Promise<string | null> {
+ if (typeof window !== 'undefined') {
  try {
  return window.localStorage.getItem(TOKEN_KEY);
+ } catch {
+ return null;
+ }
+ }
+ try {
+ const { cookies } = await import('next/headers');
+ const store = await cookies();
+ return store.get(TOKEN_KEY)?.value ?? null;
  } catch {
  return null;
  }
@@ -140,11 +161,49 @@ export function clearTokens(): void {
 }
 
 /**
- * Build a URL relative to NEXT_PUBLIC_API_BASE. Strips trailing slash from
+ * Resolves the API base URL for the current runtime.
+ *
+ * The browser must use the public origin. Server components instead prefer
+ * `API_INTERNAL_URL` (e.g. http://127.0.0.1:3001/api/v1) so rendering does not
+ * hairpin out through the public hostname, which would fail while DNS still
+ * points elsewhere and would add a needless TLS round trip afterwards.
+ */
+async function resolveApiBase(): Promise<string> {
+ if (typeof window === 'undefined') {
+ const internal = process.env.API_INTERNAL_URL;
+ if (internal) return internal.replace(/\/+$/, '');
+ }
+ return (getPublicEnv().NEXT_PUBLIC_API_BASE || 'http://localhost:3000').replace(/\/+$/, '');
+}
+
+/**
+ * Origin (scheme://host[:port]) of the API, for endpoints mounted at the root
+ * rather than under the API prefix — notably `/health/ready`, which the API
+ * services expose at the origin and not under `/api/v1`.
+ */
+async function resolveApiOrigin(): Promise<string> {
+ if (typeof window === 'undefined') {
+ const internal = process.env.API_ORIGIN_URL;
+ if (internal) return internal.replace(/\/+$/, '');
+ }
+ const base = await resolveApiBase();
+ try {
+ return new URL(base).origin;
+ } catch {
+ return base;
+ }
+}
+
+/**
+ * Build a URL relative to the resolved API base. Strips trailing slash from
  * the base and ensures a single leading slash on the path.
  */
-function buildUrl(path: string, params?: ListParams): string {
- const base = (getPublicEnv().NEXT_PUBLIC_API_BASE || 'http://localhost:3000').replace(/\/+$/, '');
+async function buildUrl(
+ path: string,
+ params?: ListParams,
+ baseOverride?: string,
+): Promise<string> {
+ const base = (baseOverride ?? (await resolveApiBase()));
  const normalized = path.startsWith('/') ? path : `/${path}`;
  let url = `${base}${normalized}`;
  if (params) {
@@ -158,15 +217,15 @@ function buildUrl(path: string, params?: ListParams): string {
 }
 
 /**
- * Core fetch wrapper. Adds the bearer token (server contexts won't have one
- * — that's expected; the request simply won't include Authorization).
+ * Core fetch wrapper. Adds the bearer token from localStorage in the browser or
+ * from the `admin_token` cookie during server rendering.
  */
 async function request<T>(
  path: string,
- init: RequestInit & { params?: ListParams } = {},
+ init: RequestInit & { params?: ListParams; baseOverride?: string } = {},
 ): Promise<T> {
- const { params, ...rest } = init;
- const url = buildUrl(path, params);
+ const { params, baseOverride, ...rest } = init;
+ const url = await buildUrl(path, params, baseOverride);
 
  const headers = new Headers(rest.headers);
  headers.set('Accept', 'application/json');
@@ -174,7 +233,7 @@ async function request<T>(
  headers.set('Content-Type', 'application/json');
  }
 
- const token = readToken();
+ const token = await readToken();
  if (token && !headers.has('Authorization')) {
  headers.set('Authorization', `Bearer ${token}`);
  }
@@ -220,12 +279,33 @@ function unwrap<T>(raw: unknown): T {
  return raw as T;
 }
 
+/**
+ * Unwraps a list endpoint.
+ *
+ * List routes answer with a *paginated* envelope —
+ * `{ success, data: { data: [...], page, pageSize, totalItems, totalPages } }` —
+ * so a single `unwrap` yields that wrapper object, not the rows. Accepts a bare
+ * array too, so plain endpoints keep working.
+ */
+function unwrapList<T>(raw: unknown): T[] {
+ const data: unknown = unwrap<unknown>(raw);
+ if (Array.isArray(data)) return data as T[];
+ if (data && typeof data === 'object') {
+ const inner = (data as { data?: unknown }).data;
+ if (Array.isArray(inner)) return inner as T[];
+ }
+ return [];
+}
+
 // ---------------------------------------------------------------------------
 // Health
 // ---------------------------------------------------------------------------
 
 export async function getHealth(): Promise<HealthResponse> {
- return unwrap<HealthResponse>(await request<unknown>('/health/ready'));
+ // /health/ready is mounted at the origin, not under the /api/v1 prefix.
+ return unwrap<HealthResponse>(
+ await request<unknown>('/health/ready', { baseOverride: await resolveApiOrigin() }),
+ );
 }
 
 // ---------------------------------------------------------------------------
@@ -239,17 +319,48 @@ export type AdminLoginResult = {
  refreshToken?: string;
 };
 
+/**
+ * The API's auth routes answer with snake_case (`access_token`, `refresh_token`) —
+ * the shape the Flutter client consumes. The console was written against camelCase,
+ * so both spellings are accepted and normalised here, once, at the boundary.
+ */
+type RawTokenPair = {
+ access_token?: string;
+ refresh_token?: string;
+ accessToken?: string;
+ refreshToken?: string;
+ user?: AdminLoginResult['user'];
+};
+
+function normalizeTokens(data: RawTokenPair | undefined): {
+ accessToken: string | null;
+ refreshToken?: string;
+ user?: AdminLoginResult['user'];
+} {
+ return {
+ accessToken: data?.access_token ?? data?.accessToken ?? null,
+ refreshToken: data?.refresh_token ?? data?.refreshToken,
+ user: data?.user,
+ };
+}
+
 export async function adminLogin(payload: AdminLoginPayload): Promise<AdminLoginResult> {
- const raw = await request<{ success: boolean; data: AdminLoginResult }>(
+ const raw = await request<{ success: boolean; data: RawTokenPair }>(
  '/auth/login',
  { method: 'POST', body: JSON.stringify(payload) },
  );
- if (!raw?.success || !raw?.data) {
+ const tokens = normalizeTokens(raw?.data);
+ if (!raw?.success || !tokens.accessToken) {
  throw new Error('Login failed: unexpected response from server');
  }
+ const result: AdminLoginResult = {
+ accessToken: tokens.accessToken,
+ refreshToken: tokens.refreshToken,
+ user: tokens.user ?? { id: '', email: payload.email },
+ };
  // Persist both tokens and mirror the access token into a cookie for middleware
- writeTokens(raw.data.accessToken, raw.data.refreshToken);
- return raw.data;
+ writeTokens(result.accessToken, result.refreshToken);
+ return result;
 }
 
 /**
@@ -280,19 +391,18 @@ export async function refreshAccessToken(): Promise<string | null> {
  if (!res.ok) return null;
 
  const data = await res.json();
- const newToken = data?.data?.accessToken || data?.accessToken;
- if (!newToken) return null;
+ const tokens = normalizeTokens(data?.data ?? data);
+ if (!tokens.accessToken) return null;
 
  // Persist tokens (same writeTokens helper as login)
  if (typeof window !== 'undefined') {
- window.localStorage.setItem(TOKEN_KEY, newToken);
- const newRefresh = data?.data?.refreshToken || data?.refreshToken;
- if (newRefresh) {
- window.localStorage.setItem(REFRESH_TOKEN_KEY, newRefresh);
+ window.localStorage.setItem(TOKEN_KEY, tokens.accessToken);
+ if (tokens.refreshToken) {
+ window.localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
  }
- document.cookie = `admin_token=${newToken}; path=/; max-age=31536000; SameSite=Lax`;
+ document.cookie = `admin_token=${tokens.accessToken}; path=/; max-age=31536000; SameSite=Lax`;
  }
- return newToken;
+ return tokens.accessToken;
  } catch {
  return null;
  }
@@ -304,19 +414,19 @@ export async function refreshAccessToken(): Promise<string | null> {
 // ---------------------------------------------------------------------------
 
 export async function listUsers(params: ListParams = {}): Promise<AdminUser[]> {
- return unwrap<AdminUser[]>(await request<unknown>('/admin/users', { params }));
+ return unwrapList<AdminUser>(await request<unknown>('/admin/users', { params }));
 }
 
 export async function listOrganizations(params: ListParams = {}): Promise<AdminOrganization[]> {
- return unwrap<AdminOrganization[]>(await request<unknown>('/admin/organizations', { params }));
+ return unwrapList<AdminOrganization>(await request<unknown>('/admin/organizations', { params }));
 }
 
 export async function listAuditLogs(params: ListParams = {}): Promise<AdminAuditLog[]> {
- return unwrap<AdminAuditLog[]>(await request<unknown>('/admin/audit-logs', { params }));
+ return unwrapList<AdminAuditLog>(await request<unknown>('/admin/audit-logs', { params }));
 }
 
 export async function listIncidents(params: ListParams = {}): Promise<AdminIncident[]> {
- return unwrap<AdminIncident[]>(await request<unknown>('/admin/incidents', { params }));
+ return unwrapList<AdminIncident>(await request<unknown>('/admin/incidents', { params }));
 }
 
 export async function resolveIncident(id: string): Promise<AdminIncident> {
@@ -328,7 +438,7 @@ export async function resolveIncident(id: string): Promise<AdminIncident> {
 }
 
 export async function listFeatureFlags(): Promise<AdminFeatureFlag[]> {
- return unwrap<AdminFeatureFlag[]>(await request<unknown>('/admin/feature-flags'));
+ return unwrapList<AdminFeatureFlag>(await request<unknown>('/admin/feature-flags'));
 }
 
 export async function createFeatureFlag(data: Partial<AdminFeatureFlag>): Promise<AdminFeatureFlag> {
@@ -362,7 +472,7 @@ export async function getUsageSummary(tenantId: string, _opts: ListParams = {}):
 }
 
 export async function getUsageByUser(tenantId: string, _opts: ListParams = {}): Promise<UsageByUser[]> {
- return unwrap<UsageByUser[]>(
+ return unwrapList<UsageByUser>(
  await request<unknown>(`/admin/usage/${encodeURIComponent(tenantId)}/by-user`),
  );
 }

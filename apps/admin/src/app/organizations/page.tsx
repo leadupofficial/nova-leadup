@@ -6,7 +6,7 @@ import { listOrganizations, type AdminOrganization } from '../../lib/api';
 
 async function getOrgs() {
  try {
- const result = await listOrganizations({ limit: 50, token: '' });
+ const result = await listOrganizations({ limit: 50 });
  return result;
  } catch {
  return null;
@@ -15,7 +15,7 @@ async function getOrgs() {
 
 export default async function OrganizationsPage() {
  const result = await getOrgs();
- const orgs: AdminOrganization[] = result?.data ?? [];
+ const orgs: AdminOrganization[] = result ?? [];
 
  return (
  <div>
@@ -23,7 +23,7 @@ export default async function OrganizationsPage() {
  <div>
  <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>Organizations</h1>
  <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#6b7280' }}>
- {result?.meta?.total ?? 0} total organizations
+ {orgs.length} total organizations
  </p>
  </div>
  </div>
@@ -61,7 +61,7 @@ export default async function OrganizationsPage() {
  </span>
  </td>
  <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#6b7280' }}>
- {new Date(org.createdAt).toLocaleDateString()}
+ {org.createdAt ? new Date(org.createdAt).toLocaleDateString() : '—'}
  </td>
  </tr>
  ))}

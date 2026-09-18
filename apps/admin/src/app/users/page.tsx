@@ -6,7 +6,7 @@ import { listUsers, type AdminUser } from '../../lib/api';
 
 async function getUsers(params: Record<string, string | number>) {
  try {
- const result = await listUsers({ ...params, token: '' });
+ const result = await listUsers({ ...params, limit: 50 });
  return result;
  } catch {
  return null;
@@ -17,7 +17,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
 	const resolved = await searchParams;
 	const orgFilter = typeof resolved.organizationId === 'string' ? resolved.organizationId : '';
 	const result = await getUsers({ organizationId: orgFilter, limit: 50 });
-	const users: AdminUser[] = result?.data ?? [];
+	const users: AdminUser[] = result ?? [];
 
  return (
  <div>
@@ -25,7 +25,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
  <div>
  <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>Users</h1>
  <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#6b7280' }}>
- {result?.meta?.total ?? 0} total users
+ {users.length} total users
  </p>
  </div>
  </div>

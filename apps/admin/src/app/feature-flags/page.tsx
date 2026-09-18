@@ -6,7 +6,7 @@ import { listFeatureFlags, createFeatureFlag, updateFeatureFlag, deleteFeatureFl
 
 async function getFlags() {
  try {
- const result = await listFeatureFlags('');
+ const result = await listFeatureFlags();
  return result;
  } catch {
  return null;

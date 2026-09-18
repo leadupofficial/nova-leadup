@@ -6,7 +6,7 @@
  * - Reads the JWT from localStorage and validates it on mount.
  * - Extracts the user's role from the token payload.
  * - Only allows users whose role is in the allowed set (owner, admin).
- * - If the token is missing or invalid, redirects to /admin/login.
+ * - If the token is missing or invalid, redirects to /login.
  * - If the token is expired, attempts a single refresh using the stored
  * refresh token before giving up and redirecting to login.
  * - Renders a loading spinner while the token is being validated.
@@ -147,11 +147,13 @@ export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuar
  if (!res.ok) return false;
 
  const data = await res.json();
- const newToken = data?.data?.accessToken || data?.accessToken;
+ // The API returns snake_case (`access_token`); accept camelCase too.
+ const payload = data?.data ?? data;
+ const newToken = payload?.access_token ?? payload?.accessToken;
  if (!newToken) return false;
 
  window.localStorage.setItem(TOKEN_KEY, newToken);
- const newRefresh = data?.data?.refreshToken || data?.refreshToken;
+ const newRefresh = payload?.refresh_token ?? payload?.refreshToken;
  if (newRefresh) {
  window.localStorage.setItem(REFRESH_TOKEN_KEY, newRefresh);
  }
@@ -169,7 +171,7 @@ export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuar
  let token = readToken();
  if (!token) {
  setState({ status: 'error', message: 'No session found.' });
- setTimeout(() => router.replace('/admin/login'), 0);
+ setTimeout(() => router.replace('/login'), 0);
  return;
  }
 
@@ -184,7 +186,7 @@ export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuar
  } else {
  clearTokens();
  setState({ status: 'error', message: 'Session expired. Please sign in again.' });
- setTimeout(() => router.replace('/admin/login'), 0);
+ setTimeout(() => router.replace('/login'), 0);
  return;
  }
  }
@@ -264,7 +266,7 @@ export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuar
  >
  <p style={{ color: '#94a3b8' }}>{state.message}</p>
  <button
- onClick={() => router.replace('/admin/login')}
+ onClick={() => router.replace('/login')}
  style={{
  padding: '0.65rem 1.5rem',
  background: '#6366f1',
@@ -306,7 +308,7 @@ export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuar
  <button
  onClick={() => {
  clearTokens();
- router.replace('/admin/login');
+ router.replace('/login');
  }}
  style={{
  padding: '0.65rem 1.5rem',
