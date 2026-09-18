@@ -181,6 +181,10 @@ class ApiConfig {
 
   static String task(String id) => '$tasks/$id';
   static String memory(String id) => '$memories/$id';
+
+  /// The dedicated search route. `GET /memories` does NOT filter by text —
+  /// its query schema has no `search` field — so a text query has to go here.
+  static String get memorySearch => '$memories/search';
   static String reminder(String id) => '$reminders/$id';
   static String avatar(String id) => '$settingsAvatars/$id';
   static String recording(String id) => '$recordings/$id';

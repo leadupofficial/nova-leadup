@@ -49,18 +49,26 @@ class NovaApi {
     return _list(data, 'tasks', NovaTask.fromJson);
   }
 
+  /// Creates a task.
+  ///
+  /// `CreateTaskSchema` requires BOTH `priority` and `status` — neither has a
+  /// default — so sending only a title returns 400 "Multiple validation
+  /// errors" and no task was ever created. They are defaulted here rather than
+  /// left to the caller.
   Future<NovaTask> createTask({
     required String title,
     String? description,
     DateTime? dueAt,
     String? priority,
+    String status = 'pending',
   }) async {
     final data = await _post(ApiConfig.tasks, {
       'title': title,
       if (description != null && description.isNotEmpty)
         'description': description,
       if (dueAt != null) 'dueAt': dueAt.toUtc().toIso8601String(),
-      'priority': ?priority,
+      'priority': priority ?? 'medium',
+      'status': status,
     });
     return NovaTask.fromJson(_object(data));
   }
@@ -94,19 +102,51 @@ class NovaApi {
   }) async {
     final data = await _get(
       ApiConfig.memories,
-      query: {'limit': limit, if (query != null && query.isNotEmpty) 'search': query},
+      // The server's MemoryListQuerySchema reads `search`; the dedicated
+      // /memories/search endpoint reads `query`. Both are correct for their
+      // own route — this one is the list.
+      query: {
+        'limit': limit,
+        if (query != null && query.isNotEmpty) 'search': query,
+      },
     );
     return _list(data, 'memories', NovaMemory.fromJson);
   }
 
+  /// Searches memories.
+  ///
+  /// `MemorySearchSchema` requires `query`; this used to send `search`, which
+  /// made every search answer 400 "Required".
+  Future<List<NovaMemory>> searchMemories({
+    required String query,
+    int limit = 20,
+    String? category,
+  }) async {
+    final data = await _get(
+      ApiConfig.memorySearch,
+      query: {
+        'query': query,
+        'limit': limit,
+        if (category != null && category.isNotEmpty) 'category': category,
+      },
+    );
+    return _list(data, 'memories', NovaMemory.fromJson);
+  }
+
+  /// Creates a memory.
+  ///
+  /// `CreateMemorySchema` requires `category` and `sourceType` — it has no
+  /// `type` field at all, and zod stripped it, so every create answered 400.
   Future<NovaMemory> createMemory({
     required String content,
-    String? type,
+    String category = 'fact',
+    String sourceType = 'manual',
     double? importance,
   }) async {
     final data = await _post(ApiConfig.memories, {
       'content': content,
-      'type': ?type,
+      'category': category,
+      'sourceType': sourceType,
       'importance': ?importance,
     });
     return NovaMemory.fromJson(_object(data));

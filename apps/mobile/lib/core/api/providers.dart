@@ -98,7 +98,10 @@ final memorySearchResultsProvider =
       final query = ref.watch(memorySearchProvider);
       if (query.trim().isEmpty) return const [];
       final api = ref.watch(novaApiProvider);
-      return api.listMemories(query: query.trim());
+      // Must use the dedicated search route: GET /memories does not filter by
+      // text (its query schema has no `search` field), so passing the term
+      // there returned every memory as though each one matched.
+      return api.searchMemories(query: query.trim());
     });
 
 // ─── Conversations ────────────────────────────────────────────────────────────
