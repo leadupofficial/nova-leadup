@@ -30,6 +30,13 @@ const DEEPGRAM_URL = 'wss://api.deepgram.com/v1/listen';
 const MAX_PENDING_BYTES = 1_000_000;
 
 /**
+ * Silence pushed to close an utterance, and how long to wait before falling back
+ * to an explicit `Finalize`. Matches the Sarvam session's boundary, so both
+ * providers end a turn the same way.
+ */
+const FINAL_SILENCE_MS = 900;
+
+/**
  * The model carries the language. English has always used `nova-2` and keeps
  * it; everything else selects `nova-3`, which is the only streaming model that
  * actually knows the Indic languages. Measured against a real Tamil clip:
@@ -96,6 +103,8 @@ export function createDeepgramStt(options: SttOptions): SttSession {
 	});
 
 	let closed = false;
+	/** Pending backstop timer from requestFinal, cleared on close. */
+	let finalizeBackstop: ReturnType<typeof setTimeout> | null = null;
 	let opened = false;
 	let pending: Buffer[] = [];
 	let pendingBytes = 0;
@@ -192,27 +201,53 @@ export function createDeepgramStt(options: SttOptions): SttSession {
 		options.handlers.onClose?.(code, reason?.toString() ?? '', isFatalProviderClose(code));
 	});
 
+	const sendAudioNow = (pcm: Buffer): void => {
+		if (closed || !pcm.length) return;
+		if (!opened) {
+			if (pendingBytes + pcm.length > MAX_PENDING_BYTES) return;
+			pending.push(pcm);
+			pendingBytes += pcm.length;
+			return;
+		}
+		try {
+			socket.send(pcm, { binary: true });
+		} catch (err) {
+			logger.warn({ err }, 'Deepgram audio send failed');
+		}
+	};
+
 	return {
 		provider: 'deepgram',
 		get closed() {
 			return closed;
 		},
 		sendAudio(pcm: Buffer): void {
-			if (closed || !pcm.length) return;
-			if (!opened) {
-				if (pendingBytes + pcm.length > MAX_PENDING_BYTES) return;
-				pending.push(pcm);
-				pendingBytes += pcm.length;
-				return;
-			}
-			try {
-				socket.send(pcm, { binary: true });
-			} catch (err) {
-				logger.warn({ err }, 'Deepgram audio send failed');
-			}
+			sendAudioNow(pcm);
 		},
 		requestFinal(): void {
-			send({ type: 'Finalize' });
+			// Feed real silence rather than sending `Finalize`.
+			//
+			// `Finalize` answers with whatever the recogniser has processed *so
+			// far* and flags it `from_finalize`, so audio still in flight is cut
+			// off: measured on a Tamil turn, the transcript came back as
+			// "...நாளைக்கு என்ன" instead of "...நாளைக்கு என்ன வேலை இருக்கு?" — the
+			// last second of speech simply missing. It was also intermittent,
+			// because how much is in flight depends on timing.
+			//
+			// Silence lets Deepgram's own endpointing close the utterance once it
+			// has seen everything, which is how the Sarvam session already ends a
+			// turn. `Finalize` is still sent afterwards as a backstop in case
+			// endpointing does not fire on its own.
+			const frame = Buffer.alloc(Math.round(options.sampleRate * 2 * 0.1));
+			const frames = Math.ceil(FINAL_SILENCE_MS / 100);
+			for (let i = 0; i < frames; i += 1) {
+				sendAudioNow(frame);
+			}
+			finalizeBackstop = setTimeout(() => {
+				finalizeBackstop = null;
+				if (!closed) send({ type: 'Finalize' });
+			}, FINAL_SILENCE_MS + 400);
+			finalizeBackstop.unref?.();
 		},
 		keepAlive(): void {
 			send({ type: 'KeepAlive' });
@@ -220,6 +255,8 @@ export function createDeepgramStt(options: SttOptions): SttSession {
 		close(): void {
 			if (closed) return;
 			closed = true;
+			if (finalizeBackstop) clearTimeout(finalizeBackstop);
+			finalizeBackstop = null;
 			pending = [];
 			pendingBytes = 0;
 			try {
