@@ -855,3 +855,103 @@ export const translationsRelations = relations(translations, ({ one }) => ({
  references: [users.id],
  }),
 }));
+
+// ─── Lead Management ──────────────────────────────────────────
+
+export const leads = pgTable('leads', {
+ id: uuid('id').defaultRandom().primaryKey(),
+ userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+ name: varchar('name', { length: 100 }).notNull(),
+ phone: varchar('phone', { length: 15 }).notNull(),
+ alternatePhone: varchar('alternate_phone', { length: 15 }),
+ email: varchar('email', { length: 255 }),
+ service: varchar('service', { length: 50 }).notNull(),
+ location: varchar('location', { length: 100 }).notNull(),
+ notes: text('notes'),
+ source: varchar('source', { length: 50 }).notNull(),
+ status: varchar('status', { length: 50 }).default('new').notNull(),
+ priority: varchar('priority', { length: 50 }).default('medium').notNull(),
+ budget: varchar('budget', { length: 50 }),
+ timeline: varchar('timeline', { length: 50 }),
+ isQualified: boolean('is_qualified').default(false).notNull(),
+ followUpDate: timestamp('follow_up_date'),
+ tags: text('tags').array(),
+ assignedTo: uuid('assigned_to').references(() => users.id),
+ createdAt: timestamp('created_at').defaultNow().notNull(),
+ updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+ index('leads_user_idx').on(table.userId),
+ index('leads_status_idx').on(table.status),
+ index('leads_source_idx').on(table.source),
+]);
+
+export const leadsRelations = relations(leads, ({ one }) => ({
+ user: one(users, {
+ fields: [leads.userId],
+ references: [users.id],
+ }),
+}));
+
+// ─── Lead Pipeline ────────────────────────────────────────────
+
+export const leadPipelineStages = pgTable('lead_pipeline_stages', {
+ id: uuid('id').defaultRandom().primaryKey(),
+ leadId: uuid('lead_id').references(() => leads.id, { onDelete: 'cascade' }).notNull().unique(),
+ stage: varchar('stage', { length: 50 }).notNull(),
+ description: text('description'),
+ createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+ index('lead_pipeline_stages_lead_idx').on(table.leadId),
+]);
+
+export const leadPipelineStagesRelations = relations(leadPipelineStages, ({ one }) => ({
+ lead: one(leads, {
+ fields: [leadPipelineStages.leadId],
+ references: [leads.id],
+ }),
+}));
+
+// ─── Follow-ups ───────────────────────────────────────────────
+
+export const leadFollowUps = pgTable('lead_follow_ups', {
+ id: uuid('id').defaultRandom().primaryKey(),
+ leadId: uuid('lead_id').references(() => leads.id, { onDelete: 'cascade' }).notNull(),
+ assignedTo: uuid('assigned_to').references(() => users.id),
+ followUpDate: timestamp('follow_up_date').notNull(),
+ notes: text('notes'),
+ completed: boolean('completed').default(false).notNull(),
+ createdAt: timestamp('created_at').defaultNow().notNull(),
+ updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+ index('lead_follow_ups_lead_idx').on(table.leadId),
+ index('lead_follow_ups_date_idx').on(table.followUpDate),
+]);
+
+export const leadFollowUpsRelations = relations(leadFollowUps, ({ one }) => ({
+ lead: one(leads, {
+ fields: [leadFollowUps.leadId],
+ references: [leads.id],
+ }),
+}));
+
+// ─── Analytics ────────────────────────────────────────────────
+
+export const leadAnalytics = pgTable('lead_analytics', {
+ id: uuid('id').defaultRandom().primaryKey(),
+ userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+ date: date('date').notNull(),
+ newLeads: integer('new_leads').default(0).notNull(),
+ qualifiedLeads: integer('qualified_leads').default(0).notNull(),
+ convertedLeads: integer('converted_leads').default(0).notNull(),
+ revenueGenerated: numeric('revenue_generated', { precision: 12, scale: 2 }).default('0.00'),
+ createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+ index('lead_analytics_user_date_idx').on(table.userId, table.date).unique(),
+]);
+
+export const leadAnalyticsRelations = relations(leadAnalytics, ({ one }) => ({
+ user: one(users, {
+ fields: [leadAnalytics.userId],
+ references: [users.id],
+ }),
+}));

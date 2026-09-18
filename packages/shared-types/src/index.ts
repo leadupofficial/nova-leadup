@@ -120,6 +120,10 @@ export {
 	detectLanguage,
 	getVoiceProviderForLanguage,
 	getSttProviderForLanguage,
+	// getLanguageByCode was defined in ./languages but never re-exported, so
+	// services/api/src/routes/voice.ts failed at import time and the whole API could
+	// not boot ("does not provide an export named 'getLanguageByCode'").
+	getLanguageByCode,
 	getLanguageName,
 	getLanguageCodeMap,
 } from './languages';

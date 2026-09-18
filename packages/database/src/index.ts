@@ -8,7 +8,13 @@ import { Pool, PoolClient } from 'pg';
 import * as schema from './schema';
 
 export * from './schema';
-export { migrate, type MigrateOptions } from './migrate';
+
+// NOTE: the legacy `migrate()` export was removed along with src/migrate.ts and
+// src/migrations/. That runner applied a SQL schema that contradicted ./schema.ts
+// (it created `users.display_name` / `users.is_active` / `sessions.token_hash NOT NULL`
+// while the Drizzle schema uses `users.name` / `users.disabled` /
+// `sessions.refresh_token_hash`). ./schema.ts plus drizzle/ (applied by
+// `pnpm db:migrate`) is the single source of truth.
 
 // ─── Connection Management ──────────────────────────────────────────────────────
 
