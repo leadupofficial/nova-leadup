@@ -119,6 +119,9 @@ export class RealtimeVoiceSession {
 			onError: (err) => {
 				this.reportError('STT_ERROR', err);
 			},
+			// Say so out loud: this turn is on a backup recogniser. The controller
+			// already logged the routed provider, close code and reason at warn.
+			onFallback: (info) => this.send({ type: 'stt', provider: info.to, fallback: true, reason: info.message }),
 			onDisconnected: (provider, code, reason, fatal) => {
 				this.reportError(
 					fatal ? 'STT_PROVIDER_REJECTED' : 'STT_DISCONNECTED',

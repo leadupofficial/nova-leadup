@@ -14,6 +14,11 @@
  *
  * Server → client
  *   {"type":"ready"}
+ *   {"type":"stt","provider":"deepgram","fallback":true,"reason":"…"}
+ *                                    the routed recogniser rejected this turn
+ *                                    (auth/quota/credit) and a backup is now
+ *                                    transcribing it — not sent when the routed
+ *                                    provider is serving the turn normally
  *   {"type":"partial","text":"…"}    interim transcript while the user speaks
  *   {"type":"final","text":"…"}      end-of-turn transcript
  *   {"type":"token","text":"…"}      LLM delta
@@ -54,6 +59,7 @@ export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
 export type ServerEvent =
 	| { type: 'ready' }
+	| { type: 'stt'; provider: string; fallback: boolean; reason: string }
 	| { type: 'partial'; text: string }
 	| { type: 'final'; text: string }
 	| { type: 'token'; text: string }

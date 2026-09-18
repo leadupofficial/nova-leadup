@@ -12,6 +12,12 @@ import { getSttProviderForLanguage } from '@nova/shared-types';
 export type SttProviderName = 'deepgram' | 'sarvam';
 
 export interface SttHandlers {
+	/**
+	 * The provider socket finished its handshake. Audio sent before this point
+	 * was queued by the session and has just been flushed; a control frame sent
+	 * earlier (a `requestFinal`) was dropped and can be re-sent now.
+	 */
+	onOpen?: () => void;
 	/** Interim transcript — the text so far, already trimmed. */
 	onPartial?: (text: string) => void;
 	/** The provider decided the utterance ended; this is the turn transcript. */

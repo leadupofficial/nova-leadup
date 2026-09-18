@@ -145,6 +145,7 @@ export function createSarvamStt(options: SttOptions): SttSession {
 		for (const chunk of pending) sendAudio(chunk);
 		pending = [];
 		pendingBytes = 0;
+		options.handlers.onOpen?.();
 	});
 
 	socket.on('message', (data: RawData) => {
@@ -184,6 +185,24 @@ export function createSarvamStt(options: SttOptions): SttSession {
 				return;
 			case 'error': {
 				const detail = message.message ?? message.code ?? 'unknown error';
+				// A fatal error (quota/credits/auth) is followed by a 1003 close.
+				// Report it through the close path, not here: the controller uses
+				// the fatal close to decide whether to replay this turn into a
+				// backup provider, and an STT_ERROR sent first would surface a
+				// failure for a turn that is about to succeed. Measured: the
+				// credits-exhausted error arrives ~75 ms before the 1003 close.
+				if (message.is_fatal === true || message.is_fatal === 'true') {
+					logger.warn(
+						{
+							provider: 'sarvam',
+							code: message.code,
+							statusCode: message.status_code,
+							detail,
+						},
+						'Sarvam STT reported a fatal error; awaiting the close',
+					);
+					return;
+				}
 				options.handlers.onError?.(new Error(`Sarvam STT: ${detail}`));
 				return;
 			}

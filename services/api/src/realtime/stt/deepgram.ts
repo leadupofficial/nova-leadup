@@ -4,11 +4,14 @@
  * Wire format, verified against production:
  *   wss://api.deepgram.com/v1/listen
  *   header  Authorization: Token <DEEPGRAM_API_KEY>
- *   query   model=nova-2&encoding=linear16&sample_rate=16000&channels=1
+ *   query   model=nova-2|nova-3&encoding=linear16&sample_rate=16000&channels=1
  *           &interim_results=true&punctuate=true&smart_format=true&endpointing=300
  *   send    raw PCM binary frames
  *   recv    JSON where type==='Results' carries channel.alternatives[0].transcript
  *           and the is_final / speech_final flags.
+ *
+ * English uses `nova-2`; every other language selects `nova-3`, which is the
+ * model that covers the Indic languages — see `toDeepgramModel`.
  *
  * `is_final` marks a segment the recogniser will not revise again; `speech_final`
  * is Deepgram's endpointing deciding the speaker stopped — that is end-of-turn.
@@ -26,12 +29,45 @@ const DEEPGRAM_URL = 'wss://api.deepgram.com/v1/listen';
 /** ~30 s of 16 kHz mono s16le. Only reached if the provider handshake stalls. */
 const MAX_PENDING_BYTES = 1_000_000;
 
-/** Deepgram wants BCP-47-ish tags; bare `en` is not accepted for English. */
+/**
+ * The model carries the language. English has always used `nova-2` and keeps
+ * it; everything else selects `nova-3`, which is the only streaming model that
+ * actually knows the Indic languages. Measured against a real Tamil clip:
+ * `nova-2` + `language=ta` is rejected with HTTP 400 before the socket opens,
+ * while `nova-3` + `language=ta` returns the correct transcript. This matters
+ * most on the fallback path, where a Deepgram session is opened for a language
+ * the normal routing would have sent to Sarvam.
+ */
+function toDeepgramModel(language: string): 'nova-2' | 'nova-3' {
+	const bare = (language || 'en').trim().toLowerCase();
+	if (!bare || bare === 'en' || bare.startsWith('en-')) return 'nova-2';
+	return 'nova-3';
+}
+
+/**
+ * Deepgram wants BCP-47-ish tags; bare `en` is not accepted for English.
+ *
+ * `auto`/`unknown` map to `multi`, nova-3's streaming multilingual mode — the
+ * closest thing to auto-detection Deepgram offers, since streaming
+ * `detect_language` is rejected with HTTP 400 (measured). `multi` is
+ * best-effort on code-mixed speech: on a *pure* Tamil clip it transliterates
+ * into Devanagari. That is acceptable here because the client sends an explicit
+ * code (`ta`/`hi`) for those languages and reserves `auto` for the mixed
+ * long tail the app cannot name.
+ */
 function toDeepgramLanguage(language: string): string | null {
 	const bare = (language || 'en').trim().toLowerCase();
-	if (!bare || bare === 'auto' || bare === 'unknown') return null;
+	if (!bare) return null;
+	if (bare === 'auto' || bare === 'unknown') return 'multi';
 	if (bare.includes('-')) return bare;
-	return bare === 'en' ? 'en-US' : bare;
+	if (bare === 'en') return 'en-US';
+	// Mixed-code pseudo-languages lean on a base language, mirroring the Sarvam
+	// stream mapping so a fallback recognises the code-mixed speech it hears.
+	if (bare === 'tanglish') return 'ta-IN';
+	if (bare === 'hinglish') return 'hi-IN';
+	if (bare === 'benglish') return 'bn-IN';
+	if (bare === 'gujlish') return 'gu-IN';
+	return bare;
 }
 
 export function createDeepgramStt(options: SttOptions): SttSession {
@@ -41,7 +77,7 @@ export function createDeepgramStt(options: SttOptions): SttSession {
 	}
 
 	const query = new URLSearchParams({
-		model: 'nova-2',
+		model: toDeepgramModel(options.language),
 		encoding: 'linear16',
 		sample_rate: String(options.sampleRate),
 		channels: '1',
@@ -82,6 +118,7 @@ export function createDeepgramStt(options: SttOptions): SttSession {
 		for (const chunk of pending) socket.send(chunk, { binary: true });
 		pending = [];
 		pendingBytes = 0;
+		options.handlers.onOpen?.();
 	});
 
 	socket.on('message', (data: RawData) => {
@@ -117,7 +154,14 @@ export function createDeepgramStt(options: SttOptions): SttSession {
 				}
 			}
 
-			if (message.speech_final) {
+			if (message.speech_final || message.from_finalize === true) {
+				// `speech_final` is endpointing deciding the speaker stopped.
+				// `from_finalize` is the answer to our explicit `Finalize` (the
+				// client pressed stop, or a provider fallback replayed a turn
+				// that already ended). Measured: Finalize returns
+				// `is_final:true, speech_final:false, from_finalize:true`, so
+				// gating on `speech_final` alone silently produced no turn at
+				// all when the stop was what ended the utterance.
 				const full = committed.trim();
 				committed = '';
 				lastSegment = '';
