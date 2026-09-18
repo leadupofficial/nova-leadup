@@ -23,6 +23,8 @@ import {
 	synthesizeSpeech,
 	synthesizeSpeechSarvam,
 	synthesizeSpeechGoogle,
+	synthesizeSpeechDeepgram,
+	toDeepgramVoiceModel,
 	translateText,
 	ChatMessage,
 } from '../services/ai.js';
@@ -297,8 +299,39 @@ router.post('/tts', authenticate, validate(TtsSchema), async (req: Authenticated
 			});
 			return;
 		} catch (ttsErr) {
-			// Fall back to Sarvam (bulbul:v3), which covers en-IN as well as the
-			// Indian languages, so a dead ElevenLabs/Google credential degrades
+			// Cloud fallback #1 — Deepgram Aura. It covers English and the six
+			// other languages Deepgram ships (de/es/fr/it/ja/nl) but has no Indic
+			// voices, so `toDeepgramVoiceModel` returns null for Tamil/Hindi/… and
+			// those requests fall through to the Sarvam fallback below and then to
+			// the client's device voice. Deepgram is never the primary here.
+			const deepgramModel = toDeepgramVoiceModel(language);
+			if (deepgramModel && env.DEEPGRAM_API_KEY) {
+				try {
+					const fallback = await synthesizeSpeechDeepgram(body.text, language);
+					logger.warn(
+						{ language, primary: voiceProvider, fallback: 'deepgram', model: deepgramModel, reason: ttsErr },
+						'TTS provider failed; served by the Deepgram fallback'
+					);
+					res.status(200).json({
+						success: true,
+						data: {
+							audioData: fallback.audioBuffer.toString('base64'),
+							url: null,
+							contentType: fallback.contentType,
+							voice: body.voiceId || 'default',
+							durationMs: Math.round((fallback.audioBuffer.length / 16000) * 1000),
+							provider: 'deepgram',
+							language,
+						},
+					});
+					return;
+				} catch (deepgramErr) {
+					logger.warn({ err: deepgramErr, language, model: deepgramModel }, 'Deepgram TTS fallback also failed');
+				}
+			}
+
+			// Cloud fallback #2 — Sarvam (bulbul:v3), which covers en-IN as well as
+			// the Indian languages, so a dead ElevenLabs/Google credential degrades
 			// to a working voice instead of silence. Sarvam is only skipped when
 			// it was the provider that just failed.
 			if (voiceProvider !== 'sarvam' && env.SARVAM_API_KEY) {
@@ -306,7 +339,7 @@ router.post('/tts', authenticate, validate(TtsSchema), async (req: Authenticated
 					const sarvamCode = language === 'tanglish' ? 'ta' : language;
 					const fallback = await synthesizeSpeechSarvam(body.text, sarvamCode as string);
 					logger.warn(
-						{ language, voiceProvider, err: ttsErr },
+						{ language, primary: voiceProvider, fallback: 'sarvam', reason: ttsErr },
 						'TTS provider failed; served by the Sarvam fallback'
 					);
 					res.status(200).json({
@@ -326,7 +359,10 @@ router.post('/tts', authenticate, validate(TtsSchema), async (req: Authenticated
 					logger.warn({ err: fallbackErr, language }, 'Sarvam TTS fallback also failed');
 				}
 			}
-			logger.warn({ err: ttsErr, language, voiceProvider }, 'TTS provider failed');
+			logger.warn(
+				{ language, primary: voiceProvider, fallback: 'device', reason: ttsErr },
+				'No cloud TTS voice available; the client must use its device voice'
+			);
 			res.status(200).json({
 				success: true,
 				data: {
@@ -375,7 +411,7 @@ router.post('/translate', authenticate, validate(TranslateSchema), async (req: A
 
 // GET /voice/languages — list all supported languages (and their provider routes)
 router.get('/languages', authenticate, (_req, res) => {
-	// Which providers this deployment can actually reach.
+	// Which providers this deployment has a credential for.
 	//
 	// The catalogue names a provider per language, but that is the *intended*
 	// route, not a promise: seven languages (Assamese, Maithili, Sanskrit,
@@ -383,6 +419,10 @@ router.get('/languages', authenticate, (_req, res) => {
 	// deployment has no GOOGLE_CLOUD_API_KEY at all. A client reading only
 	// `voiceProvider` would think those work. Reporting what is configured lets
 	// it tell the two apart instead of discovering it one failed turn at a time.
+	//
+	// This is presence, not proof. ElevenLabs reports as configured while its key
+	// is in fact invalid, so a `true` here means "a value is set", not "this will
+	// work" — verifying live would mean calling every provider on every request.
 	const configured = {
 		sarvam: Boolean(env.SARVAM_API_KEY),
 		elevenlabs: Boolean(env.ELEVENLABS_API_KEY),

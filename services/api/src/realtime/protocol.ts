@@ -19,6 +19,11 @@
  *                                    (auth/quota/credit) and a backup is now
  *                                    transcribing it — not sent when the routed
  *                                    provider is serving the turn normally
+ *   {"type":"tts","provider":"deepgram","fallback":true,"reason":"…"}
+ *                                    the routed synthesiser rejected this turn
+ *                                    and the Deepgram cloud voice is speaking it
+ *                                    — sent at most once per turn, and never
+ *                                    when the device voice had to take over
  *   {"type":"partial","text":"…"}    interim transcript while the user speaks
  *   {"type":"final","text":"…"}      end-of-turn transcript
  *   {"type":"token","text":"…"}      LLM delta
@@ -60,6 +65,7 @@ export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 export type ServerEvent =
 	| { type: 'ready' }
 	| { type: 'stt'; provider: string; fallback: boolean; reason: string }
+	| { type: 'tts'; provider: string; fallback: boolean; reason: string }
 	| { type: 'partial'; text: string }
 	| { type: 'final'; text: string }
 	| { type: 'token'; text: string }

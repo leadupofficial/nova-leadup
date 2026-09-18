@@ -15,12 +15,22 @@
  * English. The REST route prefers ElevenLabs for English, but its streaming
  * endpoint is not what was verified here and `bulbul:v3` covers `en-IN`, so the
  * realtime path uses one verified provider rather than two divergent ones.
+ *
+ * Fallback chain per sentence: the streaming primary above → **Deepgram Aura**
+ * (English and the other six languages it ships — see `toDeepgramVoiceModel`)
+ * → nothing, at which point the client plays its own device voice. Deepgram is
+ * never the primary here; it only fires once the primary has refused the turn
+ * (today Sarvam answers HTTP 402 "No credits available" for every language).
  */
 import { env } from '../utils/env.js';
 import { HttpError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
+import { synthesizeSpeechDeepgram, toDeepgramVoiceModel } from '../services/ai.js';
 
 export const SARVAM_TTS_STREAM_URL = 'https://api.sarvam.ai/text-to-speech/stream';
+
+/** The realtime path's primary (and, for now, only) streaming provider. */
+export const PRIMARY_STREAM_PROVIDER = 'sarvam';
 
 /** Sarvam's default v3 speaker; overridable so the voice can change later. */
 export const DEFAULT_SPEAKER = 'priya';
@@ -39,11 +49,28 @@ export function toSarvamTtsLanguageCode(code: string): string {
 	return `${value}-IN`;
 }
 
+/** Why a sentence is not being served by the primary streaming provider. */
+export interface TtsFallbackInfo {
+	/** Provider that was tried first and failed. */
+	from: string;
+	/** Provider now serving the sentence. */
+	to: string;
+	/** Human-readable failure from the primary, for the client's notice. */
+	reason: string;
+}
+
 export interface SpeechStreamOptions {
 	text: string;
 	language: string;
 	speaker?: string;
 	signal?: AbortSignal;
+	/**
+	 * Fired once per sentence when the primary fails and the Deepgram cloud
+	 * fallback takes over. Mirrors the STT `{type:'stt', …}` notice so the client
+	 * can say "the backup voice is speaking" instead of pretending nothing
+	 * happened. Absent when the language has no Deepgram voice.
+	 */
+	onFallback?: (info: TtsFallbackInfo) => void;
 }
 
 /**
@@ -75,8 +102,64 @@ export function toSpeakableText(text: string): string {
  * Opens a streaming synthesis request and resolves once response headers are
  * in — i.e. as soon as audio is about to flow. Errors are mapped onto
  * `HttpError` so the session can report a stable `TTS_ERROR` code.
+ *
+ * When the streaming primary refuses the sentence, this falls back to Deepgram
+ * for the languages it supports and only throws when neither cloud voice could
+ * produce audio — the caller then reports `TTS_ERROR` once per turn and the
+ * client's device voice is the last resort (which this server never reaches
+ * into). A cancelled turn is not a provider failure and is rethrown untouched.
  */
 export async function openSpeechStream(options: SpeechStreamOptions): Promise<ReadableStream<Uint8Array>> {
+	try {
+		return await openSarvamSpeechStream(options);
+	} catch (err) {
+		if (options.signal?.aborted || (err as { name?: string } | null)?.name === 'AbortError') throw err;
+
+		const model = toDeepgramVoiceModel(options.language);
+		if (!model || !env.DEEPGRAM_API_KEY) {
+			// No cloud voice for this language (Deepgram ships no Indic voices) or
+			// no key: keep the primary's error so the client can play its device
+			// voice rather than waiting on a fallback that cannot work.
+			throw err;
+		}
+
+		logger.warn(
+			{
+				primary: PRIMARY_STREAM_PROVIDER,
+				fallback: 'deepgram',
+				model,
+				language: options.language,
+				reason: err instanceof Error ? err.message : String(err),
+			},
+			'Streaming TTS primary failed; Deepgram is speaking this sentence instead'
+		);
+
+		const clip = await synthesizeSpeechDeepgram(options.text, options.language, {
+			signal: options.signal,
+		});
+		options.onFallback?.({
+			from: PRIMARY_STREAM_PROVIDER,
+			to: 'deepgram',
+			reason: err instanceof Error ? err.message : String(err),
+		});
+
+		// Deepgram's `/v1/speak` is a single POST that returns the whole clip, so
+		// a sentence arrives in one piece rather than progressively. The realtime
+		// path still streams *sentence by sentence* — speech for sentence 1 starts
+		// while the model is still writing sentence 3 — but there is no
+		// within-sentence progression here. That is the accepted trade-off for
+		// having a working cloud voice while the streaming primary is dead.
+		return new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(new Uint8Array(clip.audioBuffer));
+				controller.close();
+			},
+		});
+	}
+}
+
+/** The primary streaming attempt, isolated so `openSpeechStream` can fall back. */
+async function openSarvamSpeechStream(options: SpeechStreamOptions): Promise<ReadableStream<Uint8Array>> {
 	if (!env.SARVAM_API_KEY) {
 		throw new HttpError(503, 'SARVAM_API_KEY is not configured', 'TTS_NOT_CONFIGURED');
 	}

@@ -36,6 +36,13 @@ export interface ReplyHandlers {
 	onAudio(chunk: Uint8Array): Promise<void>;
 	/** Called once per reply if a sentence could not be synthesised. */
 	onTtsError(err: unknown): void;
+	/**
+	 * Called at most once per reply when the primary TTS provider refused the
+	 * turn and the Deepgram cloud voice is speaking it instead. Absent for
+	 * languages Deepgram does not cover (it ships no Indic voices), where the
+	 * client's device voice is the only remaining option.
+	 */
+	onTtsFallback?(info: { from: string; to: string; reason: string }): void;
 	/** True once the caller has cancelled this reply. */
 	isCancelled(): boolean;
 }
@@ -78,6 +85,8 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 	let streamed = '';
 	let sentenceIndex = 0;
 	let ttsErrorReported = false;
+	/** Mirror of `ttsErrorReported` for the Deepgram-fallback notice. */
+	let ttsFallbackReported = false;
 	/** Serialises sentence synthesis so audio is emitted in text order. */
 	let ttsChain: Promise<void> = Promise.resolve();
 
@@ -96,7 +105,18 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 			if (signal.aborted) return;
 			handlers.onSentence(speakable, index);
 			try {
-				const body = await openSpeechStream({ text: speakable, language: options.language, signal });
+				const body = await openSpeechStream({
+					text: speakable,
+					language: options.language,
+					signal,
+					onFallback: (info) => {
+						// The primary fails on every sentence while it is down, so
+						// report the switch once rather than once per sentence.
+						if (ttsFallbackReported) return;
+						ttsFallbackReported = true;
+						handlers.onTtsFallback?.(info);
+					},
+				});
 				const reader = body.getReader();
 				try {
 					for (;;) {

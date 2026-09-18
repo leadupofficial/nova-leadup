@@ -574,6 +574,112 @@ export async function transcribeAudio(audioBuffer: Buffer, language: string = 'e
 	}
 }
 
+// ─── Text-to-Speech (Deepgram Aura — cloud fallback) ──────────────────
+
+/**
+ * Deepgram Aura voice per language, keyed by NOVA's bare language code.
+ *
+ * The value is the `canonical_name` from `GET /v1/models`, and it **must** keep
+ * its `aura-2-` prefix: passing the bare voice name (`asteria`) is rejected with
+ * HTTP 400 "Model does not exist" even though that is the name
+ * `/v1/models` lists. Every id below was verified live against
+ * `POST /v1/speak?model=…` (2026-09-18: HTTP 200, `content-type: audio/mpeg`,
+ * MPEG layer III frame sync `0xFFF3`), not copied from prose.
+ *
+ * Coverage is exactly the seven languages Deepgram Aura ships: en, de, es, fr,
+ * it, ja, nl. There are no Indic voices, so Tamil/Hindi and the rest of NOVA's
+ * catalog are deliberately absent — `toDeepgramVoiceModel` returns `null` and
+ * the caller keeps its primary provider and, failing that, the device voice.
+ */
+const DEEPGRAM_VOICE_MODELS: Record<string, string> = {
+	en: 'aura-2-thalia-en',
+	de: 'aura-2-aurelia-de',
+	es: 'aura-2-agustina-es',
+	fr: 'aura-2-agathe-fr',
+	it: 'aura-2-cesare-it',
+	ja: 'aura-2-ama-ja',
+	nl: 'aura-2-beatrix-nl',
+};
+
+/**
+ * Maps a NOVA language code (`en`, `en-US`, `auto`, …) to a verified Deepgram
+ * Aura model id, or `null` when Deepgram has no voice for it.
+ *
+ * Region tags are stripped (`en-GB` → `en`); `auto`/`unknown`/empty are treated
+ * as English because that is the language the routed English primary would have
+ * spoken anyway.
+ */
+export function toDeepgramVoiceModel(code: string): string | null {
+	const value = (code || '').trim().toLowerCase();
+	if (!value || value === 'auto' || value === 'unknown') return DEEPGRAM_VOICE_MODELS.en;
+	const base = value.split('-')[0];
+	return DEEPGRAM_VOICE_MODELS[base] ?? null;
+}
+
+/**
+ * Deepgram Aura synthesis — a single POST that returns the whole clip.
+ *
+ * Unlike Sarvam's `/text-to-speech/stream` this does not stream progressively;
+ * callers that need sentence-level streaming get one piece per sentence.
+ * Throws a clear error when the key is missing, the language has no Deepgram
+ * voice, or the provider refuses the request.
+ */
+export async function synthesizeSpeechDeepgram(
+	text: string,
+	language: string = 'en',
+	options?: { signal?: AbortSignal }
+): Promise<{ audioBuffer: Buffer; contentType: string; durationMs: number }> {
+	if (!env.DEEPGRAM_API_KEY) {
+		throw new Error('DEEPGRAM_API_KEY is not configured');
+	}
+
+	const model = toDeepgramVoiceModel(language);
+	if (!model) {
+		throw new Error(`Deepgram TTS has no voice for language '${language}'`);
+	}
+
+	// P0-06: AbortSignal timeout — 60 seconds for TTS, plus the caller's own
+	// signal so a barge-in cancels the request instead of leaving it in flight.
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => controller.abort(), 60_000);
+	const onAbort = (): void => controller.abort();
+	options?.signal?.addEventListener('abort', onAbort, { once: true });
+
+	try {
+		const response = await fetch(
+			`https://api.deepgram.com/v1/speak?model=${encodeURIComponent(model)}`,
+			{
+				method: 'POST',
+				signal: controller.signal,
+				headers: {
+					Authorization: `Token ${env.DEEPGRAM_API_KEY}`,
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({ text }),
+			}
+		);
+
+		if (!response.ok) {
+			const detail = await response.text().catch(() => '');
+			throw new Error(`Deepgram TTS failed (${response.status}): ${detail.slice(0, 200)}`);
+		}
+
+		const audioBuffer = Buffer.from(await response.arrayBuffer());
+		if (audioBuffer.length === 0) {
+			throw new Error('Deepgram TTS returned no audio data');
+		}
+
+		return {
+			audioBuffer,
+			contentType: response.headers.get('content-type') || 'audio/mpeg',
+			durationMs: Math.round((audioBuffer.length / 16000) * 1000),
+		};
+	} finally {
+		clearTimeout(timeoutId);
+		options?.signal?.removeEventListener('abort', onAbort);
+	}
+}
+
 // ─── Text-to-Speech (ElevenLabs — English default) ────────────────────
 
 export async function synthesizeSpeech(

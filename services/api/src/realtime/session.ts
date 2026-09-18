@@ -435,6 +435,13 @@ export class RealtimeVoiceSession {
 					onTtsError: (err) => {
 						if (!isCancelled()) this.reportError('TTS_ERROR', err);
 					},
+					// The routed synthesiser refused the turn and Deepgram is
+					// speaking it. Same shape as the STT notice above; the reply
+					// pipeline already deduped it to once per turn and logged the
+					// primary + reason at warn.
+					onTtsFallback: (info) => {
+						if (!isCancelled()) this.send({ type: 'tts', provider: info.to, fallback: true, reason: info.reason });
+					},
 				},
 			});
 
