@@ -370,9 +370,12 @@ class NovaTextField extends StatelessWidget {
     this.autofocus = false,
     this.maxLines = 1,
     this.errorText,
+    this.helperText,
     this.enabled = true,
     this.textInputAction,
     this.focusNode,
+    this.onChanged,
+    this.textCapitalization = TextCapitalization.none,
   });
 
   final TextEditingController? controller;
@@ -386,9 +389,12 @@ class NovaTextField extends StatelessWidget {
   final bool autofocus;
   final int maxLines;
   final String? errorText;
+  final String? helperText;
   final bool enabled;
   final TextInputAction? textInputAction;
   final FocusNode? focusNode;
+  final ValueChanged<String>? onChanged;
+  final TextCapitalization textCapitalization;
 
   @override
   Widget build(BuildContext context) {
@@ -406,6 +412,8 @@ class NovaTextField extends StatelessWidget {
           obscureText: obscure,
           keyboardType: keyboardType,
           onSubmitted: onSubmitted,
+          onChanged: onChanged,
+          textCapitalization: textCapitalization,
           autofocus: autofocus,
           maxLines: obscure ? 1 : maxLines,
           enabled: enabled,
@@ -415,6 +423,7 @@ class NovaTextField extends StatelessWidget {
           decoration: InputDecoration(
             hintText: hint,
             errorText: errorText,
+            helperText: helperText,
             prefixIcon: prefixIcon == null
                 ? null
                 : Icon(prefixIcon, size: 18, color: c.muted),
