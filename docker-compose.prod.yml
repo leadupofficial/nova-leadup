@@ -86,6 +86,9 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_BUCKET: ${S3_BUCKET:-nova-assets}
       JWT_SECRET: ${JWT_SECRET}
+      # services/api refuses to boot in production without a refresh secret
+      # (config.ts getEnvConfig throws). It was missing here entirely.
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       CORS_ORIGIN: ${CORS_ORIGIN}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
@@ -104,11 +107,15 @@ services:
     tmpfs:
     - /tmp
     healthcheck:
+      # `curl` does not exist in the node:22-alpine runtime image, so the previous
+      # `curl -f` probe failed with `exec: "curl": executable file not found` and the
+      # container reported unhealthy while the API was serving normally. Node 22 has a
+      # global fetch, so use that rather than adding curl to every image.
       test:
       - CMD
-      - curl
-      - -f
-      - http://localhost:3001/health/live
+      - node
+      - -e
+      - "fetch('http://localhost:3001/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 15s
       timeout: 5s
       retries: 3
@@ -125,7 +132,11 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       JWT_SECRET: ${JWT_SECRET}
-      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET}
+      # services/auth/src/env.ts validates JWT_REFRESH_SECRET, but this file only passed
+      # REFRESH_TOKEN_SECRET — so its validator rejected the environment and the container
+      # sat unhealthy. Both names are now fed from one value.
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      REFRESH_TOKEN_SECRET: ${JWT_REFRESH_SECRET}
       AUTH_ENCRYPTION_KEY: ${AUTH_ENCRYPTION_KEY}
       API_KEY_SECRET: ${API_KEY_SECRET}
       CORS_ORIGIN: ${CORS_ORIGIN}
@@ -144,9 +155,9 @@ services:
     healthcheck:
       test:
       - CMD
-      - curl
-      - -f
-      - http://localhost:3003/health/live
+      - node
+      - -e
+      - "fetch('http://localhost:3003/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 15s
       timeout: 5s
       retries: 3
@@ -180,6 +191,11 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      # services/notification-service validates JWT_SECRET and was never given one, so it
+      # fell back to its own default — 'fallback-secret-change-me', which is 25 characters
+      # and therefore fails its own min(32) rule. The container crash-looped with
+      # "Invalid environment configuration."
+      JWT_SECRET: ${JWT_SECRET}
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
@@ -266,13 +282,48 @@ services:
     healthcheck:
       test:
       - CMD
-      - curl
-      - -f
-      - http://localhost:3004/health/live
+      - node
+      - -e
+      - "fetch('http://localhost:3004/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 10s
+  # Next.js admin console (apps/admin). Serves the HTML panel that nginx exposes
+  # at `/`. The `admin` service above stays as the /api/admin/* JSON API — they
+  # are two different things with confusingly similar names.
+  admin-ui:
+    image: nova-admin-ui:latest
+    container_name: nova-admin-ui
+    restart: unless-stopped
+    ports:
+    - 127.0.0.1:3005:3005
+    environment:
+      NODE_ENV: production
+      PORT: 3005
+      HOSTNAME: 0.0.0.0
+      # Inlined into the client bundle at image build time; must match the
+      # NEXT_PUBLIC_API_BASE build arg in apps/admin/Dockerfile.
+      NEXT_PUBLIC_API_BASE: https://nova.leadup.in/api/v1
+      API_INTERNAL_URL: http://api:3001/api/v1
+      API_ORIGIN_URL: http://admin:3004
+    depends_on:
+    - api
+    - admin
+    networks:
+    - nova-network
+    security_opt:
+    - no-new-privileges:true
+    healthcheck:
+      test:
+      - CMD
+      - node
+      - -e
+      - "fetch('http://localhost:3005/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 volumes:
   postgres_data:
     driver: local
