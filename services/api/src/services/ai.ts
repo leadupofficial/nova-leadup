@@ -197,20 +197,36 @@ let anthropic: Anthropic | null = null;
 
 function getAnthropic(): Anthropic {
 	if (!anthropic) {
-		// Support BroCode proxy via BROCODE_API_KEY + ANTHROPIC_BASE_URL,
-		// fallback to direct Anthropic via ANTHROPIC_API_KEY.
+		// Supports Anthropic's own API and OpenAI-style aggregator gateways
+		// (AICredits, BroCode) via ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY.
 		const baseURL = process.env.ANTHROPIC_BASE_URL;
 		const apiKey = process.env.BROCODE_API_KEY || env.ANTHROPIC_API_KEY;
 		if (!apiKey) throw new Error('Neither BROCODE_API_KEY nor ANTHROPIC_API_KEY is configured');
 		const options: any = { apiKey };
 		if (baseURL) options.baseURL = baseURL;
-		// BroCode uses x-api-key header (set by default), but allow custom auth header override.
-		if (process.env.BROCODE_API_KEY && process.env.ANTHROPIC_AUTH_HEADER) {
+		// Gateways authenticate differently. Anthropic's own API reads the key
+		// from `x-api-key` (the SDK's `apiKey` option); aggregators such as
+		// AICredits answer 401 "Missing or invalid Authorization header" for
+		// that and require `Authorization: Bearer`, which the SDK sends only
+		// when the key is passed as `authToken`. Set ANTHROPIC_AUTH_STYLE=bearer
+		// for those.
+		if ((process.env.ANTHROPIC_AUTH_STYLE || '').toLowerCase() === 'bearer') {
+			delete options.apiKey;
 			options.authToken = apiKey;
 		}
 		anthropic = new Anthropic(options);
 	}
 	return anthropic;
+}
+
+/**
+ * The model id to send. Gateways namespace their model ids
+ * (`anthropic/claude-sonnet-4.6`) while Anthropic's API does not
+ * (`claude-sonnet-4-20250514`), so this must be configurable rather than
+ * hardcoded — the previous literal 404'd against every gateway.
+ */
+function defaultModel(): string {
+	return process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
 }
 
 export interface ChatMessage {
@@ -254,7 +270,7 @@ export async function chatCompletion(
 	messages: ChatMessage[],
 	options: ChatOptions = {}
 ): Promise<{ content: string; model: string; usage: { inputTokens: number; outputTokens: number } }> {
-	const model = options.model || 'claude-sonnet-4-20250514';
+	const model = options.model || defaultModel();
 	const maxTokens = options.maxTokens || 4096;
 	const temperature = options.temperature ?? 0.7;
 
