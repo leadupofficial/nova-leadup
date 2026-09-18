@@ -15,7 +15,7 @@ import {
 	featureFlags,
 	usageRecords,
 } from '@nova/database';
-import { eq, desc, sql, and, count, gte } from 'drizzle-orm';
+import { eq, desc, sql, and, count, gte, inArray } from 'drizzle-orm';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error-handler.js';
 import { validate } from '../middleware/validate.js';
@@ -312,7 +312,10 @@ router.get(
 				const memberRows = await db
 					.select({ organizationId: users.organizationId, members: sql<number>`count(*)` })
 					.from(users)
-					.where(sql`${users.organizationId} = ANY(${idsArray})`)
+					// `sql\`... = ANY(${array})\`` expands a JS array into a parameter list
+				// and Postgres rejects it with "op ANY/ALL (array) requires array on
+				// right side"; inArray emits a proper IN (...) clause.
+				.where(inArray(users.organizationId, idsArray))
 					.groupBy(users.organizationId);
 				memberRows.forEach((m) => memberMap.set(m.organizationId, Number(m.members)));
 			}
@@ -799,7 +802,7 @@ router.get(
 				const userRows = await db
 					.select({ id: users.id, email: users.email, name: users.name })
 					.from(users)
-					.where(sql`${users.id} = ANY(${idsArray})`);
+					.where(inArray(users.id, idsArray));
 				userRows.forEach((u) => userMap.set(u.id, u.email ?? u.name ?? 'unknown'));
 			}
 
