@@ -58,6 +58,39 @@ function formatWhen(date: Date | null): string {
 	}).format(date);
 }
 
+/**
+ * Year-bearing "now" for the prompt header.
+ *
+ * The header used `formatWhen`, which omits the year. Asked to "remind me
+ * tomorrow at 5pm" on 2026-09-18, the model read "Fri, 18 Sep" and resolved
+ * tomorrow as **2025**-09-19 — a reminder in the past, which can never fire
+ * and is invisible to the upcoming-reminders query. The year has to be stated.
+ */
+function formatNow(date: Date): string {
+	return new Intl.DateTimeFormat('en-GB', {
+		timeZone: USER_TIMEZONE,
+		weekday: 'short',
+		day: '2-digit',
+		month: 'short',
+		year: 'numeric',
+		hour: '2-digit',
+		minute: '2-digit',
+		hour12: true,
+	}).format(date);
+}
+
+/** `YYYY-MM-DD` as it is in the user's timezone (not UTC). */
+function isoDateInUserZone(date: Date): string {
+	const parts = new Intl.DateTimeFormat('en-CA', {
+		timeZone: USER_TIMEZONE,
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+	}).formatToParts(date);
+	const read = (type: string): string => parts.find((p) => p.type === type)?.value ?? '';
+	return `${read('year')}-${read('month')}-${read('day')}`;
+}
+
 export interface UserContext {
 	/** The rendered block, or '' when the user has nothing worth injecting. */
 	text: string;
@@ -187,8 +220,8 @@ export async function buildUserContext(
 	}
 
 	const header =
-		`What you know about this user right now (current time: ${formatWhen(now)}, ` +
-		`timezone ${USER_TIMEZONE}):`;
+		`What you know about this user right now (current time: ${formatNow(now)}, ` +
+		`today's date is ${isoDateInUserZone(now)} in ${USER_TIMEZONE}):`;
 
 	let text = `${header}\n\n${sections.join('\n\n')}`;
 	if (!counts.tasks && !counts.reminders && !counts.memories) {
@@ -219,6 +252,12 @@ export async function buildUserContext(
 export function composeSystemPrompt(options: {
 	basePrompt: string;
 	context?: string;
+	/**
+	 * What the assistant can *do* this turn (the write tools it is being
+	 * offered). Omitted on routes that do not pass `tools` to the provider, so
+	 * the model is never told it can call something it cannot.
+	 */
+	capabilities?: string;
 	language?: string;
 	languageName?: string;
 	languageNative?: string;
@@ -242,6 +281,12 @@ export function composeSystemPrompt(options: {
 
 	if (options.context) {
 		parts.push(options.context);
+	}
+
+	// Last, so the "you can create these" instruction is the model's most
+	// recent framing before it answers.
+	if (options.capabilities) {
+		parts.push(options.capabilities);
 	}
 
 	return parts.join('\n\n');

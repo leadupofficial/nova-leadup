@@ -23,7 +23,6 @@ import {
 	synthesizeSpeech,
 	synthesizeSpeechSarvam,
 	synthesizeSpeechGoogle,
-	chatCompletion,
 	translateText,
 	ChatMessage,
 } from '../services/ai.js';
@@ -33,6 +32,7 @@ import { logger } from '../utils/logger.js';
 import { env } from '../utils/env.js';
 import { toAssistantError } from '../services/assistant.js';
 import { buildUserContext, composeSystemPrompt } from '../services/user-context.js';
+import { ASSISTANT_TOOLS_PROMPT, runAssistantToolLoop } from '../services/assistant-tools.js';
 import { validate } from '../middleware/validate.js';
 
 const router: ReturnType<typeof Router> = Router();
@@ -163,23 +163,37 @@ router.post('/chat', authenticate, validate(ChatSchema), async (req: Authenticat
 		const messages: ChatMessage[] = body.messages.map((m) => ({ role: m.role, content: m.content }));
 
 		// Spoken turns get the same grounding as typed ones: a voice companion
-		// that cannot see your reminders is not a companion.
+		// that cannot see your reminders is not a companion. They also get the
+		// same write tools, so "remind me to call the bank tomorrow at 5pm"
+		// works when spoken, not just when typed.
 		const context = await buildUserContext(req.user!.id);
 		const systemPrompt = composeSystemPrompt({
 			basePrompt: buildSystemPromptForLanguage(language),
 			context: context.text,
+			capabilities: ASSISTANT_TOOLS_PROMPT,
 			language,
 			languageName: getLanguageByCode(language)?.name,
 			languageNative: getLanguageByCode(language)?.native,
 		});
 
-		const result = await chatCompletion(messages, {
+		const result = await runAssistantToolLoop(req.user!.id, messages, {
 			systemPrompt,
 			maxTokens: 1024,
 			temperature: 0.7,
 		});
 
-		logger.info({ userId: req.user!.id, model: result.model, language, usage: result.usage }, 'Voice chat completion');
+		logger.info(
+			{
+				userId: req.user!.id,
+				model: result.model,
+				language,
+				usage: result.usage,
+				iterations: result.iterations,
+				tools: result.toolCalls.map((t) => `${t.name}:${t.ok ? 'ok' : 'failed'}`),
+				capped: result.capped,
+			},
+			'Voice chat completion',
+		);
 
 		res.status(200).json({
 			success: true,

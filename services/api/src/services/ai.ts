@@ -229,9 +229,38 @@ function defaultModel(): string {
 	return process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
 }
 
+/**
+ * Content blocks the chat model can send or receive.
+ *
+ * `text` is what every caller used before tool use existed. `tool_use` is the
+ * model asking the server to run one of the tools it was offered, and
+ * `tool_result` is the server's answer, which must be replayed back in a
+ * `user` turn immediately after the assistant turn that requested it.
+ */
+export type ChatContentBlock =
+	| { type: 'text'; text: string }
+	| { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+	| { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean };
+
 export interface ChatMessage {
 	role: 'user' | 'assistant';
-	content: string;
+	/** Plain text, or provider content blocks when tool calls are in play. */
+	content: string | ChatContentBlock[];
+}
+
+/**
+ * A tool the model may call. The field names mirror the Anthropic Messages API
+ * (`input_schema`, not `inputSchema`), because that is what goes on the wire.
+ */
+export interface ToolDefinition {
+	name: string;
+	description: string;
+	input_schema: {
+		type: 'object';
+		properties: Record<string, unknown>;
+		required?: string[];
+		additionalProperties?: boolean;
+	};
 }
 
 export interface ChatOptions {
@@ -239,6 +268,47 @@ export interface ChatOptions {
 	maxTokens?: number;
 	temperature?: number;
 	systemPrompt?: string;
+	/** When present and non-empty, the model may answer with `tool_use` blocks. */
+	tools?: ToolDefinition[];
+}
+
+/** An `tool_use` block the model asked for, extracted for the caller. */
+export interface ToolUseBlock {
+	id: string;
+	name: string;
+	input: Record<string, unknown>;
+}
+
+/** Everything the provider returned, including what used to be discarded. */
+export interface ChatCompletionResult {
+	/** Text blocks joined — unchanged from the pre-tool-use contract. */
+	content: string;
+	model: string;
+	usage: { inputTokens: number; outputTokens: number };
+	/** Assistant blocks in provider order (text and tool_use). */
+	blocks: ChatContentBlock[];
+	/** `tool_use` when the model wants tools run; `end_turn` for a final answer. */
+	stopReason: string | null;
+	/** Convenience view of the `tool_use` blocks in `blocks`. */
+	toolUses: ToolUseBlock[];
+}
+
+/** Flattens a message's text, ignoring tool blocks. */
+function messageText(content: string | ChatContentBlock[]): string {
+	if (typeof content === 'string') return content;
+	return content
+		.filter((b): b is Extract<ChatContentBlock, { type: 'text' }> => b.type === 'text')
+		.map((b) => b.text)
+		.join('');
+}
+
+/**
+ * Redacts PII from a user turn. `tool_result` blocks are passed through
+ * untouched: their content is produced by this server, not typed by the user.
+ */
+function redactUserContent(content: string | ChatContentBlock[]): string | ChatContentBlock[] {
+	if (typeof content === 'string') return redactPII(content);
+	return content.map((b) => (b.type === 'text' ? { ...b, text: redactPII(b.text) } : b));
 }
 
 /**
@@ -269,18 +339,20 @@ function looksLikeProviderNotice(content: string): boolean {
 export async function chatCompletion(
 	messages: ChatMessage[],
 	options: ChatOptions = {}
-): Promise<{ content: string; model: string; usage: { inputTokens: number; outputTokens: number } }> {
+): Promise<ChatCompletionResult> {
 	const model = options.model || defaultModel();
 	const maxTokens = options.maxTokens || 4096;
 	const temperature = options.temperature ?? 0.7;
 
-	// P0-05: Pre-flight safety checks on user messages
+	// P0-05: Pre-flight safety checks on user messages. Only text counts here —
+	// a `tool_result` block is server-generated and holds no user prose.
 	for (const message of messages) {
 		if (message.role === 'user') {
-			if (containsJailbreak(message.content)) {
+			const text = messageText(message.content);
+			if (containsJailbreak(text)) {
 				throw new Error('Request contains a jailbreak attempt and was blocked');
 			}
-			if (containsUnsafeContent(message.content)) {
+			if (containsUnsafeContent(text)) {
 				throw new Error('Request contains unsafe content and was blocked');
 			}
 		}
@@ -289,7 +361,7 @@ export async function chatCompletion(
 	// P0-05: Redact PII from user messages before sending to provider
 	const sanitizedMessages: ChatMessage[] = messages.map((m) => ({
 		...m,
-		content: m.role === 'user' ? redactPII(m.content) : m.content,
+		content: m.role === 'user' ? redactUserContent(m.content) : m.content,
 	}));
 
 	const client = getAnthropic();
@@ -300,10 +372,10 @@ export async function chatCompletion(
 
 	const system = [{ type: 'text' as const, text: systemPrompt }];
 
-	const anthropicMessages: Anthropic.MessageParam[] = sanitizedMessages.map((m) => ({
+	const anthropicMessages = sanitizedMessages.map((m) => ({
 		role: m.role,
 		content: m.content,
-	}));
+	})) as unknown as Anthropic.MessageParam[];
 
 	// P0-06: AbortSignal timeout — 120 seconds for chat completions
 	const controller = new AbortController();
@@ -317,10 +389,32 @@ export async function chatCompletion(
 			temperature,
 			system,
 			messages: anthropicMessages,
+			// Omitted entirely when the caller offers no tools, so the request
+			// stays byte-for-byte what it was before tool use existed.
+			...(options.tools && options.tools.length ? { tools: options.tools } : {}),
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		} as any);
-		const content = response.content
-			.filter((b): b is Anthropic.TextBlock => b.type === 'text')
+
+		// Keep text and tool_use blocks; drop anything else (e.g. thinking
+		// blocks, which we never ask for). `content` below is unchanged: text
+		// blocks joined exactly as before, so every pre-existing caller that
+		// only reads `.content` is unaffected.
+		const blocks: ChatContentBlock[] = [];
+		for (const block of response.content) {
+			if (block.type === 'text') {
+				blocks.push({ type: 'text', text: block.text });
+			} else if (block.type === 'tool_use') {
+				blocks.push({
+					type: 'tool_use',
+					id: block.id,
+					name: block.name,
+					input: (block.input ?? {}) as Record<string, unknown>,
+				});
+			}
+		}
+
+		const content = blocks
+			.filter((b): b is Extract<ChatContentBlock, { type: 'text' }> => b.type === 'text')
 			.map((b) => b.text)
 			.join('');
 
@@ -334,6 +428,10 @@ export async function chatCompletion(
 			throw new Error(`AI provider rejected the request: ${content.slice(0, 200)}`);
 		}
 
+		const toolUses: ToolUseBlock[] = blocks
+			.filter((b): b is Extract<ChatContentBlock, { type: 'tool_use' }> => b.type === 'tool_use')
+			.map((b) => ({ id: b.id, name: b.name, input: b.input }));
+
 		return {
 			content,
 			model: response.model,
@@ -341,6 +439,9 @@ export async function chatCompletion(
 				inputTokens: response.usage.input_tokens,
 				outputTokens: response.usage.output_tokens,
 			},
+			blocks,
+			stopReason: response.stop_reason ?? null,
+			toolUses,
 		};
 	} finally {
 		clearTimeout(timeoutId);

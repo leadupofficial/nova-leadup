@@ -13,8 +13,8 @@ import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
 import { validate } from '../middleware/validate.js';
-import { chatCompletion } from '../services/ai.js';
 import { buildUserContext, composeSystemPrompt } from '../services/user-context.js';
+import { ASSISTANT_TOOLS_PROMPT, runAssistantToolLoop } from '../services/assistant-tools.js';
 import { getLanguageByCode } from '@nova/shared-types';
 import {
 	HISTORY_MESSAGE_LIMIT,
@@ -278,10 +278,15 @@ router.post('/:id/messages', authenticate, validate(SendMessageSchema), async (r
 					? getLanguageByCode(body.language)
 					: undefined;
 
-				const completion = await chatCompletion(toChatMessages(history), {
+				// The write tools (create_reminder / create_task / save_memory)
+				// run against the *authenticated* user id. The model is offered
+				// no way to name a user, and the loop is capped at
+				// MAX_TOOL_ITERATIONS model calls.
+				const completion = await runAssistantToolLoop(req.user!.id, toChatMessages(history), {
 					systemPrompt: composeSystemPrompt({
 						basePrompt: NOVA_SYSTEM_PROMPT,
 						context: context.text,
+						capabilities: ASSISTANT_TOOLS_PROMPT,
 						language: body.language,
 						languageName: languageInfo?.name,
 						languageNative: languageInfo?.native,
@@ -290,6 +295,8 @@ router.post('/:id/messages', authenticate, validate(SendMessageSchema), async (r
 					temperature: 0.7,
 				});
 
+				// Only the final assistant text is persisted — the app renders
+				// `content`, and `tool_calls`/`tool_results` are left null.
 				[assistantMessage] = await db.insert(conversationMessages).values({
 					conversationId: parsed.data.id,
 					role: 'assistant',
@@ -302,7 +309,15 @@ router.post('/:id/messages', authenticate, validate(SendMessageSchema), async (r
 				await db.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, parsed.data.id));
 
 				logger.info(
-					{ conversationId: parsed.data.id, userId: req.user!.id, model: completion.model, usage: completion.usage },
+					{
+						conversationId: parsed.data.id,
+						userId: req.user!.id,
+						model: completion.model,
+						usage: completion.usage,
+						iterations: completion.iterations,
+						tools: completion.toolCalls.map((t) => `${t.name}:${t.ok ? 'ok' : 'failed'}`),
+						capped: completion.capped,
+					},
 					'Assistant reply generated',
 				);
 			} catch (aiErr) {
