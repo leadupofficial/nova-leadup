@@ -22,7 +22,7 @@ import { Router, type Request } from 'express';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { and, eq, isNull } from 'drizzle-orm';
-import { sessions, users } from '@nova/database';
+import { roleBindings, roles, sessions, users } from '@nova/database';
 import { getDb } from '../db/connection.js';
 import { HttpError } from '../middleware/error-handler.js';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
@@ -41,11 +41,17 @@ const router: ReturnType<typeof Router> = Router();
 const BCRYPT_ROUNDS = 12;
 
 /**
- * Role claim for freshly issued access tokens. `users` has no role column; RBAC roles
- * live in `roles` / `role_bindings`. The middleware only needs a non-empty value, and
- * resolving real role bindings is a separate piece of work.
+ * Role claim used when an account holds no RBAC binding. `users` has no role column;
+ * roles live in `roles` / `role_bindings` (see `resolveUserRole`).
  */
 const DEFAULT_ROLE = 'user';
+
+/**
+ * Privilege order used to collapse a user's bindings into the single `role` claim an
+ * access token carries. `requireAdmin` (routes/admin.ts) and the admin console accept
+ * only owner/admin, so the most privileged binding must win.
+ */
+const ROLE_PRIORITY = ['owner', 'admin', 'manager', 'member', 'user'] as const;
 
 const escapeHtml = (str: string): string => {
 	if (typeof str !== 'string') return '';
@@ -142,11 +148,41 @@ interface IssuedSession {
 	user: PublicUser;
 }
 
+/**
+ * Resolves the caller's role from `role_bindings` → `roles`.
+ *
+ * A self-registered account has no bindings and therefore keeps `DEFAULT_ROLE`. The
+ * lookup is intentionally fail-open to `user`: an RBAC problem must not make sign-in
+ * impossible, and `user` grants no admin access.
+ */
+async function resolveUserRole(userId: string): Promise<string> {
+	try {
+		const rows = await getDb()
+			.select({ slug: roles.slug })
+			.from(roleBindings)
+			.innerJoin(roles, eq(roles.id, roleBindings.roleId))
+			.where(eq(roleBindings.userId, userId));
+
+		if (rows.length === 0) return DEFAULT_ROLE;
+
+		const slugs = rows.map((row) => row.slug);
+		const preferred = ROLE_PRIORITY.find((candidate) => slugs.includes(candidate));
+		// Unknown-but-bound role: surface it rather than silently downgrading to `user`.
+		return preferred ?? slugs[0] ?? DEFAULT_ROLE;
+	} catch (error) {
+		logger.warn('[auth] could not resolve role bindings; defaulting to', DEFAULT_ROLE, error);
+		return DEFAULT_ROLE;
+	}
+}
+
 async function issueSession(user: UserRow, req: Request): Promise<IssuedSession> {
+	// Resolved on every issuance, so a role change takes effect on the next refresh
+	// rather than being frozen into the account.
+	const role = await resolveUserRole(user.id);
 	const access = signAccessToken({
 		sub: user.id,
 		email: user.email ?? '',
-		role: DEFAULT_ROLE,
+		role,
 	});
 	const refresh = generateRefreshToken();
 
