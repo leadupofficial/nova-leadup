@@ -297,7 +297,7 @@ class _ReminderTile extends ConsumerWidget {
           children: [
             Icon(
               Icons.alarm_rounded,
-              color: reminder.completed ? c.muted : c.accent,
+              color: reminder.dismissed ? c.muted : c.accent,
               size: 20,
             ),
             const SizedBox(width: NovaSpace.sm),

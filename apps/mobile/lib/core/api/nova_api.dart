@@ -212,15 +212,43 @@ class NovaApi {
     return _list(data, 'reminders', NovaReminder.fromJson);
   }
 
+  /// Creates a reminder.
+  ///
+  /// The server's `CreateReminderSchema` accepts `triggerAt` (canonical,
+  /// `reminders.trigger_at`) or its `dueAt` alias, and has no `notes` field —
+  /// the `reminders` table has no such column. This used to send `remindAt`,
+  /// which zod stripped as an unknown key, so every create failed the schema's
+  /// refine with 400 "triggerAt is required".
   Future<NovaReminder> createReminder({
     required String title,
     DateTime? remindAt,
-    String? notes,
+    String? timezone,
+    String? repeatRule,
+    List<String>? notificationChannel,
   }) async {
     final data = await _post(ApiConfig.reminders, {
       'title': title,
-      if (remindAt != null) 'remindAt': remindAt.toUtc().toIso8601String(),
-      if (notes != null && notes.isNotEmpty) 'notes': notes,
+      'triggerAt': ?remindAt?.toUtc().toIso8601String(),
+      'timezone': ?timezone,
+      'repeatRule': ?repeatRule,
+      'notificationChannel': ?notificationChannel,
+    });
+    return NovaReminder.fromJson(_object(data));
+  }
+
+  /// Partially updates a reminder. Mirrors the server's `UpdateReminderSchema`.
+  Future<NovaReminder> updateReminder(
+    String id, {
+    String? title,
+    DateTime? remindAt,
+    bool? dismissed,
+    String? repeatRule,
+  }) async {
+    final data = await _patch(ApiConfig.reminder(id), {
+      'title': ?title,
+      'triggerAt': ?remindAt?.toUtc().toIso8601String(),
+      'dismissed': ?dismissed,
+      'repeatRule': ?repeatRule,
     });
     return NovaReminder.fromJson(_object(data));
   }

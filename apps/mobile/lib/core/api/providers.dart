@@ -172,7 +172,7 @@ final homeOverviewProvider = FutureProvider.autoDispose<HomeOverview>((
   return HomeOverview(
     openTasks: tasks.where((t) => !t.isDone).length,
     memories: memories.length,
-    reminders: reminders.where((r) => !r.completed).length,
+    reminders: reminders.where((r) => !r.dismissed).length,
   );
 });
 

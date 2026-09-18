@@ -30,7 +30,6 @@ class ReminderComposer extends ConsumerStatefulWidget {
 
 class _ReminderComposerState extends ConsumerState<ReminderComposer> {
   final _title = TextEditingController();
-  final _notes = TextEditingController();
 
   /// The design offers Today / Tomorrow / a picked date, with a time.
   DateTime _date = DateTime.now();
@@ -49,7 +48,6 @@ class _ReminderComposerState extends ConsumerState<ReminderComposer> {
   @override
   void dispose() {
     _title.dispose();
-    _notes.dispose();
     super.dispose();
   }
 
@@ -116,14 +114,6 @@ class _ReminderComposerState extends ConsumerState<ReminderComposer> {
               ],
             ),
             const SizedBox(height: NovaSpace.md),
-
-            NovaTextField(
-              controller: _notes,
-              label: 'Notes (optional)',
-              hint: 'Anything to remember about this',
-              maxLines: 2,
-            ),
-            const SizedBox(height: NovaSpace.sm),
 
             Row(
               children: [

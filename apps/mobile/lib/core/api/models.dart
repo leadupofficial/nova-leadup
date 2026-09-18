@@ -211,25 +211,34 @@ class NovaReminder {
   const NovaReminder({
     required this.id,
     required this.title,
-    this.notes,
     this.remindAt,
-    this.completed = false,
+    this.dismissed = false,
     this.createdAt,
   });
 
   final String id;
   final String title;
-  final String? notes;
+
+  /// The server's `trigger_at`. Null only when the payload was malformed.
   final DateTime? remindAt;
-  final bool completed;
+
+  /// The server's enable/disable flag (`reminders.dismissed`). There is no
+  /// `completed` concept server-side, so this replaces the old `completed`
+  /// field, which every real payload parsed as `false` because the API never
+  /// sends it.
+  final bool dismissed;
+
   final DateTime? createdAt;
 
   factory NovaReminder.fromJson(Map<String, dynamic> j) => NovaReminder(
     id: (j['id'] ?? '').toString(),
     title: (j['title'] ?? '').toString(),
-    notes: j['notes'] as String?,
-    remindAt: _parseDate(j['remindAt'] ?? j['remind_at'] ?? j['dueAt']),
-    completed: _parseBool(j['completed'] ?? j['isCompleted']),
+    // `triggerAt` is what the API actually returns; the older aliases are kept
+    // so an un-migrated payload still parses.
+    remindAt: _parseDate(
+      j['triggerAt'] ?? j['trigger_at'] ?? j['remindAt'] ?? j['remind_at'] ?? j['dueAt'],
+    ),
+    dismissed: _parseBool(j['dismissed']),
     createdAt: _parseDate(j['createdAt'] ?? j['created_at']),
   );
 }
