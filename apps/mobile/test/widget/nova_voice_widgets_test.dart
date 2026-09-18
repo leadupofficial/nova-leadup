@@ -13,9 +13,7 @@ Widget _host(Widget child, {bool reduceMotion = true}) {
     theme: NovaTheme.dark(),
     home: Builder(
       builder: (context) => MediaQuery(
-        data: MediaQuery.of(
-          context,
-        ).copyWith(disableAnimations: reduceMotion),
+        data: MediaQuery.of(context).copyWith(disableAnimations: reduceMotion),
         child: Scaffold(body: Center(child: child)),
       ),
     ),
@@ -62,10 +60,7 @@ void main() {
     testWidgets('a committed turn has no live marker', (tester) async {
       await tester.pumpWidget(
         _host(
-          const NovaMessageBubble(
-            text: 'vanakkam',
-            role: NovaMessageRole.user,
-          ),
+          const NovaMessageBubble(text: 'vanakkam', role: NovaMessageRole.user),
         ),
       );
       await tester.pumpAndSettle();
@@ -107,6 +102,40 @@ void main() {
       // This would time out if the pill kept animating.
       await tester.pumpAndSettle();
       expect(find.text('LISTENING'), findsOneWidget);
+    });
+
+    testWidgets('says when the device voice is covering for the cloud', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _host(
+          const NovaVoiceStatusPill(
+            phase: VoiceRealtimePhase.speaking,
+            speechSource: VoiceSpeechSource.device,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('SPEAKING · ON-DEVICE'), findsOneWidget);
+    });
+
+    testWidgets('says when the device has no voice for the language', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _host(
+          const NovaVoiceStatusPill(
+            phase: VoiceRealtimePhase.speaking,
+            speechSource: VoiceSpeechSource.deviceUnavailable,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Honest degradation: it must not claim to be speaking.
+      expect(find.text('NO DEVICE VOICE'), findsOneWidget);
+      expect(find.text('SPEAKING'), findsNothing);
     });
   });
 }

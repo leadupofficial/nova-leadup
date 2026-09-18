@@ -28,6 +28,10 @@ dependencies:
  # Microphone capture for the Converse voice loop (tap the mic, speak, get a
  # transcript). Spoken replies still play through just_audio above.
  record: ^7.1.1
+ # On-device text-to-speech. The fallback voice when the cloud TTS provider is
+ # unavailable: it needs no key, no account and no credits, and Android/iOS ship
+ # voices for the languages NOVA supports.
+ flutter_tts: ^4.2.5
  permission_handler: ^13.0.2
  sensors_plus: ^6.1.0
  local_auth: ^3.0.2

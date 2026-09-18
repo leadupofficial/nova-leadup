@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../services/voice_stream_service.dart';
+import 'device_tts.dart';
 import 'voice_capture.dart';
+import 'voice_device_fallback.dart';
 import 'voice_protocol.dart';
 import 'voice_realtime_state.dart';
 import 'voice_stream_capture.dart';
@@ -16,10 +18,11 @@ export 'voice_realtime_state.dart';
 /// Owns the whole realtime voice turn: socket, microphone, event decoding,
 /// playback and the state machine.
 ///
-/// The controller never touches the UI directly. Finished turns accumulate in
-/// [VoiceRealtimeState.commits] so the screen decides how (and whether) to put
-/// them in the transcript, and provisional text stays in the state until
-/// `final`/`done` replaces it.
+/// Finished turns accumulate in [VoiceRealtimeState.commits] for the screen to
+/// render; provisional text stays until `final`/`done` replaces it.
+///
+/// Speech has two engines: the cloud one streams MP3 over the socket, and a
+/// failure (`TTS_ERROR`) falls back to the platform via [VoiceDeviceFallback].
 class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
   static const _decoder = VoiceProtocolDecoder();
   static const _encoder = VoiceProtocolEncoder();
@@ -27,6 +30,7 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
   late VoiceStreamService _service;
   late VoiceStreamCapture _capture;
   late VoiceStreamPlayback _playback;
+  late VoiceDeviceFallback _deviceSpeech;
 
   StreamSubscription<dynamic>? _messages;
   StreamSubscription<VoiceStreamStatus>? _statuses;
@@ -43,6 +47,10 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
   /// than by the server, so a successful reconnect can clear it.
   bool _socketFault = false;
 
+  /// The language policy the current turn was started with, kept raw so the
+  /// device engine can map `tanglish`/`auto` itself.
+  String _languagePolicy = 'auto';
+
   bool get isConnected => _service.isConnected;
 
   @override
@@ -53,6 +61,12 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
     _service = ref.watch(voiceStreamServiceProvider);
     _capture = ref.watch(voiceStreamCaptureProvider);
     _playback = ref.watch(voiceStreamPlaybackProvider);
+    _deviceSpeech = VoiceDeviceFallback(
+      tts: ref.watch(deviceTtsProvider),
+      read: () => state,
+      write: _set,
+      cloudPlaying: () => _playback.isPlaying,
+    );
 
     _messages = _service.messages.listen(_onFrame);
     _statuses = _service.statuses.listen(_onStatus);
@@ -78,6 +92,8 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
     await _bargeIn(generation);
     if (generation != _generation) return;
 
+    _languagePolicy = language;
+    _deviceSpeech.beginTurn(language);
     _set(const VoiceRealtimeState(phase: VoiceRealtimePhase.connecting));
 
     final connected = await _ensureConnected();
@@ -135,23 +151,23 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
     _service.send(_encoder.cancel());
     await _capture.stop();
     await _playback.stop();
+    await _deviceSpeech.stop();
     _set(const VoiceRealtimeState(phase: VoiceRealtimePhase.idle));
   }
 
   /// Sends typed input through the same realtime pipeline.
   ///
   /// The screen keeps typed messages on the REST path because that is where the
-  /// turn is persisted to the conversation; this exists so the frozen
-  /// protocol's `text` frame is implemented and covered, and so a future caller
-  /// does not have to re-derive it.
+  /// turn is persisted; this exists so the frozen protocol's `text` frame is
+  /// implemented and covered, and so a future caller need not re-derive it.
   Future<bool> sendText(String text) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return false;
 
     final generation = _generation;
     await _playback.stop();
+    await _deviceSpeech.stop();
     if (generation != _generation) return false;
-
     if (!await _ensureConnected()) return false;
     if (generation != _generation) return false;
 
@@ -172,6 +188,13 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
     if (state.phase != VoiceRealtimePhase.error) return;
     _socketFault = false;
     _set(const VoiceRealtimeState(phase: VoiceRealtimePhase.idle));
+  }
+
+  /// Clears the "speaking with the on-device voice" notice without touching the
+  /// turn: the fallback is still in effect, the user has just acknowledged it.
+  void dismissSpeechNotice() {
+    if (state.speechNotice == null) return;
+    _set(state.copyWith(clearSpeechNotice: true));
   }
 
   // ── event handling ────────────────────────────────────────────────────────
@@ -202,20 +225,18 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
         _set(state.copyWith(partial: text));
 
       case VoiceFinalEvent(:final text):
-        // `final` closes the user's turn and opens the reply; the provisional
-        // transcript is replaced by the committed bubble.
-        //
-        // Acknowledge immediately: the wait that follows is the model's
-        // time-to-first-token, which is most of the gap before NOVA speaks, so
-        // an instant blip makes it read as thinking rather than nothing at all.
+        // `final` opens the reply and supersedes the last one outright: a
+        // device utterance still being read out must not talk over it.
+        _deviceSpeech.beginTurn(_languagePolicy);
         unawaited(_playback.acknowledge());
         _set(
-          _appendCommit(
-            text,
-            user: true,
-          ).copyWith(phase: VoiceRealtimePhase.thinking, partial: ''),
+          _appendCommit(text, user: true).copyWith(
+            phase: VoiceRealtimePhase.thinking,
+            partial: '',
+            speechSource: VoiceSpeechSource.cloud,
+            clearSpeechNotice: true,
+          ),
         );
-
       case VoiceTokenEvent(:final text):
         _set(
           state.copyWith(
@@ -225,12 +246,16 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
                 : VoiceRealtimePhase.thinking,
           ),
         );
-
       case VoiceSentenceEvent(:final text, :final index):
-        // Open the single continuous player before the audio arrives so the
-        // first chunk starts without a scheduling gap. A new sentence appends
-        // to the same open stream, so it never restarts playback.
-        _playback.beginTurn();
+        // Recorded unconditionally: the server sends the first sentence before
+        // it discovers cloud TTS is down, so the fallback must replay it.
+        _deviceSpeech.record(text);
+        if (!_deviceSpeech.isDeviceEnabled) {
+          // Open the single player before audio arrives so the first chunk
+          // starts without a scheduling gap; later sentences append to the
+          // same open stream and never restart it.
+          _playback.beginTurn();
+        }
         _set(
           state.copyWith(
             phase: VoiceRealtimePhase.speaking,
@@ -240,47 +265,70 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
         );
 
       case VoiceAudioEvent(:final bytes):
-        _playback.addChunk(bytes);
-        if (state.phase != VoiceRealtimePhase.speaking) {
-          _set(state.copyWith(phase: VoiceRealtimePhase.speaking));
+        if (_deviceSpeech.isDeviceEnabled) {
+          // Cloud synthesis already failed; anything still in flight would
+          // restart a player the device engine has replaced.
+          debugPrint('[VoiceRealtime] dropping cloud audio after TTS_ERROR');
+        } else {
+          _deviceSpeech.noteCloudAudio(state.sentenceIndex);
+          _playback.addChunk(bytes);
+          if (state.phase != VoiceRealtimePhase.speaking) {
+            _set(state.copyWith(phase: VoiceRealtimePhase.speaking));
+          }
         }
 
       case VoiceSpeakingEvent(:final value):
         if (value) {
           _set(state.copyWith(phase: VoiceRealtimePhase.speaking));
         } else {
-          // The server says it is done talking: flush, do not let the player
-          // keep a stale buffer alive.
+          // The server says it is done talking: flush, do not let the player or
+          // the device engine keep a stale utterance alive.
           unawaited(_playback.stop());
+          unawaited(_deviceSpeech.stop());
           if (state.phase == VoiceRealtimePhase.speaking) {
             _set(state.copyWith(phase: VoiceRealtimePhase.thinking));
           }
         }
 
       case VoiceDoneEvent(:final text):
-        unawaited(_playback.endTurn());
-        _set(
-          _appendCommit(
-            text,
-            user: false,
-          ).copyWith(
-            // Not necessarily idle. The microphone is left open and the
-            // provider's VAD is already listening for the next utterance, so
-            // reporting idle here told the user the session had stopped while it
-            // was still live and still capturing. That is what made hands-free
-            // conversation look broken: the turn really had ended, but the
-            // session had not.
-            phase: state.micActive
-                ? VoiceRealtimePhase.listening
-                : VoiceRealtimePhase.idle,
-            reply: '',
-          ),
-        );
-
+        final committed = _appendCommit(text, user: false);
+        if (_deviceSpeech.isDeviceEnabled && _deviceSpeech.isActive) {
+          // The device engine is still reading the reply out. Commit the text
+          // now, but stay in `speaking` until it finishes: reporting
+          // `listening` while NOVA is audibly talking would be a lie.
+          _deviceSpeech.holdTurn();
+          _set(
+            committed.copyWith(reply: '', phase: VoiceRealtimePhase.speaking),
+          );
+        } else {
+          unawaited(_playback.endTurn());
+          _set(
+            committed.copyWith(
+              // Not necessarily idle. The microphone is left open and the
+              // provider's VAD is already listening for the next utterance, so
+              // reporting idle here told the user the session had stopped while
+              // it was still live — which made hands-free look broken.
+              phase: state.micActive
+                  ? VoiceRealtimePhase.listening
+                  : VoiceRealtimePhase.idle,
+              reply: '',
+            ),
+          );
+        }
       case VoiceServerErrorEvent(:final code, :final message):
-        unawaited(_capture.stop());
-        unawaited(_playback.stop());
-        _fail(code: code, message: message);
+        if (code == 'TTS_ERROR') {
+          // Not a turn failure. The reply is already on screen and the device
+          // can still say it; aborting here is what made one provider outage
+          // produce total silence. Buffered audio drains rather than being cut
+          // off mid-word.
+          unawaited(_playback.endTurn());
+          _deviceSpeech.enable();
+        } else {
+          unawaited(_capture.stop());
+          unawaited(_playback.stop());
+          unawaited(_deviceSpeech.stop());
+          _fail(code: code, message: message);
+        }
 
       case VoiceUnknownEvent(:final type):
         debugPrint('[VoiceRealtime] ignoring unknown event "$type"');
@@ -308,27 +356,20 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
         _set(state.copyWith(connected: true));
 
       case VoiceStreamStatus.reconnecting:
-        _socketFault = true;
-        unawaited(_capture.stop());
-        unawaited(_playback.stop());
-        if (state.phase == VoiceRealtimePhase.idle ||
-            state.phase == VoiceRealtimePhase.error) {
-          _set(state.copyWith(connected: false, micActive: false));
-        } else {
-          _fail(
-            code: 'reconnecting',
-            message: 'The voice connection dropped. Reconnecting…',
-          );
-        }
-
       case VoiceStreamStatus.disconnected:
       case VoiceStreamStatus.closed:
         _socketFault = true;
         unawaited(_capture.stop());
         unawaited(_playback.stop());
+        unawaited(_deviceSpeech.stop());
         if (state.phase == VoiceRealtimePhase.idle ||
             state.phase == VoiceRealtimePhase.error) {
           _set(state.copyWith(connected: false, micActive: false));
+        } else if (status == VoiceStreamStatus.reconnecting) {
+          _fail(
+            code: 'reconnecting',
+            message: 'The voice connection dropped. Reconnecting…',
+          );
         } else {
           _fail(
             code: 'disconnected',
@@ -344,25 +385,29 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
 
   void _onCaptureError(VoiceCaptureException error) {
     unawaited(_playback.stop());
+    unawaited(_deviceSpeech.stop());
     _fail(code: error.failure.name, message: error.message);
   }
 
   void _onPlayingChanged(bool playing) {
-    if (state.audible == playing) return;
-    _set(state.copyWith(audible: playing));
+    final audible = playing || _deviceSpeech.isActive;
+    if (state.audible == audible) return;
+    _set(state.copyWith(audible: audible));
   }
 
   // ── internals ─────────────────────────────────────────────────────────────
 
-  /// Stops the microphone and any NOVA audio, and tells the server to abort
-  /// whatever it was doing. This is the barge-in path.
+  /// Stops the microphone and NOVA audio and tells the server to abort.
   Future<void> _bargeIn(int generation) async {
     final wasActive = state.isTurnActive;
     if (wasActive) _service.send(_encoder.cancel());
     await _capture.stop();
     await _playback.stop();
+    await _deviceSpeech.stop();
     if (generation != _generation) return;
-    if (wasActive) _set(const VoiceRealtimeState(phase: VoiceRealtimePhase.idle));
+    if (wasActive) {
+      _set(const VoiceRealtimeState(phase: VoiceRealtimePhase.idle));
+    }
   }
 
   /// Opens the socket and waits for it to report connected.
@@ -444,6 +489,7 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
     // away (sign-out, provider rebuild, app teardown).
     unawaited(_capture.stop());
     unawaited(_playback.stop());
+    unawaited(_deviceSpeech.stop());
   }
 }
 

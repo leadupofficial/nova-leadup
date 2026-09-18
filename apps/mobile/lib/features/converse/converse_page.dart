@@ -181,7 +181,9 @@ class _ConversePageState extends ConsumerState<ConversePage> {
   Future<void> _speak(String text) async {
     if (text.trim().isEmpty) return;
     try {
-      final bytes = await ref.read(novaApiProvider).synthesizeSpeech(text: text);
+      final bytes = await ref
+          .read(novaApiProvider)
+          .synthesizeSpeech(text: text);
       if (mounted) await _playback.play(bytes);
     } catch (error) {
       // Covers the server's `audioData: null` + `error` TTS fallback (thrown by
@@ -310,10 +312,12 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     ref.watch(avatarPrefsProvider).asData?.value.animationDensity,
   );
 
-  /// One notice slot: a voice-session error outranks a REST-path notice.
+  /// One notice slot: a voice-session error outranks a Cloud-voice notice, which
+  /// outranks a REST-path notice.
   (String, Color, IconData, VoidCallback)? get _activeNotice {
     final c = context.nova;
-    final voiceError = ref.watch(voiceRealtimeProvider).errorMessage;
+    final voice = ref.watch(voiceRealtimeProvider);
+    final voiceError = voice.errorMessage;
     if (voiceError != null) {
       return (
         voiceError,
@@ -321,6 +325,10 @@ class _ConversePageState extends ConsumerState<ConversePage> {
         Icons.error_outline_rounded,
         _realtime.clearError,
       );
+    }
+    final speech = voiceSpeechNotice(voice, c, _realtime.dismissSpeechNotice);
+    if (speech != null) {
+      return (speech.message, speech.tone, speech.icon, speech.onDismiss);
     }
     final local = _notice;
     if (local == null) return null;
@@ -332,33 +340,14 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     );
   }
 
-  /// The provisional bubble for the user's live transcript, if any.
-  Widget? _liveTranscript(VoiceRealtimeState voice) {
-    final partial = voice.partial.trim();
-    if (partial.isEmpty) return null;
-    return NovaMessageBubble(
-      text: partial,
-      role: NovaMessageRole.user,
-      provisional: true,
-      label: voice.micActive ? 'You · listening' : 'You · transcribing',
-    );
-  }
-
-  /// The provisional bubble for the reply as it streams in, if any.
-  Widget? _liveReply(VoiceRealtimeState voice) {
-    final reply = voice.reply.trim();
-    if (reply.isEmpty) return null;
-    if (voice.phase != VoiceRealtimePhase.speaking &&
-        voice.phase != VoiceRealtimePhase.thinking) {
-      return null;
-    }
-    return NovaMessageBubble(
-      text: reply,
-      role: NovaMessageRole.nova,
-      provisional: true,
-      label: 'Nova · speaking',
-    );
-  }
+  /// The provisional transcript and reply bubbles for the live turn.
+  ///
+  /// Their layout-free contents live in the voice view layer
+  /// ([voiceLiveTranscript]/[voiceLiveReply]); this screen only places them.
+  List<Widget> _liveBubbles(VoiceRealtimeState voice) => <Widget>[
+    ?voiceLiveTranscript(voice),
+    ?voiceLiveReply(voice),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -376,7 +365,7 @@ class _ConversePageState extends ConsumerState<ConversePage> {
       }
     });
 
-    final live = <Widget>[?_liveTranscript(voice), ?_liveReply(voice)];
+    final live = _liveBubbles(voice);
     final notice = _activeNotice;
 
     return Scaffold(
@@ -389,7 +378,10 @@ class _ConversePageState extends ConsumerState<ConversePage> {
             child: Column(
               children: [
                 NovaConversationTopBar(
-                  status: NovaVoiceStatusPill(phase: phase),
+                  status: NovaVoiceStatusPill(
+                    phase: phase,
+                    speechSource: voice.speechSource,
+                  ),
                   speakReplies: _speakReplies,
                   onBack: () => context.go('/'),
                   onHistory: () => context.push('/conversations'),
@@ -438,9 +430,7 @@ class _ConversePageState extends ConsumerState<ConversePage> {
                                   ? NovaMessageRole.user
                                   : NovaMessageRole.nova,
                               failed: m.failed,
-                              onRetry: m.failed
-                                  ? () => _send(m.content)
-                                  : null,
+                              onRetry: m.failed ? () => _send(m.content) : null,
                             );
                           },
                         ),

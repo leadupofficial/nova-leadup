@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nova_mobile/app/providers.dart';
+import 'package:nova_mobile/core/voice/device_tts.dart';
 import 'package:nova_mobile/core/voice/voice_capture.dart';
 import 'package:nova_mobile/core/voice/voice_realtime_controller.dart';
 import 'package:nova_mobile/core/voice/voice_stream_capture.dart';
@@ -159,9 +160,14 @@ class FakeStreamPlayback implements VoiceStreamPlayback {
 }
 
 class VoiceRealtimeHarness {
-  VoiceRealtimeHarness({FakeStreamCapture? capture, FakeStreamPlayback? playback}) {
+  VoiceRealtimeHarness({
+    FakeStreamCapture? capture,
+    FakeStreamPlayback? playback,
+    FakeDeviceTts? deviceTts,
+  }) {
     this.capture = capture ?? FakeStreamCapture();
     this.playback = playback ?? FakeStreamPlayback();
+    this.deviceTts = deviceTts ?? FakeDeviceTts();
     service = VoiceStreamService(
       uri: Uri.parse('ws://localhost:3001/api/v1/voice/realtime?token=t'),
       connector: connector,
@@ -175,6 +181,7 @@ class VoiceRealtimeHarness {
         voiceStreamServiceProvider.overrideWithValue(service),
         voiceStreamCaptureProvider.overrideWithValue(this.capture),
         voiceStreamPlaybackProvider.overrideWithValue(this.playback),
+        deviceTtsProvider.overrideWithValue(this.deviceTts),
       ],
     );
     controller = container.read(voiceRealtimeProvider.notifier);
@@ -183,6 +190,7 @@ class VoiceRealtimeHarness {
   final ScriptedConnector connector = ScriptedConnector();
   late final FakeStreamCapture capture;
   late final FakeStreamPlayback playback;
+  late final FakeDeviceTts deviceTts;
   late final VoiceStreamService service;
   late final ProviderContainer container;
   late final VoiceRealtimeController controller;
@@ -198,11 +206,56 @@ class VoiceRealtimeHarness {
       .toList();
 
   Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
     container.dispose();
     await service.close();
     await capture.dispose();
     await playback.dispose();
+    await deviceTts.dispose();
   }
+
+  bool _disposed = false;
+}
+
+/// A device speech engine that records what it was asked to say.
+class FakeDeviceTts implements DeviceTts {
+  FakeDeviceTts({Set<String> unsupported = const <String>{}})
+    : unsupported = <String>{...unsupported};
+
+  /// BCP-47 tags this "device" has no voice for. Growable, so a test can add
+  /// one after construction.
+  final Set<String> unsupported;
+
+  /// Every utterance, in the order it was spoken.
+  final List<String> spoken = <String>[];
+
+  /// The language each utterance was spoken in, index-aligned with [spoken].
+  final List<String?> spokenLanguages = <String?>[];
+
+  /// When set, a spoken utterance stays in flight until this completes, so a
+  /// test can observe the turn while the device engine is still talking.
+  Completer<void>? hold;
+
+  int stops = 0;
+  int disposes = 0;
+
+  @override
+  Future<bool> canSpeak(String? languageTag) async =>
+      languageTag == null || !unsupported.contains(languageTag);
+
+  @override
+  Future<void> speak(String text, {String? languageTag}) async {
+    spoken.add(text);
+    spokenLanguages.add(languageTag);
+    await hold?.future;
+  }
+
+  @override
+  Future<void> stop() async => stops++;
+
+  @override
+  Future<void> dispose() async => disposes++;
 }
 
 /// Lets pending microtasks and one short timer tick run.

@@ -14,6 +14,23 @@ enum VoiceRealtimePhase {
   error,
 }
 
+/// Which engine is voicing the current reply.
+///
+/// The cloud provider is the default, but it is a single point of failure: when
+/// it fails, the reply is spoken by the platform's built-in synthesiser
+/// instead. The UI has to be able to tell the two apart — silent degradation is
+/// what made a provider outage look like NOVA had gone mute.
+enum VoiceSpeechSource {
+  /// Streaming MP3 from the server's cloud TTS provider.
+  cloud,
+
+  /// The platform's built-in synthesiser, used because cloud TTS failed.
+  device,
+
+  /// Device speech was needed but this device has no voice for the language.
+  deviceUnavailable,
+}
+
 /// A finished turn that belongs in the visible transcript.
 @immutable
 class VoiceTurnCommit {
@@ -46,6 +63,9 @@ class VoiceRealtimeState {
     this.audible = false,
     this.connected = false,
     this.commits = const <VoiceTurnCommit>[],
+    this.speechSource = VoiceSpeechSource.cloud,
+    this.deviceLanguageTag,
+    this.speechNotice,
   });
 
   final VoiceRealtimePhase phase;
@@ -74,6 +94,16 @@ class VoiceRealtimeState {
   /// drains whatever it has not rendered yet.
   final List<VoiceTurnCommit> commits;
 
+  /// Which engine is voicing the current reply.
+  final VoiceSpeechSource speechSource;
+
+  /// The BCP-47 tag device speech is using, or null for the device default.
+  final String? deviceLanguageTag;
+
+  /// A one-line explanation shown when the reply is not coming from the cloud
+  /// voice: either that the device voice is covering, or that it cannot.
+  final String? speechNotice;
+
   /// True for the phases in which a turn is in flight and Stop makes sense.
   bool get isTurnActive =>
       phase == VoiceRealtimePhase.listening ||
@@ -91,9 +121,13 @@ class VoiceRealtimeState {
     bool? audible,
     bool? connected,
     List<VoiceTurnCommit>? commits,
+    VoiceSpeechSource? speechSource,
+    String? deviceLanguageTag,
+    String? speechNotice,
     String? errorMessage,
     String? errorCode,
     bool clearError = false,
+    bool clearSpeechNotice = false,
   }) {
     return VoiceRealtimeState(
       phase: phase ?? this.phase,
@@ -104,6 +138,13 @@ class VoiceRealtimeState {
       audible: audible ?? this.audible,
       connected: connected ?? this.connected,
       commits: commits ?? this.commits,
+      speechSource: speechSource ?? this.speechSource,
+      deviceLanguageTag: clearSpeechNotice
+          ? null
+          : (deviceLanguageTag ?? this.deviceLanguageTag),
+      speechNotice: clearSpeechNotice
+          ? null
+          : (speechNotice ?? this.speechNotice),
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       errorCode: clearError ? null : (errorCode ?? this.errorCode),
     );
@@ -121,6 +162,9 @@ class VoiceRealtimeState {
       other.micActive == micActive &&
       other.audible == audible &&
       other.connected == connected &&
+      other.speechSource == speechSource &&
+      other.deviceLanguageTag == deviceLanguageTag &&
+      other.speechNotice == speechNotice &&
       listEquals(other.commits, commits);
 
   @override
@@ -134,6 +178,9 @@ class VoiceRealtimeState {
     micActive,
     audible,
     connected,
+    speechSource,
+    deviceLanguageTag,
+    speechNotice,
     Object.hashAll(commits),
   );
 }
