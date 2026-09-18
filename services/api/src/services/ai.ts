@@ -496,17 +496,22 @@ export async function transcribeAudioSarvam(
 	}
 
 	const sarvamCode = toSarvamCode(language);
+	// Sarvam's speech-to-text endpoint takes multipart/form-data with the audio
+	// in a `file` part. It previously received a JSON body with an `audio`
+	// base64 field, which the API rejects with "body.file : Field required".
+	// `saarika:v2` is also retired — the API answers 400 "has been deprecated".
+	const form = new FormData();
+	form.append('file', new Blob([new Uint8Array(audioBuffer)], { type: 'audio/wav' }), 'audio.wav');
+	form.append('language_code', sarvamCode);
+	form.append('model', 'saarika:v2.5');
+
 	const response = await fetch('https://api.sarvam.ai/speech-to-text', {
 		method: 'POST',
 		headers: {
+			// Let fetch set the multipart boundary; do not set Content-Type here.
 			'api-subscription-key': env.SARVAM_API_KEY,
-			'Content-Type': 'application/json',
 		},
-		body: JSON.stringify({
-			audio: audioBuffer.toString('base64'),
-			language_code: sarvamCode,
-			model: 'saarika:v2',
-		}),
+		body: form,
 	});
 
 	if (!response.ok) {
@@ -541,8 +546,11 @@ export async function synthesizeSpeechSarvam(
 		body: JSON.stringify({
 			inputs: [text],
 			target_language_code: sarvamCode,
-			speaker: options?.speaker || 'meera',
-			model: 'bulbul:v2',
+			// `bulbul:v2` is retired (the API answers 400 for it) and its speaker
+			// list does not include `meera`. v3 is current; `priya` is a valid
+			// v3 speaker and is the default here.
+			speaker: options?.speaker || 'priya',
+			model: 'bulbul:v3',
 			pitch: options?.pitch ?? 0,
 			pace: options?.pace ?? 1.0,
 			loudness: options?.loudness ?? 1.0,

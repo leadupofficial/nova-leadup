@@ -29,6 +29,7 @@ import {
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
+import { env } from '../utils/env.js';
 import { validate } from '../middleware/validate.js';
 
 const router: ReturnType<typeof Router> = Router();
@@ -53,7 +54,17 @@ router.post('/stt', authenticate, validate(SttSchema), async (req: Authenticated
 
 		let audioBuffer: Buffer;
 		if (body.audioData) {
-			audioBuffer = Buffer.isBuffer(body.audioData) ? body.audioData : Buffer.from(body.audioData);
+			if (Buffer.isBuffer(body.audioData)) {
+				audioBuffer = body.audioData;
+			} else {
+				// Clients send base64, optionally as a data: URL. Decoding with the
+				// default utf8 encoding would hand the transcriber mojibake bytes;
+				// the encoding argument is required.
+				const raw = String(body.audioData);
+				const comma = raw.indexOf(',');
+				const b64 = raw.startsWith('data:') && comma !== -1 ? raw.slice(comma + 1) : raw;
+				audioBuffer = Buffer.from(b64, 'base64');
+			}
 		} else if (body.audioUrl) {
 			const response = await fetch(body.audioUrl);
 			const arrayBuffer = await response.arrayBuffer();
@@ -227,6 +238,35 @@ router.post('/tts', authenticate, validate(TtsSchema), async (req: Authenticated
 			});
 			return;
 		} catch (ttsErr) {
+			// Fall back to Sarvam (bulbul:v3), which covers en-IN as well as the
+			// Indian languages, so a dead ElevenLabs/Google credential degrades
+			// to a working voice instead of silence. Sarvam is only skipped when
+			// it was the provider that just failed.
+			if (voiceProvider !== 'sarvam' && env.SARVAM_API_KEY) {
+				try {
+					const sarvamCode = language === 'tanglish' ? 'ta' : language;
+					const fallback = await synthesizeSpeechSarvam(body.text, sarvamCode as string);
+					logger.warn(
+						{ language, voiceProvider, err: ttsErr },
+						'TTS provider failed; served by the Sarvam fallback'
+					);
+					res.status(200).json({
+						success: true,
+						data: {
+							audioData: fallback.audioBuffer.toString('base64'),
+							url: null,
+							contentType: fallback.contentType,
+							voice: body.voiceId || 'default',
+							durationMs: Math.round((fallback.audioBuffer.length / 16000) * 1000),
+							provider: 'sarvam-fallback',
+							language,
+						},
+					});
+					return;
+				} catch (fallbackErr) {
+					logger.warn({ err: fallbackErr, language }, 'Sarvam TTS fallback also failed');
+				}
+			}
 			logger.warn({ err: ttsErr, language, voiceProvider }, 'TTS provider failed');
 			res.status(200).json({
 				success: true,
