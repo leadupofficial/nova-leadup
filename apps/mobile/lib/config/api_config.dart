@@ -15,9 +15,19 @@ enum Environment {
 /// and the platform-level counterpart lives in
 /// `android/app/src/main/res/xml/network_security_config.xml`.
 class ApiConfig {
-  static const String _defaultProdUrl = 'https://api.nova.leadup.tech';
+  /// The single NOVA deployment.
+  ///
+  /// Both debug and release builds default to this host, deliberately. The previous
+  /// defaults were `http://10.0.2.2:3001` for debug (the Android *emulator's* alias for
+  /// the host loopback, which resolves to nothing on a real phone) and
+  /// `https://api.nova.leadup.tech` for release (a host that is not reachable). Debug and
+  /// release now behave identically, so what you test on a device is what ships.
+  ///
+  /// Point a build somewhere else explicitly when you need to:
+  ///   flutter build apk --debug --dart-define=API_URL=http://localhost:3001
+  static const String _defaultProdUrl = 'https://nova.leadup.in';
+
   static const String _defaultStagingUrl = 'https://staging-api.nova.leadup.tech';
-  static const String _defaultDevUrl = 'http://10.0.2.2:3001';
 
   /// Build-time override: `--dart-define=API_URL=https://...`.
   static const String _apiUrlOverride =
@@ -44,13 +54,19 @@ class ApiConfig {
   }
 
   /// The configured base URL before validation, with any trailing slash removed.
+  ///
+  /// Order of precedence: explicit `--dart-define=API_URL`, then staging when selected,
+  /// then the single production host — for debug and release alike.
   static String get resolvedBaseUrl {
     final raw = _apiUrlOverride.isNotEmpty
         ? _apiUrlOverride
         : switch (currentEnvironment) {
             Environment.production => _defaultProdUrl,
             Environment.staging => _defaultStagingUrl,
-            Environment.development => _defaultDevUrl,
+            // Debug builds also target the real server so a test build exercises the
+            // same API as a release build. Opt into a local API with
+            // --dart-define=API_URL=http://localhost:3001.
+            Environment.development => _defaultProdUrl,
           };
     return raw.endsWith('/') ? raw.substring(0, raw.length - 1) : raw;
   }

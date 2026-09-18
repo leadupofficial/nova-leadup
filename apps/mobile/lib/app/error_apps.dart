@@ -24,7 +24,7 @@ class ConfigurationErrorApp extends StatelessWidget {
         message: 'This build cannot reach the NOVA API safely, so it will not start.',
         details: problems,
         hint: 'Rebuild with:\n'
-            'flutter build apk --release --dart-define=API_URL=https://api.nova.leadup.tech',
+            'flutter build apk --release --dart-define=API_URL=https://nova.leadup.in',
       ),
     );
   }
