@@ -66,6 +66,38 @@ final class VoiceServerErrorEvent extends VoiceServerEvent {
   final String message;
 }
 
+/// `{"type":"stt","provider":"deepgram","fallback":true,"reason":"..."}`.
+///
+/// Emitted when the recogniser named for the language could not serve the turn
+/// and a backup is transcribing instead. The server says so honestly, and the UI
+/// shows it: a turn that succeeded on a fallback should not look identical to one
+/// that used the provider it was supposed to.
+final class VoiceSttFallbackEvent extends VoiceServerEvent {
+  const VoiceSttFallbackEvent({
+    required this.provider,
+    required this.fallback,
+    required this.reason,
+  });
+  final String provider;
+  final bool fallback;
+  final String reason;
+}
+
+/// `{"type":"tts","provider":"deepgram","fallback":true,"reason":"..."}`.
+///
+/// The speech-side counterpart of [VoiceSttFallbackEvent]: the voice the user is
+/// hearing is not the one the language nominally selects.
+final class VoiceTtsFallbackEvent extends VoiceServerEvent {
+  const VoiceTtsFallbackEvent({
+    required this.provider,
+    required this.fallback,
+    required this.reason,
+  });
+  final String provider;
+  final bool fallback;
+  final String reason;
+}
+
 /// A well-formed frame with a `type` this client build does not know.
 ///
 /// Ignored by the controller rather than treated as a failure: the server may
@@ -134,6 +166,16 @@ class VoiceProtocolDecoder {
         _int(map['index']),
       ),
       'speaking' => VoiceSpeakingEvent(map['value'] == true),
+      'stt' => VoiceSttFallbackEvent(
+        provider: map['provider']?.toString() ?? 'unknown',
+        fallback: map['fallback'] == true,
+        reason: map['reason']?.toString() ?? '',
+      ),
+      'tts' => VoiceTtsFallbackEvent(
+        provider: map['provider']?.toString() ?? 'unknown',
+        fallback: map['fallback'] == true,
+        reason: map['reason']?.toString() ?? '',
+      ),
       'done' => VoiceDoneEvent(_string(map['text'])),
       'error' => VoiceServerErrorEvent(
         code: map['code']?.toString() ?? 'unknown',

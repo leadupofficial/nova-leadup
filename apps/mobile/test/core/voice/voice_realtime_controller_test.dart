@@ -252,6 +252,37 @@ void main() {
       },
     );
 
+    test('a recogniser fallback is surfaced, not swallowed', () async {
+      await harness.controller.startTurn();
+      await settle();
+
+      harness.socket.push(
+        '{"type":"stt","provider":"deepgram","fallback":true,'
+        '"reason":"sarvam closed the stream (1003): Credits exhausted. Visit the API Dashboard."}',
+      );
+      await settle();
+
+      expect(harness.state.speechNotice, isNotNull);
+      expect(harness.state.speechNotice, contains('deepgram'));
+      // The provider's own words are trimmed to their first clause; the full
+      // sentence would not fit a notice.
+      expect(harness.state.speechNotice, contains('Credits exhausted'));
+      expect(harness.state.speechNotice, isNot(contains('API Dashboard')));
+    });
+
+    test('a voice fallback is surfaced too', () async {
+      await harness.controller.startTurn();
+      await settle();
+
+      harness.socket.push(
+        '{"type":"tts","provider":"deepgram","fallback":true,"reason":"TTS provider failed (402)"}',
+      );
+      await settle();
+
+      expect(harness.state.speechNotice, isNotNull);
+      expect(harness.state.speechNotice, contains('deepgram'));
+    });
+
     test('done returns to idle once the microphone has been stopped', () async {
       await harness.controller.startTurn();
       await settle();

@@ -330,9 +330,70 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
           _fail(code: code, message: message);
         }
 
+      case VoiceSttFallbackEvent(:final provider, :final fallback, :final reason):
+        if (!fallback) break;
+        // The recogniser named for this language could not serve the turn and a
+        // backup is transcribing instead. Surfaced rather than swallowed: the
+        // whole reason the Sarvam outage went unnoticed was that a turn running
+        // on a fallback looked exactly like one that was not.
+        _set(
+          state.copyWith(
+            speechNotice:
+                'Listening with $provider — the usual recogniser is unavailable'
+                '${reason.isEmpty ? '.' : ' (${_shortReason(reason)}).'}',
+          ),
+        );
+
+      case VoiceTtsFallbackEvent(:final provider, :final fallback, :final reason):
+        if (!fallback) break;
+        _set(
+          state.copyWith(
+            speechNotice:
+                'Speaking with $provider — the usual voice is unavailable'
+                '${reason.isEmpty ? '.' : ' (${_shortReason(reason)}).'}',
+          ),
+        );
+
       case VoiceUnknownEvent(:final type):
         debugPrint('[VoiceRealtime] ignoring unknown event "$type"');
     }
+  }
+
+  /// Trims a provider error down to something that fits a notice.
+  ///
+  /// Providers bury the reason after the close code — Sarvam sends
+  /// "sarvam closed the stream (1003): Credits exhausted. Visit the API
+  /// Dashboard…" — so taking the first clause alone would report the numeric
+  /// code and drop the one part that says what is wrong. Prefer whichever
+  /// clause actually names the problem.
+  String _shortReason(String reason) {
+    final clauses = reason
+        .split(RegExp(r'[.:\n]'))
+        .map((clause) => clause.trim())
+        .where((clause) => clause.isNotEmpty)
+        .toList();
+    if (clauses.isEmpty) return '';
+
+    const signals = <String>[
+      'credit',
+      'quota',
+      'key',
+      'unauthor',
+      'forbidden',
+      'rate limit',
+      'not configured',
+      'unavailable',
+      'exhaust',
+      'invalid',
+    ];
+    final informative = clauses.firstWhere(
+      (clause) =>
+          signals.any((signal) => clause.toLowerCase().contains(signal)),
+      orElse: () => clauses.first,
+    );
+    return informative.length <= 60
+        ? informative
+        : '${informative.substring(0, 59)}…';
   }
 
   void _onMicFrame(Uint8List chunk) {

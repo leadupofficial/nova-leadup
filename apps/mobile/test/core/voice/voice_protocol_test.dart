@@ -76,6 +76,38 @@ void main() {
       expect((event as VoiceUnknownEvent).type, 'avatar_blink');
     });
 
+    test('decodes the recogniser fallback notice', () {
+      // The server says which recogniser actually served the turn; the client
+      // used to drop this on the floor, so a fallback turn looked identical to
+      // one that used the provider the language nominally selects.
+      final event = decoder.decode(
+        '{"type":"stt","provider":"deepgram","fallback":true,'
+        '"reason":"sarvam closed the stream (1003): Credits exhausted."}',
+      );
+      expect(event, isA<VoiceSttFallbackEvent>());
+      final fallback = event as VoiceSttFallbackEvent;
+      expect(fallback.provider, 'deepgram');
+      expect(fallback.fallback, isTrue);
+      expect(fallback.reason, contains('Credits exhausted'));
+    });
+
+    test('decodes the voice fallback notice', () {
+      final event = decoder.decode(
+        '{"type":"tts","provider":"deepgram","fallback":true,"reason":"TTS provider failed (402)"}',
+      );
+      expect(event, isA<VoiceTtsFallbackEvent>());
+      final fallback = event as VoiceTtsFallbackEvent;
+      expect(fallback.provider, 'deepgram');
+      expect(fallback.fallback, isTrue);
+    });
+
+    test('a fallback notice with missing fields does not throw', () {
+      final event = decoder.decode('{"type":"tts"}');
+      expect(event, isA<VoiceTtsFallbackEvent>());
+      expect((event as VoiceTtsFallbackEvent).provider, 'unknown');
+      expect(event.fallback, isFalse);
+    });
+
     test('malformed frames throw VoiceProtocolException', () {
       expect(() => decoder.decode('not json'), throwsA(isA<VoiceProtocolException>()));
       expect(() => decoder.decode('[1,2,3]'), throwsA(isA<VoiceProtocolException>()));
