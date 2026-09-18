@@ -375,16 +375,41 @@ router.post('/translate', authenticate, validate(TranslateSchema), async (req: A
 
 // GET /voice/languages — list all supported languages (and their provider routes)
 router.get('/languages', authenticate, (_req, res) => {
+	// Which providers this deployment can actually reach.
+	//
+	// The catalogue names a provider per language, but that is the *intended*
+	// route, not a promise: seven languages (Assamese, Maithili, Sanskrit,
+	// Sindhi, Kashmiri, Dogri, Manipuri) are mapped to `google`, and this
+	// deployment has no GOOGLE_CLOUD_API_KEY at all. A client reading only
+	// `voiceProvider` would think those work. Reporting what is configured lets
+	// it tell the two apart instead of discovering it one failed turn at a time.
+	const configured = {
+		sarvam: Boolean(env.SARVAM_API_KEY),
+		elevenlabs: Boolean(env.ELEVENLABS_API_KEY),
+		deepgram: Boolean(env.DEEPGRAM_API_KEY),
+		google: Boolean(env.GOOGLE_CLOUD_API_KEY),
+	};
+
 	res.status(200).json({
 		success: true,
 		data: {
-			languages: SUPPORTED_LANGUAGES.map((l) => ({
-				code: l.code,
-				name: l.name,
-				native: l.native,
-				voiceProvider: l.voiceProvider,
-				sttProvider: l.sttProvider,
-			})),
+			languages: SUPPORTED_LANGUAGES.map((l) => {
+				const sttReady = configured[l.sttProvider as keyof typeof configured] ?? false;
+				const ttsReady = configured[l.voiceProvider as keyof typeof configured] ?? false;
+				return {
+					code: l.code,
+					name: l.name,
+					native: l.native,
+					voiceProvider: l.voiceProvider,
+					sttProvider: l.sttProvider,
+					// False means the named provider has no credential here, so the
+					// turn will fall back (Deepgram for recognition, the device voice
+					// for speech) rather than using the provider named above.
+					sttConfigured: sttReady,
+					ttsConfigured: ttsReady,
+				};
+			}),
+			providers: configured,
 			mixed: MIXED_CODES,
 			count: SUPPORTED_LANGUAGES.length,
 		},
