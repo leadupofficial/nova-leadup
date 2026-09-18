@@ -170,10 +170,16 @@ class WakeWordController extends Notifier<WakeWordState> {
 
     // `start()` only asks the service to run; the authoritative "listening" signal
     // arrives asynchronously over the event channel.
+    //
+    // `clearError` is deliberately NOT tied to `started`. The native side answers
+    // this call successfully and then reports a refusal as an error *event* — for
+    // example "POST_NOTIFICATIONS not granted", which it refuses rather than
+    // starting a microphone foreground service without. That event can land
+    // before this line runs, and clearing on `started` wiped the message, so the
+    // screen just said "not running" with no reason and no way to fix it.
     state = state.copyWith(
       busy: false,
       error: started ? null : 'Could not start wake word detection.',
-      clearError: started,
     );
   }
 
@@ -230,8 +236,14 @@ class WakeWordController extends Notifier<WakeWordState> {
         state = state.copyWith(
           listening: false,
           busy: false,
+          // Name the permission that actually failed. The native layer refuses to
+          // start the microphone foreground service without BOTH microphone and
+          // notification access and says which one is missing; collapsing that to a
+          // generic sentence left the user tapping Resume with no idea what to fix.
           error: code == 'permission_denied'
-              ? 'NOVA needs microphone and notification access to listen for the wake word.'
+              ? 'NOVA cannot listen yet — $message. Wake word detection runs in a '
+                    'foreground service, so it needs both microphone and '
+                    'notification access.'
               : message,
         );
     }

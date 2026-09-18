@@ -191,6 +191,9 @@ class _WakeWordPageState extends ConsumerState<WakeWordPage> {
     final permission =
         availability?.reason == 'permission_denied' ||
         (error?.toLowerCase().contains('microphone') ?? false);
+    /// The native refusal for a missing POST_NOTIFICATIONS names it explicitly.
+    final needsNotification =
+        error?.toLowerCase().contains('notification') ?? false;
     final tone = error != null ? c.danger : c.warning;
     final message = error ?? availability?.userMessage ?? 'Unavailable.';
     final detail = error != null ? null : availability?.detail ?? availability?.reason;
@@ -228,11 +231,22 @@ class _WakeWordPageState extends ConsumerState<WakeWordPage> {
             spacing: NovaSpace.xs,
             runSpacing: NovaSpace.xs,
             children: [
+              // The native layer needs BOTH permissions and reports which one is
+              // missing, so offer the action that matches the failure rather than
+              // always asking for the microphone — which left a notification-denied
+              // user tapping a button that could not help them.
               if (permission)
                 NovaSecondaryButton(
                   label: 'Grant microphone access',
                   icon: Icons.mic_none_rounded,
                   onPressed: () => ref.read(permissionProvider.notifier).requestMicrophone(),
+                ),
+              if (needsNotification)
+                NovaSecondaryButton(
+                  label: 'Allow notifications',
+                  icon: Icons.notifications_none_rounded,
+                  onPressed: () =>
+                      ref.read(permissionProvider.notifier).requestNotification(),
                 ),
               NovaSecondaryButton(
                 label: permission ? 'Open settings' : 'Try again',
