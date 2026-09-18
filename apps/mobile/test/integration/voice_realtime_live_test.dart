@@ -200,6 +200,79 @@ void main() {
         : null,
     timeout: const Timeout(Duration(minutes: 3)),
   );
+
+  test(
+    'speaking while NOVA talks cuts it off (barge-in)',
+    () async {
+      final pcm = _readPcm16kMono(pcmPath!);
+      final token = await _login(email, password);
+      final capture = FakeStreamCapture();
+      final playback = FakeStreamPlayback();
+
+      final service = VoiceStreamService(
+        uri: _realtimeUri(token),
+        config: const VoiceReconnectConfig(
+          initialDelay: Duration(milliseconds: 100),
+          maxDelay: Duration(milliseconds: 400),
+        ),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          voiceStreamServiceProvider.overrideWithValue(service),
+          voiceStreamCaptureProvider.overrideWithValue(capture),
+          voiceStreamPlaybackProvider.overrideWithValue(playback),
+        ],
+      );
+      addTearDown(() async {
+        container.dispose();
+        await service.close();
+        await capture.dispose();
+        await playback.dispose();
+      });
+
+      final controller = container.read(voiceRealtimeProvider.notifier);
+      var speakingSamples = 0;
+      var stopsDuringSpeech = 0;
+      var wasSpeaking = false;
+      container.listen(voiceRealtimeProvider, (previous, next) {
+        final speaking = next.phase == VoiceRealtimePhase.speaking;
+        if (speaking) speakingSamples++;
+        if (wasSpeaking && !speaking) stopsDuringSpeech++;
+        wasSpeaking = speaking;
+      });
+
+      await controller.startTurn(language: language);
+      await _pump(pcm, capture, const Duration(milliseconds: 100));
+      await _awaitAtLeast(() => speakingSamples, 1);
+
+      // Talk over the reply. The microphone is still open, so this reaches the
+      // server, whose energy detector and provider VAD are the barge-in cue.
+      await _pump(pcm, capture, const Duration(milliseconds: 100));
+
+      final deadline = DateTime.now().add(const Duration(seconds: 20));
+      while (DateTime.now().isBefore(deadline) && stopsDuringSpeech == 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
+
+      // ignore: avoid_print
+      print('bargeInStops=$stopsDuringSpeech playbackStops=${playback.stops}');
+
+      expect(
+        stopsDuringSpeech,
+        greaterThanOrEqualTo(1),
+        reason: 'speaking over the reply did not interrupt it',
+      );
+      expect(
+        playback.stops,
+        greaterThanOrEqualTo(1),
+        reason: 'the local player was never flushed on barge-in',
+      );
+    },
+    skip: !live || pcmPath == null
+        ? 'set NOVA_LIVE_API=1 and NOVA_VOICE_PCM=<16kHz mono wav>'
+        : null,
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }
 
 /// Waits until [read] reaches [count], or gives up.
@@ -210,7 +283,6 @@ Future<void> _awaitAtLeast(int Function() read, int count) async {
     await Future<void>.delayed(const Duration(milliseconds: 250));
   }
 }
-
 Uri _realtimeUri(String token) {
   final base = Uri.parse(
     const String.fromEnvironment(
