@@ -200,15 +200,37 @@ class _ConsentPageState extends ConsumerState<ConsentPage> {
     }
   }
 
-  /// Writes one decision. Returns false when the server did not accept it, so the
-  /// row stays unresolved instead of reporting an unsaved choice.
+  /// Writes one decision — locally always, and to the server when it accepts it.
+  ///
+  /// The row resolves either way, deliberately. `recordConsent` needs an account
+  /// and onboarding runs *before* sign-in, so on a fresh install every call fails
+  /// with "Missing or invalid authorization header". Because [_resolved] accepts
+  /// a non-device row only once [_decided] holds a value, and both callers set
+  /// that only when this returned `true`, Continue stayed disabled forever and a
+  /// new user could not get past the first screen of the app.
+  ///
+  /// So the choice is kept locally, as the rest of onboarding state already is,
+  /// and the failure is still shown against the row so the user is told it has
+  /// not synced. Returns whether the server accepted it.
   Future<bool> _save(_RowSpec row, bool granted, String method) async {
+    if (mounted) {
+      setState(() => _decided[row.purpose] = granted);
+    }
     try {
       await ref.read(novaApiProvider).recordConsent(purpose: row.purpose, granted: granted, method: method);
       ref.invalidate(consentHistoryProvider);
+      if (mounted) setState(() => _error.remove(row.purpose));
       return true;
     } catch (error) {
-      if (mounted) setState(() => _error[row.purpose] = _friendly(error));
+      // The choice has been kept locally above, so say that plainly rather than
+      // leaving the raw provider error ("Missing or invalid authorization
+      // header") looking like the decision failed.
+      if (mounted) {
+        setState(() {
+          _error[row.purpose] =
+              '${_friendly(error)} — saved on this device; it will sync once you sign in.';
+        });
+      }
       return false;
     }
   }
