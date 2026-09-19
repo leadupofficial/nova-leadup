@@ -133,6 +133,8 @@ void main() {
       // one of these is a route a user can reach from the UI.
       '/tasks/reminders',
       '/me/integrations',
+      // Smart Notification Assistant (§5.21).
+      '/me/notifications',
       '/admin',
       '/translate',
       '/wakeword',

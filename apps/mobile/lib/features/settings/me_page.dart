@@ -173,6 +173,13 @@ class MePage extends ConsumerWidget {
                 ),
                 Divider(height: 1, color: c.border),
                 NovaListRow(
+                  title: 'Notification assistant',
+                  subtitle: 'Read selected notifications — off by default',
+                  icon: Icons.notifications_active_outlined,
+                  onTap: () => context.push('/me/notifications'),
+                ),
+                Divider(height: 1, color: c.border),
+                NovaListRow(
                   title: 'Integrations',
                   subtitle: 'Connected services and available tools',
                   icon: Icons.extension_outlined,

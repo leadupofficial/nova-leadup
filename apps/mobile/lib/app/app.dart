@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/theme/nova_theme.dart';
 import '../core/voice/wake_word_controller.dart';
+import '../features/notifications/notification_controller.dart';
 import '../features/reminders/reminder_sync.dart';
 import '../services/analytics_service.dart';
 import 'providers.dart';
@@ -33,6 +34,11 @@ class _NovaAppState extends ConsumerState<NovaApp> {
     // the server's reminders and reconciles the OS notifications — a reinstall
     // or a stale token no longer means "no reminders ever fire".
     ref.read(reminderSyncProvider.notifier);
+    // Same reason for the notification assistant: it must keep filtering while
+    // any screen is open, not only while its own settings page is. This is a
+    // no-op until the user grants Notification Access and turns it on — the
+    // native listener drops everything before that point.
+    ref.read(notificationAssistantProvider.notifier);
   }
 
   @override
@@ -51,6 +57,11 @@ class _NovaAppState extends ConsumerState<NovaApp> {
     // Reminders may have changed on another device, and the OS may have dropped
     // alarms while the process was dead. Re-reconciling here is cheap.
     unawaited(ref.read(reminderSyncProvider.notifier).sync());
+    // Notification Access can be revoked from Android Settings while NOVA is
+    // backgrounded, and nothing tells the app. Re-checking on resume is what
+    // makes "instantly disableable" true for a revocation the user made
+    // outside the app.
+    unawaited(ref.read(notificationAssistantProvider.notifier).refreshStatus());
   }
 
   void _onDetach() {

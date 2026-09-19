@@ -103,14 +103,38 @@
             </intent-filter>
         </receiver>
 
-        <!-- Notification listener: relays in-app notifications to the agent. -->
-        <receiver
-            android:name=".NotificationListener"
-            android:exported="false">
+        <!--
+          Smart Notification Assistant (§5.21) — the ONLY notification listener in
+          the app. It replaced `NotificationListener`, a BroadcastReceiver for the
+          custom action `nova.notification.POSTED` that nothing ever sent; a
+          receiver cannot read system notifications, which is why the feature did
+          not exist.
+
+          `android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"`
+          is the platform's own guard: BIND_NOTIFICATION_LISTENER_SERVICE is a
+          signature-level permission held only by the system, so although the
+          service is exported (which the system needs in order to bind it) no
+          third-party app can. It is deliberately NOT declared as a
+          <uses-permission> — an app can never be granted it, and requesting it
+          would only imply a capability NOVA does not hold. This is the same
+          declaration AOSP's own CTS notification-listener app uses.
+
+          No other permission is added for this feature: reading notifications
+          comes from the user selecting NOVA in Android Settings → Notifications →
+          Device & app notifications → Notification access, which is a grant no
+          manifest entry can request. The service reads the in-app master toggle
+          from its own SharedPreferences and does nothing at all while it is off,
+          so the grant alone is never treated as consent.
+        -->
+        <service
+            android:name=".NovaNotificationListenerService"
+            android:label="NOVA Notification Assistant"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
-                <action android:name="nova.notification.POSTED" />
+                <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
-        </receiver>
+        </service>
 
         <!--
           flutter_local_notifications receivers. The plugin only ships the

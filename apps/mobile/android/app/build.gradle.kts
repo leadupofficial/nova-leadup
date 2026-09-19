@@ -173,6 +173,13 @@ kotlin {
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
+    // JVM unit tests for the pure-Kotlin pieces of the notification assistant
+    // (`NotificationContentGuard`, the Kotlin half of the §9.5 filter). It has
+    // no Android dependency, so it runs as a plain JVM test with
+    // `./gradlew :app:testDebugUnitTest` and needs no device. Nothing here ships
+    // in the APK.
+    testImplementation("junit:junit:4.13.2")
+
     // On-device wake word detection (openWakeWord, Apache-2.0).
     //
     // Chosen over Picovoice Porcupine because it needs no access key, no account, and

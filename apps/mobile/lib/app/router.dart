@@ -13,6 +13,7 @@ import '../features/converse/conversations_page.dart';
 import '../features/converse/converse_page.dart';
 import '../features/home/home_page.dart';
 import '../features/memory/memory_page.dart';
+import '../features/notifications/notification_assistant_page.dart';
 import '../features/overlay/translate_page.dart';
 import '../features/overlay/wakeword_page.dart';
 import '../features/recording/recording_page.dart';
@@ -277,6 +278,14 @@ final routerProvider = Provider<GoRouter>((ref) {
                     path: 'integrations',
                     name: 'integrations',
                     builder: (context, state) => const IntegrationsPage(),
+                  ),
+                  // Smart Notification Assistant (§5.21). Device-local, so it
+                  // lives under Me alongside the other privacy controls.
+                  GoRoute(
+                    path: 'notifications',
+                    name: 'notification-assistant',
+                    builder: (context, state) =>
+                        const NotificationAssistantPage(),
                   ),
                 ],
               ),

@@ -27,5 +27,14 @@ class MainActivity : FlutterFragmentActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             applicationContext,
         )
+
+        // Exposes the notification listener to Dart
+        // (lib/features/notifications/notification_platform.dart): its status, the
+        // Android Notification Access screen, and the stream of notifications that
+        // survived the on-device filter.
+        NovaNotificationListenerService.registerChannels(
+            flutterEngine.dartExecutor.binaryMessenger,
+            applicationContext,
+        )
     }
 }
