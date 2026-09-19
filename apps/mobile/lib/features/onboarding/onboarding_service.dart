@@ -218,6 +218,9 @@ class OnboardingService {
   static const _profileKey = 'nova_onboarding_profile';
   static const _healthKey = 'nova_onboarding_health';
   static const _permissionsKey = 'nova_onboarding_permissions';
+  /// The companion chosen during onboarding, kept locally until an account
+  /// exists to save it to.
+  static const _personaKey = 'nova_onboarding_persona';
 
   final SharedPreferences _prefs;
 
@@ -283,12 +286,38 @@ class OnboardingService {
   List<String> getGrantedPermissions() =>
       _prefs.getStringList(_permissionsKey) ?? const <String>[];
 
+  /// Stores the companion the user configured before they had an account.
+  ///
+  /// `/settings/persona` is authenticated, and onboarding runs before sign-in,
+  /// so on a fresh install the save always failed with "Missing or invalid
+  /// authorization header" and the companion was silently lost. Keeping it here
+  /// means the choice survives and can be pushed once the user signs in.
+  Future<void> savePendingPersona(Map<String, dynamic> persona) async {
+    await _prefs.setString(_personaKey, jsonEncode(persona));
+  }
+
+  Map<String, dynamic>? getPendingPersona() {
+    final raw = _prefs.getString(_personaKey);
+    if (raw == null) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> clearPendingPersona() async {
+    await _prefs.remove(_personaKey);
+  }
+
   Future<void> clear() async {
     await _prefs.remove(_statusKey);
     await _prefs.remove(_stepKey);
     await _prefs.remove(_profileKey);
     await _prefs.remove(_healthKey);
     await _prefs.remove(_permissionsKey);
+    await _prefs.remove(_personaKey);
   }
 
   T? _decode<T>(String key, T Function(Map<String, dynamic>) fromJson) {

@@ -224,7 +224,22 @@ class _CompanionPageState extends ConsumerState<CompanionPage> {
         languagePolicy: _languagePolicy,
         voiceSpeed: _voiceSpeed,
       );
-      await ref.read(novaMutationsProvider).savePersona(persona);
+      // Kept locally first, then pushed. `/settings/persona` is authenticated
+      // and onboarding runs *before* sign-in, so on a fresh install the save
+      // failed with "Missing or invalid authorization header" and the companion
+      // the user had just configured was silently thrown away.
+      await ref
+          .read(onboardingServiceProvider)
+          .savePendingPersona(persona.toJson());
+      try {
+        await ref.read(novaMutationsProvider).savePersona(persona);
+      } catch (e) {
+        // Not fatal: the choice is stored and will be pushed after sign-in, so
+        // onboarding continues rather than trapping the user on this screen.
+        debugPrint('[Companion] persona save deferred until sign-in: $e');
+      }
+      if (!mounted) return;
+      await ref.read(onboardingServiceProvider).clearPendingPersona();
       if (!mounted) return;
       await _advance(context, ref, save: false);
     } catch (e) {
