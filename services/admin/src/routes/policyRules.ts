@@ -15,7 +15,7 @@ router.patch('/:id', authenticateJwt, (req, res) => {
  res.json({ id: req.params.id, ...req.body });
 });
 
-router.delete('/:id', authenticateJwt, (req) => {
+router.delete('/:id', authenticateJwt, (req, res) => {
  res.status(204).send();
 });
 

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { authenticateJwt, errorHandler } from '../middleware.js';
+import { authenticateJwt } from '@nova/auth';
+import { errorHandler } from '../middleware.js';
 
 export const incidentsRouter = Router();
 

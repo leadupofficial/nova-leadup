@@ -42,13 +42,13 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
  });
 }
 
-class HttpError extends Error {
+export class HttpError extends Error {
  constructor(public status: number, message: string) {
  super(message);
  this.name = 'HttpError';
  }
 }
 
-function createError(status: number, message: string): HttpError {
+export function createError(status: number, message: string): HttpError {
  return new HttpError(status, message);
 }
