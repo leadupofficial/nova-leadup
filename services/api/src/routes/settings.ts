@@ -7,7 +7,7 @@ import { getDb } from '../db/connection.js';
 import { users, privacyPreferences, personas, avatars, companionConfigs, organizations, featureFlags,
 } from '@nova/database';
 import { eq, and, desc, like, ilike, sql, type SQL } from 'drizzle-orm';
-import { authenticate, requireRole, type AuthenticatedRequest } from '../middleware/auth.js';
+import { authenticate, requireAdmin, requireRole, type AuthenticatedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
 import { validate } from '../middleware/validate.js';
@@ -514,7 +514,7 @@ router.patch('/companion', authenticate, validate(CompanionSchema), async (req: 
 
 // ─── Org / Admin Settings ─────────────────────────────────────────────────────
 
-router.get('/organization', requireRole('admin'), async (req: AuthenticatedRequest, res, next: NextFunction) => {
+router.get('/organization', authenticate, requireAdmin, async (req: AuthenticatedRequest, res, next: NextFunction) => {
 	try {
 		const db = getDb();
 		const orgList = await db.select().from(organizations).limit(1);
@@ -535,7 +535,7 @@ router.get('/organization', requireRole('admin'), async (req: AuthenticatedReque
 	}
 });
 
-router.patch('/organization', requireRole('admin'), async (req: AuthenticatedRequest, res, next: NextFunction) => {
+router.patch('/organization', authenticate, requireAdmin, async (req: AuthenticatedRequest, res, next: NextFunction) => {
 	try {
 		const db = getDb();
 		const updates = req.body;
@@ -551,7 +551,7 @@ router.patch('/organization', requireRole('admin'), async (req: AuthenticatedReq
 
 // ─── Feature Flags ────────────────────────────────────────────────────────────
 
-router.get('/feature-flags', requireRole('admin'), async (req: AuthenticatedRequest, res, next: NextFunction) => {
+router.get('/feature-flags', authenticate, requireAdmin, async (req: AuthenticatedRequest, res, next: NextFunction) => {
 	try {
 		const db = getDb();
 		const flags = await db.select().from(featureFlags);
@@ -565,7 +565,7 @@ router.get('/feature-flags', requireRole('admin'), async (req: AuthenticatedRequ
 	}
 });
 
-router.patch('/feature-flags/:id', requireRole('admin'), async (req: AuthenticatedRequest, res, next: NextFunction) => {
+router.patch('/feature-flags/:id', authenticate, requireAdmin, async (req: AuthenticatedRequest, res, next: NextFunction) => {
 	try {
 		const db = getDb();
 		// `feature_flags.id` is a uuid. This parsed an integer and compared it to the
@@ -596,7 +596,7 @@ router.patch('/feature-flags/:id', requireRole('admin'), async (req: Authenticat
 
 // ─── Rate Limits (Admin) ──────────────────────────────────────────────────────
 
-router.get('/rate-limits', requireRole('admin'), async (req: AuthenticatedRequest, res, next: NextFunction) => {
+router.get('/rate-limits', authenticate, requireAdmin, async (req: AuthenticatedRequest, res, next: NextFunction) => {
 	try {
 		res.status(200).json({
 			success: true,
@@ -607,9 +607,20 @@ router.get('/rate-limits', requireRole('admin'), async (req: AuthenticatedReques
 	}
 });
 
-router.patch('/rate-limits/:id', requireRole('admin'), async (req: AuthenticatedRequest, res, next: NextFunction) => {
+router.patch('/rate-limits/:id', authenticate, requireAdmin, async (req: AuthenticatedRequest, res, next: NextFunction) => {
 	try {
-		res.status(200).json({ success: true, data: null });
+		// This returned `{success: true, data: null}` and did nothing at all, so an
+		// admin could "change" a rate limit and be told it worked while nothing was
+		// stored or applied. 501 says so. There is no rate-limit configuration table
+		// to write to: the limits are constants in middleware/rateLimit.ts, which is a
+		// deployment concern rather than a per-user setting.
+		res.status(501).json({
+			success: false,
+			error: {
+				code: 'NOT_IMPLEMENTED',
+				message: 'Editing rate limits at runtime is not implemented. Limits are configured at deploy time.',
+			},
+		});
 	} catch (err) {
 		next(err);
 	}
