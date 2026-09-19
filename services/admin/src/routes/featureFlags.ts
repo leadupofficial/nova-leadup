@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticateJwt } from '@nova/auth';
 
-const router = Router();
+const router: Router = Router();
 
 router.get('/', authenticateJwt, (_req, res) => {
  res.json({ flags: [] });

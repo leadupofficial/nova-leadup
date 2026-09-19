@@ -1,7 +1,7 @@
 /**
  * Audit log repository — queries against audit_log with full filtering.
  */
-import { q, qOne } from '../db';
+import { q, qOne } from '../db.js';
 
 export interface AuditRow {
  id: string;
@@ -120,21 +120,21 @@ export async function getAuditStats(organizationId: string, from?: Date, to?: Da
  const { rowCount: totalCount } = await q(`SELECT COUNT(*) FROM audit_log WHERE ${where}`, params);
  const total = totalCount ?? 0;
 
- const { rows: actionRows } = await q(
+ const { rows: actionRows } = await q<{ action: string; cnt: number }>(
  `SELECT action, COUNT(*) as cnt FROM audit_log WHERE ${where} GROUP BY action ORDER BY cnt DESC LIMIT 20`,
  params
  );
  const actionCounts: Record<string, number> = {};
  for (const r of actionRows) actionCounts[r.action] = r.cnt;
 
- const { rows: toolRows } = await q(
+ const { rows: toolRows } = await q<{ tool_name: string; cnt: number }>(
  `SELECT tool_name, COUNT(*) as cnt FROM audit_log WHERE ${where} AND tool_name IS NOT NULL GROUP BY tool_name ORDER BY cnt DESC LIMIT 20`,
  params
  );
  const toolCounts: Record<string, number> = {};
  for (const r of toolRows) toolCounts[r.tool_name] = r.cnt;
 
- const { rows: decisionRows } = await q(
+ const { rows: decisionRows } = await q<{ decision: string; cnt: number }>(
  `SELECT decision, COUNT(*) as cnt FROM audit_log WHERE ${where} GROUP BY decision ORDER BY cnt DESC`,
  params
  );

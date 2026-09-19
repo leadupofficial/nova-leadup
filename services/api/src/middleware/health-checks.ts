@@ -14,7 +14,7 @@ interface HealthCheckResult {
 	timestamp: string;
 }
 
-const router = Router();
+const router: ReturnType<typeof Router> = Router();
 
 // Health check dependencies (injected at startup)
 let dbPool: Pool | null = null;

@@ -1,11 +1,11 @@
 import 'dotenv/config';
-import express from 'express';
+import express, { type Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import { integrationRoutes } from './routes/integrations';
+import { integrationRoutes } from './routes/integrations.js';
 
-const app = express();
+const app: Express = express();
 const PORT = process.env.PORT || 3005;
 
 app.use(helmet());

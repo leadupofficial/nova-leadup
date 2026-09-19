@@ -14,7 +14,7 @@ import { chatCompletion, generateEmbedding, type ChatMessage } from '../services
 import { toAssistantError } from '../services/assistant.js';
 import { AISummarizeSchema, AIEmbedSchema } from '../schemas/index.js';
 
-const router = Router();
+const router: ReturnType<typeof Router> = Router();
 
 /**
  * Chat models this API can actually reach, mirrored from the defaults in

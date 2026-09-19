@@ -7,9 +7,9 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import express from 'express';
-import { authenticateJwt, errorHandler } from '../middleware';
-import authRoutes from '../routes/authRoutes';
-import orgRoutes from '../routes/orgRoutes';
+import { authenticateJwt, errorHandler } from '../middleware.js';
+import authRoutes from '../routes/authRoutes.js';
+import orgRoutes from '../routes/orgRoutes.js';
 
 // ---- vi.mock factories (hoisted, self-contained) ----
 
@@ -93,15 +93,15 @@ describe('POST /auth/register', () => {
  });
 
  it('creates user and returns tokens', async () => {
- const { findUserByEmail: f1 } = await import('../repositories/users');
- const { createUser: f2 } = await import('../repositories/users');
- const { createOrganization: f3 } = await import('../repositories/organizations');
- const { createWorkspace: f4 } = await import('../repositories/workspaces');
- const { findRoleByKey: f5 } = await import('../repositories/roles');
- const { assignRoleToUser: f6 } = await import('../repositories/roles');
- const { createSession: f7 } = await import('../repositories/sessions');
- const { signAccessToken: f8 } = await import('../jwt');
- const { signRefreshToken: f9 } = await import('../jwt');
+ const { findUserByEmail: f1 } = await import('../repositories/users.js');
+ const { createUser: f2 } = await import('../repositories/users.js');
+ const { createOrganization: f3 } = await import('../repositories/organizations.js');
+ const { createWorkspace: f4 } = await import('../repositories/workspaces.js');
+ const { findRoleByKey: f5 } = await import('../repositories/roles.js');
+ const { assignRoleToUser: f6 } = await import('../repositories/roles.js');
+ const { createSession: f7 } = await import('../repositories/sessions.js');
+ const { signAccessToken: f8 } = await import('../jwt.js');
+ const { signRefreshToken: f9 } = await import('../jwt.js');
  f1.mockResolvedValue(null);
  f2.mockResolvedValue({ id: 'u1', primary_organization_id: 'o1', primary_workspace_id: 'w1', email_verified: true });
  f3.mockResolvedValue({ id: 'o1', name: 'Test', slug: 'test', plan: 'free' });
@@ -125,7 +125,7 @@ describe('POST /auth/login', () => {
  beforeEach(() => { vi.clearAllMocks(); });
 
  it('returns 401 for non-existent user', async () => {
- const { findUserByEmail: f1 } = await import('../repositories/users');
+ const { findUserByEmail: f1 } = await import('../repositories/users.js');
  f1.mockResolvedValue(null);
  const app = createApp();
  const res = await request(app).post('/auth/login').send({ email: 'noone@example.com', password: 'any' });
@@ -134,8 +134,8 @@ describe('POST /auth/login', () => {
  });
 
  it('returns 401 for wrong password', async () => {
- const { findUserByEmail: f1 } = await import('../repositories/users');
- const { verifyPassword: f2 } = await import('../crypto');
+ const { findUserByEmail: f1 } = await import('../repositories/users.js');
+ const { verifyPassword: f2 } = await import('../crypto.js');
  f1.mockResolvedValue({ id: 'u1', email: 't@e.com', password_hash: 'hash', primary_organization_id: 'o1', primary_workspace_id: 'w1', email_verified: true });
  f2.mockResolvedValue(false);
  const app = createApp();
@@ -144,10 +144,10 @@ describe('POST /auth/login', () => {
  });
 
  it('returns tokens on valid credentials', async () => {
- const { findUserByEmail: f1 } = await import('../repositories/users');
- const { verifyPassword: f2 } = await import('../crypto');
- const { createSession: f3 } = await import('../repositories/sessions');
- const { signAccessToken: f4 } = await import('../jwt');
+ const { findUserByEmail: f1 } = await import('../repositories/users.js');
+ const { verifyPassword: f2 } = await import('../crypto.js');
+ const { createSession: f3 } = await import('../repositories/sessions.js');
+ const { signAccessToken: f4 } = await import('../jwt.js');
  f1.mockResolvedValue({ id: 'u1', email: 't@e.com', password_hash: 'hash', primary_organization_id: 'o1', primary_workspace_id: 'w1', email_verified: true });
  f2.mockResolvedValue(true);
  f3.mockResolvedValue({ id: 's1', status: 'active' });
@@ -170,7 +170,7 @@ describe('POST /auth/phone/otp/request', () => {
  });
 
  it('returns 202 for valid E.164 phone', async () => {
- const { createOtpRecord: f } = await import('../repositories/otp');
+ const { createOtpRecord: f } = await import('../repositories/otp.js');
  f.mockResolvedValue({ id: 'o1' });
  const app = createApp();
  const res = await request(app).post('/auth/phone/otp/request').send({ phoneNumber: '+14155551234', channel: 'sms' });
@@ -200,9 +200,9 @@ describe('GET /auth/me', () => {
  });
 
  it('returns user with valid token', async () => {
- const { verifyAccessToken: f1 } = await import('../jwt');
- const { findSessionByToken: f2 } = await import('../repositories/sessions');
- const { findUserById: f3 } = await import('../repositories/users');
+ const { verifyAccessToken: f1 } = await import('../jwt.js');
+ const { findSessionByToken: f2 } = await import('../repositories/sessions.js');
+ const { findUserById: f3 } = await import('../repositories/users.js');
  f1.mockImplementation((t: string) => {
  if (t === 'valid_token_abc') return { sub: 'usr_abc', orgId: 'org_123', workspaceId: 'ws_456', role: 'member' };
  throw new Error('invalid');

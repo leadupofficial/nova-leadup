@@ -17,20 +17,20 @@ export type {
 	NovaToolDefinition,
 	ToolExecutionContext,
 	ToolResult,
-} from './tool-registry';
+} from './registry.js';
 
-export { ToolRegistry } from './tool-registry';
+export { ToolRegistry } from './registry.js';
 
-export type { ToolValidationResult } from './validation';
+export type { ToolValidationResult } from './validation.js';
 
-export { validateToolInput } from './validation';
+export { validateToolInput } from './validation.js';
 
-export { PERMISSION_LABELS, PERMISSION_DESCRIPTIONS, requiresConfirmation, ROLE_PERMISSIONS } from './types';
+export { PERMISSION_LABELS, PERMISSION_DESCRIPTIONS, requiresConfirmation, ROLE_PERMISSIONS } from './types.js';
 
 export {
 	type CalendarClientOptions,
 	CalendarClient,
-} from './integrations/calendar-client';
+} from './integrations/calendar-client.js';
 
 export {
 	type OAuthAuthorizeResult,
@@ -50,4 +50,4 @@ export {
 	buildAuthUrl,
 	exchangeCodeForToken,
 	refreshAccessToken,
-} from './integrations/provider-registry';
+} from './integrations/provider-registry.js';

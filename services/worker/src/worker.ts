@@ -6,7 +6,7 @@
  */
 
 import 'dotenv/config';
-import { Queue } from 'bullmq';
+import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { RecordingProcessor } from './recording-processor';
 import { db } from '@nova/database';
@@ -47,29 +47,30 @@ async function main() {
 
  console.log(`[worker] Transcriber configured: ${transcriber.isConfigured()}`);
 
- // Create BullMQ queue connection
- const queue = new Queue(QUEUE_NAME, { connection: redisConnection });
+ // Create BullMQ worker
+ const worker = new Worker(
+   QUEUE_NAME,
+   async (job) => {
+   console.log(`[worker] Processing job ${job.id} for recording ${job.data.recordingId}`);
 
- // Process jobs
- await queue.process('transcribe', CONCURRENCY, async (job) => {
- console.log(`[worker] Processing job ${job.id} for recording ${job.data.recordingId}`);
-
- try {
- const result = await processor.process(job.data);
- console.log(`[worker] Job ${job.id} completed: ${result.segmentsCreated} segments in ${result.latencyMs}ms`);
- return result;
- } catch (err) {
- console.error(`[worker] Job ${job.id} failed:`, err);
- throw err; // BullMQ will retry based on job options
- }
- });
+   try {
+   const result = await processor.process(job.data);
+   console.log(`[worker] Job ${job.id} completed: ${result.segmentsCreated} segments in ${result.latencyMs}ms`);
+   return result;
+   } catch (err) {
+   console.error(`[worker] Job ${job.id} failed:`, err);
+   throw err;
+   }
+   },
+   { connection: redisConnection, concurrency: CONCURRENCY }
+ );
 
  console.log(`[worker] Worker running — listening on queue "${QUEUE_NAME}" with concurrency ${CONCURRENCY}`);
 
  // Graceful shutdown
  const shutdown = async (signal: string) => {
  console.log(`[worker] Received ${signal}, shutting down gracefully...`);
- await queue.close();
+ await worker.close();
  await redisConnection.quit();
  process.exit(0);
  };
@@ -82,3 +83,5 @@ main().catch((err) => {
  console.error('[worker] Fatal error:', err);
  process.exit(1);
 });
+
+export { main as startWorker };

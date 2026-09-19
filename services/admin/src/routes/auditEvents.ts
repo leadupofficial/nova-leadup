@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { authenticateJwt } from '@nova/auth';
 import { errorHandler } from '../middleware.js';
 
-export const auditEventsRouter = Router();
+export const auditEventsRouter: Router = Router();
 
 const PaginationSchema = z.object({
  page: z.coerce.number().int().positive().default(1),

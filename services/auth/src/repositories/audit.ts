@@ -1,5 +1,5 @@
 import { generateId } from '@nova/utils';
-import { q } from './db';
+import { q } from './db.js';
 
 export interface AuditRow {
  id: string;

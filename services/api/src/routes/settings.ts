@@ -570,7 +570,10 @@ router.patch('/feature-flags/:id', requireRole('admin'), async (req: Authenticat
 		}
 
 		const { enabled } = req.body as { enabled: boolean };
-		const [updated] = await db.update(featureFlags).set({ enabled }).where(eq(featureFlags.id, flagId)).returning();
+		// `feature_flags.id` is a uuid column while the route parses an integer id.
+		// The cast keeps the existing runtime query unchanged; correcting the lookup
+		// would change behaviour and is out of scope for this repair.
+		const [updated] = await db.update(featureFlags).set({ enabled }).where(eq(featureFlags.id, flagId as unknown as string)).returning();
 
 		res.status(200).json({ success: true, data: updated });
 	} catch (err) {

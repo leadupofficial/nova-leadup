@@ -15,10 +15,10 @@
  "build": "tsc",
  "type-check": "tsc --noEmit",
  "clean": "rm -rf dist"
- }
-,
+ },
  "dependencies": {},
  "devDependencies": {
+ "@nova/config": "workspace:*",
  "typescript": "^5.8.3"
  }
-}
+ }

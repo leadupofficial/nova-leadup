@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { OtpChannel, MfaMethod, ApiKeyScope, Role, Permission, AuthProviders, OtpChannels, MfaMethods, ApiKeyScopes, ALL_ROLES as AllRoles } from './enums';
+import { OtpChannel, MfaMethod, ApiKeyScope, Role, Permission, AuthProviders, OtpChannels, MfaMethods, ApiKeyScopes, ALL_ROLES as AllRoles } from './enums.js';
 
 export const ProblemDetailsSchema = z.object({
  type: z.string().url().or(z.string().startsWith('https://')).or(z.literal('about:blank')),

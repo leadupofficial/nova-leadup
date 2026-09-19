@@ -117,7 +117,7 @@ export function corsMiddleware() {
 /**
  * Compression — only applied to text-based responses.
  */
-export function compressionMiddleware() {
+export function compressionMiddleware(): ReturnType<typeof compression> {
 	return compression({
 		filter: (req: Request, res: Response) => {
 			if (req.headers['x-no-compression']) return false;

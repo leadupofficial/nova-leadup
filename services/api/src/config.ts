@@ -78,7 +78,8 @@ export function getEnvConfig(): ApiConfig {
 		if (!process.env.JWT_SECRET || FORBIDDEN_PLACEHOLDERS.includes(process.env.JWT_SECRET)) {
 			throw new Error('JWT_SECRET is required in production and must not be a placeholder');
 		}
-		if (!refreshSecretValue() || FORBIDDEN_PLACEHOLDERS.includes(refreshSecretValue())) {
+		const refreshSecret = refreshSecretValue();
+		if (!refreshSecret || FORBIDDEN_PLACEHOLDERS.includes(refreshSecret)) {
 			throw new Error(
 				'JWT_REFRESH_SECRET (or JWT_REFRESH_TOKEN_SECRET) is required in production and must not be a placeholder',
 			);

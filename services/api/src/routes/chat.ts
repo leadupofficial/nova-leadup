@@ -30,7 +30,7 @@ import {
 	type AssistantError,
 } from '../services/assistant.js';
 
-const router = Router();
+const router: ReturnType<typeof Router> = Router();
 
 type ConversationMessage = typeof conversationMessages.$inferSelect;
 

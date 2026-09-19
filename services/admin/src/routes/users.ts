@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { authenticateJwt } from '@nova/auth';
 
-const router = Router();
+const router: Router = Router();
 
 const UserSchema = z.object({ name: z.string().optional(), role: z.string().optional() });
 

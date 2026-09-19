@@ -26,7 +26,7 @@ import { logger } from '../utils/logger.js';
 import { chatCompletion } from '../services/ai.js';
 import { NOVA_SYSTEM_PROMPT, toAssistantError } from '../services/assistant.js';
 
-const router = Router();
+const router: ReturnType<typeof Router> = Router();
 
 const MAX_MESSAGE_CHARS = 10_000;
 

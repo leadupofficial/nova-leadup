@@ -4,11 +4,13 @@
 import { Router } from 'express';
 import { getPool } from '../db.js';
 
-export const healthRouter = Router();
+export const healthRouter: Router = Router();
 
 healthRouter.get('', (_req, res) => {
  // Quick health check — try a DB ping
- let dbStatus: 'up' | 'down' = 'down';
+ // `string` rather than the 'up' | 'down' union: the value is written from
+ // an async callback, which control-flow analysis cannot observe.
+ let dbStatus: string = 'down';
  try {
  const pool = getPool();
  // Best-effort, don't await — this is a quick check

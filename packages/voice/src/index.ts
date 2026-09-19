@@ -50,15 +50,15 @@ export {
 	VoiceProviderFactory,
 	VoiceSessionManager,
 	AudioLevelDetector,
-} from './engine';
+} from './engine.js';
 
-export type { IVoiceProvider, ElevenLabsConfig, SarvamConfig, VoiceSessionOptions, AudioLevelDetectorOptions } from './engine';
+export type { IVoiceProvider, ElevenLabsConfig, SarvamConfig, VoiceSessionOptions, AudioLevelDetectorOptions } from './engine.js';
 
 // ─── Transcription ────────────────────────────────────────────────────────────
 
-export { Transcriber } from './transcriber';
-export type { TranscribeInput } from './transcriber';
+export { Transcriber } from './transcriber.js';
+export type { TranscribeInput } from './transcriber.js';
 
 // ─── Translation ──────────────────────────────────────────────────────────────
 
-export { SarvamTranslator } from './translator';
+export { SarvamTranslator } from './translator.js';

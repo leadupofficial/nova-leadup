@@ -13,8 +13,8 @@ import type {
  ClaudeCompletionRequest,
  ClaudeCompletionResponse,
  ClaudeToolDefinition,
-} from './types';
-import { BlueprintModelRouter } from './orchestrator';
+} from './types.js';
+import { BlueprintModelRouter } from './orchestrator.js';
 
 // ─── Output Types ────────────────────────────────────────────────────────────
 

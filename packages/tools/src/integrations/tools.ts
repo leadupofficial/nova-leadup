@@ -11,8 +11,8 @@ import type {
  NovaToolDefinition,
  ToolExecutionContext,
  ToolResult,
-} from '../tool-registry';
-import { ToolRegistry } from '../tool-registry';
+} from '../registry.js';
+import { ToolRegistry } from '../registry.js';
 import type {
  ConnectCalendarInput,
  ConnectCalendarOutput,
@@ -20,11 +20,12 @@ import type {
  ListCalendarEventsOutput,
  CreateCalendarEventInput,
  CreateCalendarEventOutput,
-} from './types';
+} from '@nova/shared-types';
 
 // ─── Tool Definitions ──────────────────────────────────────────────
 
 const CONNECT_CALENDAR: NovaToolDefinition = {
+ id: 'connect_calendar',
  name: 'connect_calendar',
  description: 'Connect a calendar provider (Google Calendar or Outlook) via OAuth2. Returns an authorization URL for the user to complete the connection.',
  version: '1.0.0',
@@ -68,6 +69,7 @@ const CONNECT_CALENDAR: NovaToolDefinition = {
 };
 
 const LIST_CALENDAR_EVENTS: NovaToolDefinition = {
+ id: 'list_calendar_events',
  name: 'list_calendar_events',
  description: 'List calendar events from a connected calendar provider within an optional time range.',
  version: '1.0.0',
@@ -104,6 +106,7 @@ const LIST_CALENDAR_EVENTS: NovaToolDefinition = {
 };
 
 const CREATE_CALENDAR_EVENT: NovaToolDefinition = {
+ id: 'create_calendar_event',
  name: 'create_calendar_event',
  description: 'Create a new event in a connected calendar provider.',
  version: '1.0.0',

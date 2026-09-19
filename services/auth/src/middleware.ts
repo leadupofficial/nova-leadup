@@ -7,7 +7,39 @@ import { verifyAccessToken } from './jwt.js';
 import { findSessionByToken } from './repositories/sessions.js';
 import { findUserById } from './repositories/users.js';
 import { findRoleByKey } from './repositories/roles.js';
+import { tokenDenylist } from './tokenDenylist.js';
 import { ROLE_PERMISSIONS } from '@nova/auth-types';
+import rateLimit from 'express-rate-limit';
+import RedisStore from 'rate-limit-redis';
+import Redis from 'ioredis';
+
+const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+
+/**
+ * Bridge for rate-limit-redis v4, which sends raw Redis commands.
+ * ioredis types `call()` as returning `unknown`, so the reply is narrowed to
+ * the scalar/array shapes the store understands.
+ */
+type RedisStoreReply = string | number | boolean | (string | number | boolean)[];
+const sendRedisCommand = (...args: string[]): Promise<RedisStoreReply> =>
+  redis.call(args[0], args.slice(1)) as Promise<RedisStoreReply>;
+
+export const authLimiter = rateLimit({
+  store: new RedisStore({ sendCommand: sendRedisCommand }),
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: 'Too many authentication attempts, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const apiLimiter = rateLimit({
+  store: new RedisStore({ sendCommand: sendRedisCommand }),
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 export interface AuthContext {
  userId: string;
@@ -47,6 +79,11 @@ export async function authenticateJwt(req: Request, _res: Response, next: NextFu
 
  const token = authHeader.slice(7);
  const payload = verifyAccessToken(token);
+
+ // Token revocation: reject if the jti is on the denylist
+ if (tokenDenylist.isRevoked(payload.jti, payload.sub)) {
+   return next(new AuthHttpError('Token has been revoked', 401, 'Unauthorized', 'https://api.nova.leadup.in/problems/token-revoked'));
+ }
 
  const roleRow = await findRoleByKey(payload.role);
  const roleKey = roleRow?.key ?? 'member';
@@ -130,5 +167,19 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
  title: 'Internal Server Error',
  status: 500,
  detail: err.message || 'An unexpected error occurred.',
+ });
+}
+
+export function sendProblem(res: Response, err: Error | AuthHttpError, instance?: string): void {
+ const status = err instanceof AuthHttpError ? err.statusCode : 500;
+ const title = err instanceof AuthHttpError ? err.title : 'Internal Server Error';
+ const code = err instanceof AuthHttpError ? err.problemType : 'https://api.nova.leadup.in/problems/server-error';
+ const detail = err instanceof Error ? err.message : 'An unexpected error occurred.';
+ res.status(status).json({
+ type: code,
+ title,
+ status,
+ detail,
+ instance,
  });
 }

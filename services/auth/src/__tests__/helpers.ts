@@ -1,4 +1,5 @@
-// No-op — real helpers use supertest directly
+import { AuthContext } from '../middleware.js';
+
 export function createMockCtx(): AuthContext {
  return {
  userId: 'test-user',

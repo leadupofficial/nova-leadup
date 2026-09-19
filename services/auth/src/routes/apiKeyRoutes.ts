@@ -2,21 +2,21 @@
  * API key management routes.
  */
 
-import type { Request, Response, Router } from 'express';
+import type { Request, Response, NextFunction, Router } from 'express';
 import { Router as createRouter } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { createApiKey, listApiKeys, revokeApiKey, findApiKeyByHash } from '../repositories/apiKeys';
-import { authenticateJwt, requirePermission, AuthContext, AuthHttpError, sendProblem } from '../middleware';
-import { CreateApiKeySchema } from '@nova/auth-types';
+import { createApiKey, listApiKeys, revokeApiKey, findApiKeyByHash, updateLastUsed } from '../repositories/apiKeys.js';
+import { authenticateJwt, requirePermission, AuthContext, AuthHttpError, sendProblem } from '../middleware.js';
+import { CreateApiKeySchema, Permissions } from '@nova/auth-types';
 
-const router = createRouter();
+const router: Router = createRouter();
 
 // ---- POST /api-keys ----
 
 router.post(
  '/',
  authenticateJwt,
- requirePermission(Permission.ApiKeyCreate),
+ requirePermission(Permissions.ApiKeyCreate),
  async (req: Request, res: Response): Promise<void> => {
  try {
  const ctx = (req as unknown as { auth: AuthContext }).auth;
@@ -32,7 +32,7 @@ router.post(
  res.status(201).json({
  id: key.id,
  name: key.name,
- prefix: key.prefix,
+ prefix: key.key_prefix,
  scopes: key.scopes,
  expiresAt: key.expires_at,
  createdAt: key.created_at,
@@ -49,7 +49,7 @@ router.post(
 router.get(
  '/',
  authenticateJwt,
- requirePermission(Permission.ApiKeyView),
+ requirePermission(Permissions.ApiKeyView),
  async (req: Request, res: Response): Promise<void> => {
  try {
  const ctx = (req as unknown as { auth: AuthContext }).auth;
@@ -74,7 +74,7 @@ router.get(
 router.delete(
  '/:id',
  authenticateJwt,
- requirePermission(Permission.ApiKeyRevoke),
+ requirePermission(Permissions.ApiKeyRevoke),
  async (req: Request, res: Response): Promise<void> => {
  try {
  await revokeApiKey(req.params.id);
@@ -87,36 +87,36 @@ router.delete(
 
 // ---- Service-to-service auth middleware (for API key auth) ----
 
-export async function authenticateApiKey(req: Request, _res: Response, next: Express.NextFunction): Promise<void> {
+export async function authenticateApiKey(req: Request, _res: Response, next: NextFunction): Promise<void> {
  try {
  const authHeader = req.headers.authorization;
  if (!authHeader?.startsWith('Bearer ')) {
- (req as unknown as { authError }).authError = new AuthHttpError('Missing API key', 401);
+ (req as unknown as { authError: AuthHttpError }).authError = new AuthHttpError('Missing API key', 401);
  return;
  }
 
  const rawKey = authHeader.slice(7);
  // Compute hash same way as createApiKey
- const { hmacSha256 } = await import('../crypto');
+ const { hmacSha256 } = await import('../crypto.js');
  const hash = hmacSha256(process.env.API_KEY_SECRET || 'default', rawKey);
 
  const key = await findApiKeyByHash(hash);
  if (!key || !key.scopes.includes('read')) {
- (req as unknown as { authError }).authError = new AuthHttpError('Invalid API key', 401);
+ (req as unknown as { authError: AuthHttpError }).authError = new AuthHttpError('Invalid API key', 401);
  return;
  }
 
  if (key.expires_at && new Date(key.expires_at) < new Date()) {
- (req as unknown as { authError }).authError = new AuthHttpError('API key expired', 401);
+ (req as unknown as { authError: AuthHttpError }).authError = new AuthHttpError('API key expired', 401);
  return;
  }
 
  // Attach API key context
- (req as unknown as { apiKey }).apiKey = { organizationId: key.organization_id, scopes: key.scopes };
+ (req as unknown as { apiKey: { organizationId: string; scopes: string[] } }).apiKey = { organizationId: key.organization_id, scopes: key.scopes };
  await updateLastUsed(key.id);
  next();
  } catch {
- (req as unknown as { authError }).authError = new AuthHttpError('API key validation failed', 401);
+ (req as unknown as { authError: AuthHttpError }).authError = new AuthHttpError('API key validation failed', 401);
  }
 }
 

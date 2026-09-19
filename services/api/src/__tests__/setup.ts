@@ -1,3 +1,11 @@
+// Load a local `.env` before anything else is imported.
+//
+// Import evaluation is hoisted above the module body, so without this the
+// modules pulled in below (and `../server.js` at the bottom in particular)
+// read process.env before this file has set anything. That made the suite
+// depend on whatever happened to be exported in the developer's shell.
+import 'dotenv/config';
+
 import { vi, expect } from 'vitest';
 import { z } from 'zod';
 

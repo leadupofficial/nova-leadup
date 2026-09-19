@@ -16,12 +16,15 @@
     "bullmq": "^5.35.0",
     "dotenv": "^16.4.0",
     "ioredis": "^5.4.0",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.16.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.0",
     "@types/express": "^5.0.0",
     "@types/helmet": "^4.0.0",
+    "@types/pg": "^8.11.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
     "helmet": "^8.0.0",

@@ -2,7 +2,7 @@
  * Prometheus metrics for @nova/admin.
  */
 import promClient from 'prom-client';
-import type { Request, Response } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 
 export const metricRegistry = new promClient.Registry();
 

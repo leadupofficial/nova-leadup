@@ -1,5 +1,14 @@
 import { sql, SQL, eq, and, or, like, inArray, desc, asc } from 'drizzle-orm';
-import { Database } from '../client';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import type { Database } from '../client.js';
+
+/**
+ * The Drizzle client instance exposed by `Database#client`.
+ *
+ * Subclasses receive the `Database` wrapper but talk to the ORM directly, so
+ * the base class stores the ORM client under `this.db`.
+ */
+type DrizzleClient = ReturnType<typeof drizzle>;
 
 export interface QueryOptions {
   limit?: number;
@@ -16,19 +25,19 @@ export interface RepositoryConfig {
 }
 
 export abstract class BaseRepository<T extends { id: string }> {
-  protected readonly db: Database;
+  protected readonly db: DrizzleClient;
   protected readonly table: any;
 
-  constructor(protected readonly config: RepositoryConfig) {
-    this.db = config.db;
-    this.table = config.table;
+  constructor(db: Database, table: any) {
+    this.db = db.client;
+    this.table = table;
   }
 
   async findById(id: string): Promise<T | undefined> {
     if (!this.isValidUUID(id)) {
       throw new Error('Invalid UUID format');
     }
-    const result = await this.db.client.select().from(this.table).where(eq(this.table.id, id)).limit(1);
+    const result = await this.db.select().from(this.table).where(eq(this.table.id, id)).limit(1);
     return result[0];
   }
 
@@ -36,13 +45,15 @@ export abstract class BaseRepository<T extends { id: string }> {
     if (!ids.length) return [];
     const validIds = ids.filter(id => this.isValidUUID(id));
     if (!validIds.length) return [];
-    return this.db.client.select().from(this.table).where(inArray(this.table.id, validIds));
+    return this.db.select().from(this.table).where(inArray(this.table.id, validIds));
   }
 
   async findAll(options?: QueryOptions): Promise<T[]> {
     const { limit = 50, offset = 0, orderBy, filters, searchFields, searchQuery } = options || {};
 
-    let query = this.db.client.select().from(this.table);
+    // `$dynamic()` keeps the builder's type stable across the conditional
+    // `.where()` calls below.
+    let query = this.db.select().from(this.table).$dynamic();
 
     if (searchQuery && searchFields?.length) {
       const conditions = searchFields
@@ -74,16 +85,16 @@ export abstract class BaseRepository<T extends { id: string }> {
     }
 
     if (orderBy) {
-      query = query.orderBy(orderBy);
+      query = query.orderBy(...(Array.isArray(orderBy) ? orderBy : [orderBy]));
     }
 
     query = query.limit(limit).offset(offset);
 
-    return query;
+    return query as unknown as T[];
   }
 
   async count(filters?: Record<string, any>): Promise<number> {
-    let query = this.db.client.select({ count: sql<number>`count(*)` }).from(this.table);
+    let query = this.db.select({ count: sql<number>`count(*)` }).from(this.table).$dynamic();
 
     if (filters) {
       const filterConditions = Object.entries(filters)
@@ -102,12 +113,15 @@ export abstract class BaseRepository<T extends { id: string }> {
 
   async create(data: Omit<T, 'id' | 'createdAt' | 'updatedAt'>): Promise<T> {
     const now = new Date();
-    const result = await this.db.client.insert(this.table).values({
+    // `this.table` is `any`, so Drizzle cannot infer the inserted row type and
+    // reports a union with the raw `QueryResult`; the runtime value is the
+    // `.returning()` row array.
+    const rows = (await this.db.insert(this.table).values({
       ...data,
       createdAt: now,
       updatedAt: now,
-    }).returning();
-    return result[0];
+    }).returning()) as unknown as T[];
+    return rows[0];
   }
 
   async createMany(data: Array<Omit<T, 'id' | 'createdAt' | 'updatedAt'>>): Promise<T[]> {
@@ -118,7 +132,7 @@ export abstract class BaseRepository<T extends { id: string }> {
       updatedAt: now,
     }));
 
-    return this.db.client.insert(this.table).values(values).returning();
+    return this.db.insert(this.table).values(values).returning() as unknown as Promise<T[]>;
   }
 
   async update(id: string, data: Partial<Omit<T, 'id' | 'createdAt'>>): Promise<T | undefined> {
@@ -126,7 +140,7 @@ export abstract class BaseRepository<T extends { id: string }> {
       throw new Error('Invalid UUID format');
     }
 
-    const result = await this.db.client
+    const result = await this.db
       .update(this.table)
       .set({
         ...data,
@@ -142,7 +156,7 @@ export abstract class BaseRepository<T extends { id: string }> {
     const validIds = ids.filter(id => this.isValidUUID(id));
     if (!validIds.length) return 0;
 
-    const result = await this.db.client
+    const result = await this.db
       .update(this.table)
       .set({
         ...data,
@@ -150,7 +164,7 @@ export abstract class BaseRepository<T extends { id: string }> {
       })
       .where(inArray(this.table.id, validIds));
 
-    return result.rowCount || 0;
+    return result.rowCount ?? 0;
   }
 
   async delete(id: string): Promise<boolean> {
@@ -158,21 +172,21 @@ export abstract class BaseRepository<T extends { id: string }> {
       throw new Error('Invalid UUID format');
     }
 
-    const result = await this.db.client.delete(this.table).where(eq(this.table.id, id));
-    return result.rowCount > 0;
+    const result = await this.db.delete(this.table).where(eq(this.table.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   async deleteMany(ids: string[]): Promise<number> {
     const validIds = ids.filter(id => this.isValidUUID(id));
     if (!validIds.length) return 0;
 
-    const result = await this.db.client.delete(this.table).where(inArray(this.table.id, validIds));
-    return result.rowCount || 0;
+    const result = await this.db.delete(this.table).where(inArray(this.table.id, validIds));
+    return result.rowCount ?? 0;
   }
 
   async exists(id: string): Promise<boolean> {
     if (!this.isValidUUID(id)) return false;
-    const result = await this.db.client.select({ count: sql<number>`count(*)` }).from(this.table).where(eq(this.table.id, id));
+    const result = await this.db.select({ count: sql<number>`count(*)` }).from(this.table).where(eq(this.table.id, id));
     return Number(result[0]?.count || 0) > 0;
   }
 

@@ -1,4 +1,4 @@
-import { q, qOne } from './db';
+import { q, qOne } from './db.js';
 
 export interface OtpRow {
  id: string;

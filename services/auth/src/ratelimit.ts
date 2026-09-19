@@ -6,6 +6,7 @@
  * - Per-user limiting (key: rl:user:<userId>:<endpoint>)
  * - Global token-bucket style limits
  */
+import type { Request, Response, NextFunction } from 'express';
 import Redis from 'ioredis';
 
 const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
@@ -30,7 +31,7 @@ const ENDPOINT_LIMITS: Record<string, RateLimitConfig> = {
  '/auth/password-reset': { windowMs: 60_000, max: 5 },
 };
 
-export function rateLimitMiddleware(req: Express.Request, res: Express.Response, next: Express.NextFunction): void {
+export function rateLimitMiddleware(req: Request, res: Response, next: NextFunction): void {
  const endpoint = req.route?.path ?? req.path;
  const config = ENDPOINT_LIMITS[endpoint] ?? DEFAULT_CONFIG;
  const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
@@ -41,7 +42,7 @@ export function rateLimitMiddleware(req: Express.Request, res: Express.Response,
  if (count === 1) {
  redis.pexpire(key, config.windowMs, () => {});
  }
- if (count > config.max) {
+ if ((count ?? 0) > config.max) {
  res.set('Retry-After', String(Math.ceil(config.windowMs / 1000)));
  return sendProblem(res, 429, 'Too Many Requests', 'Rate limit exceeded. Try again later.', req.path);
  }
@@ -49,7 +50,7 @@ export function rateLimitMiddleware(req: Express.Request, res: Express.Response,
  });
 }
 
-export function rateLimitUser(
+export async function rateLimitUser(
  userId: string,
  endpoint: string,
  config: RateLimitConfig = DEFAULT_CONFIG
@@ -63,7 +64,7 @@ export function rateLimitUser(
 }
 
 function sendProblem(
- res: Express.Response,
+ res: Response,
  status: number,
  title: string,
  detail: string,

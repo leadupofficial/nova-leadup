@@ -27,7 +27,7 @@ import type {
 	ApprovalContext,
 	PolicyDecision,
 } from '@nova/shared-types';
-import { RateLimiter, type RateLimitResult } from './rate-limiter';
+import { RateLimiter, type RateLimitResult } from './rate-limiter.js';
 
 // ─── Permission Level Constants ───────────────────────────────────────────────
 
@@ -323,10 +323,10 @@ export class PolicyEngine {
 	/**
 	 * Evaluate a tool call against all policies.
 	 */
-	evaluate(input: ToolPolicyInput): PolicyDecision {
+	async evaluate(input: ToolPolicyInput): Promise<PolicyDecision> {
 		// Step 1: Rate limit
 		if (this.rateLimiter) {
-			const rateResult = this.rateLimiter.check(
+			const rateResult = await this.rateLimiter.check(
 				RateLimiter.buildKey([input.userId, input.tenantId ?? 'personal', 'tool']),
 				'tool',
 				'free', // tier resolution is caller's responsibility
@@ -410,7 +410,7 @@ export interface PolicyModule {
 	readonly rbac: RBACChecker;
 	readonly tenantIsolation: TenantIsolationEnforcer;
 	readonly confirmation: ConfirmationChecker;
-	evaluate(input: ToolPolicyInput): PolicyDecision;
+	evaluate(input: ToolPolicyInput): Promise<PolicyDecision>;
 }
 
 export class DefaultPolicyModule implements PolicyModule {
@@ -432,7 +432,7 @@ export class DefaultPolicyModule implements PolicyModule {
 		});
 	}
 
-	evaluate(input: ToolPolicyInput): PolicyDecision {
+	async evaluate(input: ToolPolicyInput): Promise<PolicyDecision> {
 		return this.engine.evaluate(input);
 	}
 }

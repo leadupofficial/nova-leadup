@@ -108,7 +108,7 @@ import type {
 	VoiceSession,
 	AudioLevelData,
 	ToolCall,
-} from './types';
+} from './types.js';
 
 export {
 	SUPPORTED_LANGUAGES,
@@ -126,7 +126,7 @@ export {
 	getLanguageByCode,
 	getLanguageName,
 	getLanguageCodeMap,
-} from './languages';
+} from './languages.js';
 
 export type {
 	AppEvent,
@@ -231,4 +231,4 @@ export type {
 	VoiceSession,
 	AudioLevelData,
 	ToolCall,
-} from './types';
+} from './types.js';

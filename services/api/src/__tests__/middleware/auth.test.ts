@@ -21,7 +21,7 @@ vi.mock('../../db/connection', () => {
 	return { getDbPool: mockGetDbPool };
 });
 
-import { authenticate, AuthenticatedRequest, requireAdmin } from '../../middleware/auth';
+import { authenticate, AuthenticatedRequest, requireAdmin } from '../../middleware/auth.js';
 import { errorHandler, HttpError } from '../../middleware/error-handler.js';
 import crypto from 'crypto';
 
@@ -105,7 +105,7 @@ describe('authenticate middleware — API key auth', () => {
 
 	it('returns 401 for an API key with no DB match', async () => {
 		const mockPool = { query: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }) };
-		const { getDbPool } = await import('../../db/connection');
+		const { getDbPool } = await import('../../db/connection.js');
 		mockGetDbPool.mockReturnValue(mockPool);
 
 		const apiKey = 'nova_live_TestKey_abcdefghij';
@@ -139,7 +139,7 @@ describe('authenticate middleware — API key auth', () => {
 				rowCount: 1,
 			}),
 		};
-		const { getDbPool } = await import('../../db/connection');
+		const { getDbPool } = await import('../../db/connection.js');
 		mockGetDbPool.mockReturnValue(mockPool);
 
 		const app = express();
@@ -167,7 +167,7 @@ describe('authenticate middleware — API key auth', () => {
 				rowCount: 1,
 			}),
 		};
-		const { getDbPool } = await import('../../db/connection');
+		const { getDbPool } = await import('../../db/connection.js');
 		mockGetDbPool.mockReturnValue(mockPool);
 
 		const app = express();
@@ -195,7 +195,7 @@ describe('authenticate middleware — API key auth', () => {
 				rowCount: 1,
 			}),
 		};
-		const { getDbPool } = await import('../../db/connection');
+		const { getDbPool } = await import('../../db/connection.js');
 		mockGetDbPool.mockReturnValue(mockPool);
 
 		const app = express();
@@ -225,7 +225,7 @@ describe('authenticate middleware — API key auth', () => {
 		const mockPool = {
 			query: vi.fn().mockRejectedValue(new Error('Connection refused')),
 		};
-		const { getDbPool } = await import('../../db/connection');
+		const { getDbPool } = await import('../../db/connection.js');
 		mockGetDbPool.mockReturnValue(mockPool);
 
 		const app = express();
@@ -251,7 +251,7 @@ describe('authenticate middleware — API key auth', () => {
 
 	it('skips API key validation when Authorization header is missing', async () => {
 		const mockPool = { query: vi.fn() };
-		const { getDbPool } = await import('../../db/connection');
+		const { getDbPool } = await import('../../db/connection.js');
 		mockGetDbPool.mockReturnValue(mockPool);
 
 		const app = express();

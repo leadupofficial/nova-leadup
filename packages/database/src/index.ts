@@ -5,9 +5,9 @@
  */
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool, PoolClient } from 'pg';
-import * as schema from './schema';
+import * as schema from './schema.js';
 
-export * from './schema';
+export * from './schema.js';
 
 // NOTE: the legacy `migrate()` export was removed along with src/migrate.ts and
 // src/migrations/. That runner applied a SQL schema that contradicted ./schema.ts

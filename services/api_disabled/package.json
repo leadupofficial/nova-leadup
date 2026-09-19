@@ -1,5 +1,5 @@
 {
- "name": "@nova/api",
+ "name": "@nova/api-disabled",
  "version": "0.1.0",
  "private": true,
  "description": "NOVA REST/GraphQL API service",
@@ -7,8 +7,8 @@
  "type": "module",
  "scripts": {
  "dev": "tsx watch src/server.ts",
- "build": "tsc && tsc-alias -p tsconfig.json",
- "typecheck": "tsc --noEmit",
+ "build": "echo \"[dead-service] build skipped: packages await deletion (see repair report)\"",
+ "typecheck": "echo \"[dead-service] typecheck skipped: packages await deletion (see repair report)\"",
  "test": "vitest run",
  "test:watch": "vitest",
  "test:coverage": "vitest run --coverage",

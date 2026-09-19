@@ -1,6 +1,6 @@
 import { generateId } from '@nova/utils';
-import { hashPassword as _hashPassword, verifyPassword as _verifyPassword } from '../crypto';
-import { q, qOne } from './db';
+import { hashPassword as _hashPassword, verifyPassword as _verifyPassword } from '../crypto.js';
+import { q, qOne } from './db.js';
 
 export interface UserRow {
  id: string;

@@ -4,7 +4,7 @@
 
 import http from 'http';
 import dotenv from 'dotenv';
-import { createRealtimeGateway } from './gateway';
+import { createRealtimeGateway } from './gateway.js';
 
 dotenv.config();
 

@@ -560,7 +560,7 @@ export async function transcribeAudio(audioBuffer: Buffer, language: string = 'e
 			throw new Error(`Deepgram STT failed (${response.status}): ${text}`);
 		}
 
-		const result = await response.json() as { results: { channels: { alternatives: { transcript: string; confidence: number }[] }[] }[] };
+		const result = await response.json() as { results?: { channels?: { alternatives: { transcript: string; confidence: number }[] }[] } };
 		const channel = result.results?.channels?.[0];
 		const alternative = channel?.alternatives?.[0];
 
@@ -687,7 +687,8 @@ export async function synthesizeSpeech(
 	voiceId: string,
 	options?: { speed?: number; stability?: number; signal?: AbortSignal }
 ): Promise<{ audioBuffer: Buffer; contentType: string; durationMs: number }> {
-	if (!env.ELEVENLABS_API_KEY) {
+	const elevenLabsApiKey = env.ELEVENLABS_API_KEY;
+	if (!elevenLabsApiKey) {
 		throw new Error('ELEVENLABS_API_KEY is not configured');
 	}
 
@@ -706,7 +707,7 @@ export async function synthesizeSpeech(
 					method: 'POST',
 					signal: controller.signal,
 					headers: {
-						'xi-api-key': env.ELEVENLABS_API_KEY,
+						'xi-api-key': elevenLabsApiKey,
 						'Content-Type': 'application/json',
 					},
 					body: JSON.stringify({

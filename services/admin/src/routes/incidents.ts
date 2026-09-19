@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { authenticateJwt } from '@nova/auth';
 import { errorHandler } from '../middleware.js';
 
-export const incidentsRouter = Router();
+export const incidentsRouter: Router = Router();
 
 const CreateIncidentSchema = z.object({
  severity: z.enum(['info', 'warning', 'error', 'critical']),

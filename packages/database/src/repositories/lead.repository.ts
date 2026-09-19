@@ -1,7 +1,10 @@
 import { eq, and, or, desc, asc, like, inArray, gte, lte, isNull, sql, count, sum, avg } from 'drizzle-orm';
-import { BaseRepository } from '../utils/base-repository';
-import { leads, users } from '../schema';
-import type { Database } from '../client';
+import { BaseRepository } from '../utils/base-repository.js';
+import { leads, users } from '../schema.js';
+import type { Database } from '../client.js';
+
+type LeadRow = typeof leads.$inferSelect;
+type LeadInsert = typeof leads.$inferInsert;
 
 export interface LeadQueryOptions {
 	status?: string | 'ALL';
@@ -20,20 +23,20 @@ export interface LeadQueryOptions {
 	orderDirection?: 'asc' | 'desc';
 }
 
-export interface LeadWithAssigner extends ReturnType<typeof leads.$inferSelect> {
+export type LeadWithAssigner = Omit<LeadRow, 'assignedTo'> & {
 	assignedTo?: {
 		id: string;
 		name: string;
-		email: string;
+		email: string | null;
 	};
-}
+};
 
-export class LeadRepository extends BaseRepository<ReturnType<typeof leads.$inferSelect>> {
+export class LeadRepository extends BaseRepository<LeadRow> {
 	constructor(db: Database) {
 		super(db, leads);
 	}
 
-	async findById(id: string, currentUserId?: string): Promise<ReturnType<typeof leads.$inferSelect> | undefined> {
+	async findById(id: string, currentUserId?: string): Promise<LeadRow | undefined> {
 		if (!currentUserId) {
 			return super.findById(id);
 		}
@@ -45,7 +48,7 @@ export class LeadRepository extends BaseRepository<ReturnType<typeof leads.$infe
 		return result;
 	}
 
-	async findByAssignedUser(currentUserId: string, assignedTo: string): Promise<ReturnType<typeof leads.$inferSelect>[]> {
+	async findByAssignedUser(currentUserId: string, assignedTo: string): Promise<LeadRow[]> {
 		return this.db.select().from(leads).where(and(eq(leads.userId, currentUserId), eq(leads.assignedTo, assignedTo)));
 	}
 
@@ -79,7 +82,7 @@ export class LeadRepository extends BaseRepository<ReturnType<typeof leads.$infe
 	async findActive(
 		currentUserId: string,
 		options?: Omit<LeadQueryOptions, 'status'>,
-	): Promise<ReturnType<typeof leads.$inferSelect>[]> {
+	): Promise<LeadRow[]> {
 		if (!currentUserId) {
 			throw new Error('currentUserId is required');
 		}
@@ -153,7 +156,7 @@ export class LeadRepository extends BaseRepository<ReturnType<typeof leads.$infe
 			);
 		}
 
-		let query = this.db.select().from(leads).where(and(...conditions));
+		let query = this.db.select().from(leads).where(and(...conditions)).$dynamic();
 
 		const orderColumn = leads[orderBy as keyof typeof leads];
 		query = query.orderBy(orderDirection === 'asc' ? asc(orderColumn as any) : desc(orderColumn as any));
@@ -162,7 +165,7 @@ export class LeadRepository extends BaseRepository<ReturnType<typeof leads.$infe
 		return query;
 	}
 
-	async assignUser(leadId: string, assignedTo: string): Promise<ReturnType<typeof leads.$inferSelect> | undefined> {
+	async assignUser(leadId: string, assignedTo: string): Promise<LeadRow | undefined> {
 		const [result] = await this.db
 			.update(leads)
 			.set({ assignedTo, updatedAt: new Date() })
@@ -172,7 +175,7 @@ export class LeadRepository extends BaseRepository<ReturnType<typeof leads.$infe
 		return result;
 	}
 
-	async updateStatus(leadId: string, status: string): Promise<ReturnType<typeof leads.$inferSelect> | undefined> {
+	async updateStatus(leadId: string, status: string): Promise<LeadRow | undefined> {
 		const [result] = await this.db
 			.update(leads)
 			.set({ status, updatedAt: new Date() })
@@ -216,7 +219,7 @@ export class LeadRepository extends BaseRepository<ReturnType<typeof leads.$infe
 				count: count(),
 				totalBudget: sum(leads.budget),
 			})
-			.from(leads);
+			.from(leads).$dynamic();
 
 		if (conditions.length > 0) {
 			query = query.where(and(...conditions));
@@ -249,7 +252,7 @@ export class LeadRepository extends BaseRepository<ReturnType<typeof leads.$infe
 				totalBudget: sum(leads.budget),
 				avgBudget: avg(leads.budget),
 			})
-			.from(leads);
+			.from(leads).$dynamic();
 
 		if (conditions.length > 0) {
 			query = query.where(and(...conditions));
@@ -294,12 +297,15 @@ export class LeadRepository extends BaseRepository<ReturnType<typeof leads.$infe
 		};
 	}
 
-	async create(data: Partial<ReturnType<typeof leads.$inferInsert>>): Promise<ReturnType<typeof leads.$inferSelect>> {
-		const [result] = await this.db.insert(leads).values(data).returning();
+	async create(data: Partial<LeadInsert>): Promise<LeadRow> {
+		// `create` deliberately accepts a partial insert (columns with database
+		// defaults may be omitted); Drizzle's `values()` overload requires the
+		// full insert type, so the partial is asserted here.
+		const [result] = await this.db.insert(leads).values(data as LeadInsert).returning();
 		return result;
 	}
 
-	async update(id: string, data: Partial<ReturnType<typeof leads.$inferInsert>>): Promise<ReturnType<typeof leads.$inferSelect> | undefined> {
+	async update(id: string, data: Partial<LeadInsert>): Promise<LeadRow | undefined> {
 		const [result] = await this.db.update(leads).set(data).where(eq(leads.id, id)).returning();
 		return result;
 	}

@@ -12,21 +12,26 @@
   },
   "dependencies": {
     "@nova/auth": "workspace:*",
-    "@nova/shared-types": "workspace:*",
+    "@nova/auth-types": "workspace:*",
     "@nova/observability": "workspace:*",
-    "ws": "^8.18.0",
-    "express": "^4.21.0",
+    "@nova/shared-types": "workspace:*",
     "cors": "^2.8.5",
-    "zod": "^3.24.0",
-    "dotenv": "^16.4.0"
+    "dotenv": "^16.4.0",
+    "express": "^4.21.0",
+    "ioredis": "^6.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "pino": "^9.7.0",
+    "ws": "^8.18.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
-    "tsx": "^4.19.0",
-    "vitest": "^2.1.0",
-    "@types/ws": "^8.5.0",
-    "@types/express": "^5.0.0",
     "@types/cors": "^2.8.0",
-    "tsc-alias": "^1.8.0"
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/ws": "^8.5.0",
+    "tsc-alias": "^1.8.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
   }
 }

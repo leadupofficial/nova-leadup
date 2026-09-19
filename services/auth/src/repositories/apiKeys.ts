@@ -1,6 +1,6 @@
 import { generateId } from '@nova/utils';
-import { generateApiKey } from '../crypto';
-import { q, qOne } from './db';
+import { generateApiKey } from '../crypto.js';
+import { q, qOne } from './db.js';
 
 export interface ApiKeyRow {
  id: string;

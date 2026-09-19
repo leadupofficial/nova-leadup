@@ -18,7 +18,7 @@ import type {
  PromptLayer,
  ModelRouter,
  RouteContext,
-} from './types';
+} from './types.js';
 
 // ─── Model Router ──────────────────────────────────────────────────────────
 

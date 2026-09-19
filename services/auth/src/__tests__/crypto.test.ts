@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hashPassword, verifyPassword, generateOtp, encryptToken, decryptToken, generateApiKey, hmacSha256 } from '../crypto';
+import { hashPassword, verifyPassword, generateOtp, encryptToken, decryptToken, generateApiKey, hmacSha256 } from '../crypto.js';
 
 describe('hashPassword / verifyPassword', () => {
  it('hashes a password and verifies it', async () => {

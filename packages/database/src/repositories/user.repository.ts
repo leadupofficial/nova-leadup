@@ -1,7 +1,7 @@
-import { eq, and, or, desc, asc, like, gte, lte, count, sql } from 'drizzle-orm';
-import { BaseRepository } from '../utils/base-repository';
-import { users } from '../schema';
-import type { Database } from '../client';
+import { eq, and, or, desc, asc, like, gte, lte, count, sql, type SQL } from 'drizzle-orm';
+import { BaseRepository } from '../utils/base-repository.js';
+import { users } from '../schema.js';
+import type { Database } from '../client.js';
 
 export interface UserQueryOptions {
 	searchQuery?: string;
@@ -11,7 +11,7 @@ export interface UserQueryOptions {
 	orderDirection?: 'asc' | 'desc';
 }
 
-export class UserRepository extends BaseRepository {
+export class UserRepository extends BaseRepository<typeof users.$inferSelect> {
 	constructor(db: Database) {
 		super(db, users);
 	}
@@ -24,19 +24,23 @@ export class UserRepository extends BaseRepository {
 	async findActiveUsers(options?: Omit<UserQueryOptions, 'isActive'>): Promise<Record<string, unknown>[]> {
 		const { searchQuery, limit = 50, offset = 0, orderBy = 'createdAt', orderDirection = 'desc' } = options || {};
 
-		const conditions = [eq(users.disabled, false)];
+		const conditions: SQL<unknown>[] = [eq(users.disabled, false)];
 
 		if (searchQuery) {
-			conditions.push(
-				or(
-					like(users.name, `%${searchQuery}%`),
-					like(users.email, `%${searchQuery}%`)
-				)
+			const searchCondition = or(
+				like(users.name, `%${searchQuery}%`),
+				like(users.email, `%${searchQuery}%`)
 			);
+			if (searchCondition) conditions.push(searchCondition);
 		}
 
-		let query = this.db.select().from(users).where(and(...conditions));
-		const orderColumn = users[orderBy as keyof typeof users];
+		let query = this.db.select().from(users).where(and(...conditions)).$dynamic();
+		const orderColumns = {
+			name: users.name,
+			email: users.email,
+			createdAt: users.createdAt,
+		} as const;
+		const orderColumn = orderColumns[orderBy];
 		query = query.orderBy(orderDirection === 'asc' ? asc(orderColumn) : desc(orderColumn));
 		query = query.limit(limit).offset(offset);
 

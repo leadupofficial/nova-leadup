@@ -1,5 +1,5 @@
 import { generateId } from '@nova/utils';
-import { q, qOne } from './db';
+import { q, qOne } from './db.js';
 
 export interface RoleRow {
  id: string;

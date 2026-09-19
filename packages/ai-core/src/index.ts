@@ -23,16 +23,16 @@ export type {
 	ModelRouter,
 	RouteContext,
 	PromptLayer,
-} from './types';
-export type { ConversationTurn, SessionOrchestratorOptions } from './orchestrator';
+} from './types.js';
+export type { ConversationTurn, SessionOrchestratorOptions } from './orchestrator.js';
 export {
 	BlueprintModelRouter,
 	SessionOrchestrator,
 	buildLayeredPrompt,
 	validateToolCall,
-} from './orchestrator';
-export type { SummaryResult, SummaryOptions, ActionItemExtraction, ExtractedContact } from './summarizer';
-export { Summarizer } from './summarizer';
+} from './orchestrator.js';
+export type { SummaryResult, SummaryOptions, ActionItemExtraction, ExtractedContact } from './summarizer.js';
+export { Summarizer } from './summarizer.js';
 
 // ─── Claude Client ─────────────────────────────────────────────────────────────
 
@@ -44,8 +44,8 @@ export interface ClaudeClientOptions {
 	readonly timeoutMs?: number;
 }
 
-import type { ClaudeModel, ClaudeMessage, ClaudeToolDefinition, ModelRouter, RouteContext, ToolCall, ClaudeCompletionRequest, ClaudeCompletionResponse, PromptLayer } from './types';
-import { BlueprintModelRouter, SessionOrchestrator, buildLayeredPrompt } from './orchestrator';
+import type { ClaudeModel, ClaudeMessage, ClaudeToolDefinition, ModelRouter, RouteContext, ToolCall, ClaudeCompletionRequest, ClaudeCompletionResponse, PromptLayer } from './types.js';
+import { BlueprintModelRouter, SessionOrchestrator, buildLayeredPrompt } from './orchestrator.js';
 
 const DEFAULT_BASE_URL = 'https://api.anthropic.com/v1';
 const DEFAULT_TIMEOUT_MS = 60_000;

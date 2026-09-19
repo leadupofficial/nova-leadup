@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
 import request from 'supertest';
-import './setup';
+import './setup.js';
 
 import app from '../server.js';
 import jwt from 'jsonwebtoken';

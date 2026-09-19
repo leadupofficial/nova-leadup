@@ -158,7 +158,11 @@ async function checkStorage(): Promise<HealthCheckResult> {
 	try {
 		let getStorageClient: (() => unknown) | undefined;
 		try {
-			const mod: any = await import('../storage.js');
+			// services/api has no local `storage.ts`; this probe is best-effort and
+			// intentionally falls through to the catch below. A non-literal specifier
+			// keeps that runtime behaviour while letting the source compile.
+			const storageModule = '../storage.js';
+			const mod: any = await import(storageModule);
 			getStorageClient = mod.getStorageClient;
 		} catch {
 			return {

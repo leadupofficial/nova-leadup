@@ -1,27 +1,29 @@
 /**
  * Authentication routes for @nova/auth.
  */
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction, Router } from 'express';
 import { Router as createRouter } from 'express';
 import { z } from 'zod';
-import { createOrganization } from '../repositories/organizations';
-import { createWorkspace } from '../repositories/workspaces';
-import { createUser, findUserByEmail, verifyEmail, updatePassword } from '../repositories/users';
-import { createSession, findSessionByRefreshToken, rotateRefreshToken } from '../repositories/sessions';
-import { createOtpRecord, findActiveOtp, markOtpConsumed, incrementOtpAttempts } from '../repositories/otp';
-import { findRoleByKey, assignRoleToUser } from '../repositories/roles';
-import { logAudit } from '../repositories/audit';
-import { q } from '../repositories/db';
-import { hashPassword, verifyPassword, generateOtp } from '../crypto';
-import { signAccessToken, signRefreshToken } from '../jwt';
-import { authenticateJwt, AuthContext, AuthHttpError } from '../middleware';
+import { createOrganization } from '../repositories/organizations.js';
+import { createWorkspace } from '../repositories/workspaces.js';
+import { createUser, findUserByEmail, verifyEmail, updatePassword } from '../repositories/users.js';
+import { createSession, findSessionByRefreshToken, rotateRefreshToken } from '../repositories/sessions.js';
+import { createOtpRecord, findActiveOtp, markOtpConsumed, incrementOtpAttempts } from '../repositories/otp.js';
+import { findRoleByKey, assignRoleToUser } from '../repositories/roles.js';
+import { logAudit } from '../repositories/audit.js';
+import { q } from '../repositories/db.js';
+import { hashPassword, verifyPassword, generateOtp } from '../crypto.js';
+import { signAccessToken, signRefreshToken } from '../jwt.js';
+import { authenticateJwt, AuthContext, AuthHttpError } from '../middleware.js';
+import { tokenDenylist } from '../tokenDenylist.js';
+import { withRefreshLock } from '../utils/refreshLock.js';
 import {
  RegisterEmailSchema, LoginSchema, PhoneOtpRequestSchema, PhoneOtpVerifySchema,
  PasswordResetRequestSchema, PasswordResetSchema, RefreshTokenSchema,
  MfaEnrollSchema, MfaVerifySchema,
 } from '@nova/auth-types';
 
-const router = createRouter();
+const router: Router = createRouter();
 
 function generateSecret(): string {
  const bytes = crypto.getRandomValues(new Uint8Array(20));
@@ -254,7 +256,7 @@ router.post('/password-reset/request', async (req: Request, res: Response, next:
 router.post('/password-reset/confirm', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
  try {
  const parsed = PasswordResetSchema.parse(req.body);
- const rows = await q<{ id: string; user_id: string; token_hash: string }>(
+ const { rows } = await q<{ id: string; user_id: string; token_hash: string }>(
  'SELECT id, user_id, token_hash FROM password_reset_tokens WHERE consumed = false AND expires_at > now() LIMIT 200'
  );
 
@@ -306,7 +308,7 @@ router.post('/mfa/verify', authenticateJwt, async (req: Request, res: Response, 
 router.get('/me', authenticateJwt, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
  try {
  const ctx = (req as unknown as { auth: AuthContext }).auth;
- const user = (req as unknown as { user }).user;
+ const user = (req as unknown as { user: { id: string; email: string } }).user;
  res.json({
  id: user.id, email: user.email,
  orgId: ctx.orgId, workspaceId: ctx.workspaceId,
@@ -315,6 +317,38 @@ router.get('/me', authenticateJwt, async (req: Request, res: Response, next: Nex
  });
  } catch (err) {
  next(err instanceof Error ? err : new Error('Failed to fetch profile'));
+ }
+});
+
+// ---- POST /auth/logout ----
+// Revokes the presented access token by adding its jti to the in-memory denylist.
+// Subsequent requests using the same token will fail at the auth middleware.
+
+router.post('/logout', authenticateJwt, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+ try {
+ const ctx = (req as unknown as { auth: AuthContext }).auth;
+ const authHeader = req.headers.authorization ?? '';
+ const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+
+ if (!token) {
+ return next(problem(400, 'Bad Request', 'Missing access token'));
+ }
+
+ try {
+ const { verifyAccessToken } = await import('../jwt.js');
+ const payload = verifyAccessToken(token);
+ if (payload.jti && payload.sub) {
+ const expMs = typeof payload.exp === 'number' ? payload.exp * 1000 : Date.now() + 900_000;
+ tokenDenylist.revoke(payload.jti, payload.sub, expMs);
+ }
+ } catch {
+ // Token already invalid or expired — that's acceptable for logout
+ }
+
+ await logAudit({ organizationId: ctx.orgId, actorUserId: ctx.userId, action: 'user.logout', resourceType: 'session' });
+ res.status(204).send();
+ } catch (err) {
+ next(err instanceof Error ? err : new Error('Logout failed'));
  }
 });
 

@@ -2,7 +2,6 @@
  * Minimal PostgreSQL pool + query helpers scoped to @nova/auth.
  */
 import pg from 'pg';
-import { getPool as getApiPool } from '../../api/src/db/connection';
 
 const { Pool } = pg;
 
@@ -35,8 +34,10 @@ export async function qOne<T = unknown>(
 }
 
 export async function qVal(sql: string, params?: unknown[]): Promise<unknown> {
- const { rows } = await q(sql, params);
- return rows[0]?.[Object.keys(rows[0])[0]] ?? null;
+ const { rows } = await q<Record<string, unknown>>(sql, params);
+ const first = rows[0];
+ if (!first) return null;
+ return first[Object.keys(first)[0]] ?? null;
 }
 
 export async function closePool(): Promise<void> {

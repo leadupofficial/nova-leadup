@@ -31,15 +31,13 @@ import 'dotenv/config';
 
 import express from 'express';
 import compression from 'compression';
-import { validateEnv } from './utils/env';
+import { validateEnv } from './utils/env.js';
 void validateEnv();
-import Redis from 'ioredis';
 import authRoutes from './routes/authRoutes.js';
 import orgRoutes from './routes/orgRoutes.js';
 import apiKeyRoutes, { authenticateApiKey } from './routes/apiKeyRoutes.js';
-import { authenticateJwt, errorHandler } from './middleware.js';
+import { authenticateJwt, errorHandler, authLimiter, apiLimiter } from './middleware.js';
 import type { AuthContext, AuthUser } from './middleware.js';
-import { rateLimitMiddleware } from './ratelimit.js';
 
 // ─── Runtime Auth Utilities ────────────────────────────────────────────────────
 
@@ -75,11 +73,13 @@ app.use((req, _res, next) => {
  next();
 });
 
-// Rate limiting (IP-based, per endpoint)
-app.use(rateLimitMiddleware as any);
+// Rate limiting (per-IP with Redis store)
+app.use(apiLimiter);
 
-// Mount routes
-app.use('/auth', authRoutes);
+// Auth routes: stricter limit (5 per 15 min per IP)
+app.use('/auth', authLimiter, authRoutes);
+
+// All other routes: generic rate limit
 app.use('/orgs', authenticateJwt, orgRoutes);
 app.use('/api-keys', authenticateJwt, apiKeyRoutes);
 

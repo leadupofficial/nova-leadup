@@ -1,19 +1,19 @@
-import express from 'express';
+import express, { type Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import { userRoutes } from './routes/users';
-import { orgRoutes } from './routes/organizations';
-import { adminHealthRoutes } from './routes/adminHealth';
-import { auditRoutes } from './routes/auditEvents';
-import { incidentRoutes } from './routes/incidents';
-import { featureFlagRoutes } from './routes/featureFlags';
-import { costUsageRoutes } from './routes/costUsage';
-import { policyRuleRoutes } from './routes/policyRules';
-import { roleRoutes } from './routes/roles';
-import { workspaceRoutes } from './routes/workspaces';
+import { userRoutes } from './routes/users.js';
+import { orgRoutes } from './routes/organizations.js';
+import { adminHealthRoutes } from './routes/adminHealth.js';
+import { auditEventsRouter } from './routes/auditEvents.js';
+import { incidentsRouter } from './routes/incidents.js';
+import { featureFlagRoutes } from './routes/featureFlags.js';
+import { costUsageRoutes } from './routes/costUsage.js';
+import { policyRuleRoutes } from './routes/policyRules.js';
+import { roleRoutes } from './routes/roles.js';
+import { workspaceRoutes } from './routes/workspaces.js';
 
-const app = express();
+const app: Express = express();
 const PORT = process.env.PORT || 3007;
 
 app.use(helmet());
@@ -25,8 +25,8 @@ app.get('/health/live', (_req, res) => res.json({ status: 'alive', timestamp: ne
 app.use('/api/admin', adminHealthRoutes);
 app.use('/api/admin/users', userRoutes);
 app.use('/api/admin/orgs', orgRoutes);
-app.use('/api/admin/audit', auditRoutes);
-app.use('/api/admin/incidents', incidentRoutes);
+app.use('/api/admin/audit', auditEventsRouter);
+app.use('/api/admin/incidents', incidentsRouter);
 app.use('/api/admin/feature-flags', featureFlagRoutes);
 app.use('/api/admin/cost', costUsageRoutes);
 app.use('/api/admin/policies', policyRuleRoutes);

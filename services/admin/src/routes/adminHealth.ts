@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-const router = Router();
+const router: Router = Router();
 
 router.get('/live', (_req, res) => {
  res.json({ status: 'alive', timestamp: new Date().toISOString() });

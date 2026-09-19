@@ -7,20 +7,51 @@
  * SECURITY: Uses proper JWT verification with the gateway's signing key.
  */
 
-import jwt from 'jsonwebtoken';
+import jwt, { type Algorithm } from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
 import { IncomingMessage } from 'http';
-import { tokenDenylist } from './token-denylist';
+import { tokenDenylist } from './token-denylist.js';
 
 // Re-export secure random utilities for convenience
-export { generateSessionId, generateConversationId, secureRandomHex } from './secure-random';
+export { generateSessionId, generateConversationId, secureRandomHex } from './secure-random.js';
+
+/**
+ * Extract Bearer token from Authorization header or Sec-WebSocket-Protocol.
+ *
+ * @param req - The incoming request
+ * @returns The extracted token or null
+ */
+function extractToken(req: Request | IncomingMessage): string | null {
+ // Check standard Authorization header first
+ const authHeader = 'headers' in req ? req.headers.authorization : undefined;
+ if (authHeader?.startsWith('Bearer ')) {
+ return authHeader.slice(7);
+ }
+
+ // Check Sec-WebSocket-Protocol header (WebSocket connections)
+ const wsProtocol = 'headers' in req ? req.headers['sec-websocket-protocol'] : undefined;
+ if (wsProtocol?.startsWith('Bearer ')) {
+ return wsProtocol.slice(7);
+ }
+
+ // Check query parameter (fallback)
+ const url = 'url' in req ? req.url : undefined;
+ if (url) {
+ const queryMatch = url.match(/[?&]token=([^&]+)/);
+ if (queryMatch) {
+ return decodeURIComponent(queryMatch[1]);
+ }
+ }
+
+ return null;
+}
 
 /**
  * Configuration for JWT authentication.
  */
 export interface JwtAuthConfig {
  secret: string;
- algorithms?: string[];
+ algorithms?: Algorithm[];
  issuer?: string;
  audience?: string;
 }
@@ -51,37 +82,6 @@ export function createJwtAuthMiddleware(config: JwtAuthConfig) {
  } = config;
 
  /**
- * Extract Bearer token from Authorization header or Sec-WebSocket-Protocol.
- *
- * @param req - The incoming request
- * @returns The extracted token or null
- */
- function extractToken(req: Request | IncomingMessage): string | null {
- // Check standard Authorization header first
- const authHeader = 'headers' in req ? req.headers.authorization : undefined;
- if (authHeader?.startsWith('Bearer ')) {
- return authHeader.slice(7);
- }
-
- // Check Sec-WebSocket-Protocol header (WebSocket connections)
- const wsProtocol = 'headers' in req ? req.headers['sec-websocket-protocol'] : undefined;
- if (wsProtocol?.startsWith('Bearer ')) {
- return wsProtocol.slice(7);
- }
-
- // Check query parameter (fallback)
- const url = 'url' in req ? req.url : undefined;
- if (url) {
- const queryMatch = url.match(/[?&]token=([^&]+)/);
- if (queryMatch) {
- return decodeURIComponent(queryMatch[1]);
- }
- }
-
- return null;
- }
-
- /**
  * Verify and decode a JWT token.
  *
  * @param token - The JWT token to verify
@@ -100,7 +100,7 @@ export function createJwtAuthMiddleware(config: JwtAuthConfig) {
  }
  }
 
- return (req: Request, res: Response, next: NextFunction) => {
+ return async (req: Request, res: Response, next: NextFunction) => {
  // Allow preflight OPTIONS requests
  if (req.method === 'OPTIONS') {
  return next();
