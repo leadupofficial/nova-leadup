@@ -136,24 +136,40 @@ sensitive permission, and is the more trustworthy product.
 
 ### Phase 0 — Clean the foundation  *(~1–2 days, do this first)*
 
-- Remove 14 dead Flutter deps and 3 dead server deps.
+- ~~Remove the dead Flutter deps~~ — **done**, 19 removed.
 - Delete or archive the 5 dead services.
-- Ship **arm64-only**.
 - Replace the `console.log` logger with real pino.
 
-**Outcome:** APK ~55 MB smaller, dependency list honest, logs parseable. **This phase is
-a prerequisite for measuring every later phase.**
+**Outcome:** dependency list honest, logs parseable, download 17% smaller. **This phase
+is a prerequisite for measuring every later phase.**
 
-Native libs today total 93.8 MB:
+#### APK size — corrected
+
+An earlier draft of this file claimed the download was "101 MB" and that arm64-only
+would save ~55 MB. **That was wrong, and by a factor of six.** The build already
+emits per-ABI splits, so a real arm64 phone downloads `app-arm64-v8a-release.apk`.
+The 101 MB figure is the *universal* artifact, used only for sideloading.
+
+Measured before and after removing the dead dependencies:
+
+| Artifact | Before | After |
+|---|---|---|
+| **arm64 split (what users download)** | **53.3 MB** | **44.0 MB** |
+| universal (sideload) | 101.4 MB | 77.9 MB |
+| armeabi-v7a split | 26.7 MB | 19.9 MB |
+| x86_64 split | 36.3 MB | 28.2 MB |
+
+So the real win is **9.3 MB, 17% smaller**, not 55 MB. Rive and SQLite are gone
+entirely. What remains in the arm64 split:
 
 ```
-arm64-v8a      45.8 MB   ← real phones
-x86_64         28.8 MB   ← emulator-only
-armeabi-v7a    19.2 MB   ← 32-bit devices
+17.4 MB  libonnxruntime.so   ← the wake-word model; now the largest single component
+11.2 MB  libflutter.so
+ 8.0 MB  libapp.so
 ```
 
-Dropping Rive (21.4 MB) and x86_64 leaves ~38.5 MB — **about 55 MB off a 101 MB
-download**, no feature lost.
+The wake-word runtime is now the biggest thing in the app, so further size work
+means evaluating a lighter engine, not more pruning.
 
 ---
 
