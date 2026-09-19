@@ -91,12 +91,111 @@ function isoDateInUserZone(date: Date): string {
 	return `${read('year')}-${read('month')}-${read('day')}`;
 }
 
+/** One open task as the grounding read saw it. */
+export interface TaskFact {
+	id: string;
+	title: string;
+	status: string;
+	/** Coerced to null so an absent column reads as "no due date", not undefined. */
+	dueAt: Date | null;
+}
+
+/** One undismissed reminder inside the grounding window. */
+export interface ReminderFact {
+	id: string;
+	title: string;
+	triggerAt: Date;
+}
+
+export interface MemoryFact {
+	id: string;
+	category: string;
+	content: string;
+	importance: number | null;
+}
+
+/**
+ * The same rows the rendered block is built from, kept structured.
+ *
+ * The briefing needs to *reason* about the snapshot — what is overdue, what is
+ * due today, which reminder is next — and doing that by re-parsing the rendered
+ * prompt text would be a second, divergent grounding read. Deriving it here
+ * costs one pass over rows that were already fetched, so chat grounding and the
+ * briefing can never disagree about the user's data.
+ *
+ * `overdueTasks`/`dueTodayTasks`/`laterTasks`/`undatedTasks` partition `tasks`;
+ * `upcomingReminders`/`pastReminders` partition `reminders`.
+ */
+export interface UserContextFacts {
+	tasks: TaskFact[];
+	overdueTasks: TaskFact[];
+	dueTodayTasks: TaskFact[];
+	/** Due on a future date, not today. */
+	laterTasks: TaskFact[];
+	undatedTasks: TaskFact[];
+	reminders: ReminderFact[];
+	upcomingReminders: ReminderFact[];
+	/** Already fired within the last day and never dismissed. */
+	pastReminders: ReminderFact[];
+	nextReminder: ReminderFact | null;
+	memories: MemoryFact[];
+}
+
 export interface UserContext {
 	/** The rendered block, or '' when the user has nothing worth injecting. */
 	text: string;
 	counts: { tasks: number; reminders: number; memories: number };
 	/** The shared "now" the snapshot was taken at, for the prompt. */
 	now: Date;
+	/** The structured view of the same rows, for callers that must reason. */
+	facts: UserContextFacts;
+}
+
+function emptyFacts(): UserContextFacts {
+	return {
+		tasks: [],
+		overdueTasks: [],
+		dueTodayTasks: [],
+		laterTasks: [],
+		undatedTasks: [],
+		reminders: [],
+		upcomingReminders: [],
+		pastReminders: [],
+		nextReminder: null,
+		memories: [],
+	};
+}
+
+/**
+ * Classifies one snapshot's tasks and reminders against `now`, in the same
+ * timezone the prompt header states. Kept separate from the query so the rules
+ * are testable without a database.
+ */
+export function classifyFacts(
+	facts: UserContextFacts,
+	now: Date,
+): UserContextFacts {
+	const today = isoDateInUserZone(now);
+	for (const task of facts.tasks) {
+		if (!task.dueAt) {
+			facts.undatedTasks.push(task);
+		} else if (task.dueAt.getTime() < now.getTime()) {
+			facts.overdueTasks.push(task);
+		} else if (isoDateInUserZone(task.dueAt) === today) {
+			facts.dueTodayTasks.push(task);
+		} else {
+			facts.laterTasks.push(task);
+		}
+	}
+
+	// `reminders` arrives ordered by `triggerAt` ascending, so the first one
+	// still in the future is the next one. A reminder that fired earlier today
+	// is not "next" — it is something that was missed, which is exactly what
+	// `pastReminders` is for.
+	facts.upcomingReminders = facts.reminders.filter((r) => r.triggerAt.getTime() > now.getTime());
+	facts.pastReminders = facts.reminders.filter((r) => r.triggerAt.getTime() <= now.getTime());
+	facts.nextReminder = facts.upcomingReminders[0] ?? null;
+	return facts;
 }
 
 /**
@@ -114,6 +213,7 @@ export async function buildUserContext(
 
 	const counts = { tasks: 0, reminders: 0, memories: 0 };
 	const sections: string[] = [];
+	const facts = emptyFacts();
 	// The three reads are independent, so they run together. Sequentially they
 	// sat directly in the latency path of every spoken turn — this runs before
 	// the model is even called — and three round trips where one would do is
@@ -124,12 +224,18 @@ export async function buildUserContext(
 				// `tasks` has no priority column — CreateTaskSchema accepts one, but
 				// the table does not store it, so selecting it would be a lie.
 				const rows = await db
-					.select({ title: tasks.title, status: tasks.status, dueAt: tasks.dueAt })
+					.select({ id: tasks.id, title: tasks.title, status: tasks.status, dueAt: tasks.dueAt })
 					.from(tasks)
 					.where(and(eq(tasks.userId, userId), inArray(tasks.status, ['pending', 'in_progress'])))
 					.orderBy(asc(tasks.dueAt), desc(tasks.createdAt))
 					.limit(l.maxTasks);
 				counts.tasks = rows.length;
+				facts.tasks = rows.map((t) => ({
+					id: t.id,
+					title: t.title,
+					status: t.status,
+					dueAt: t.dueAt ?? null,
+				}));
 				if (!rows.length) return null;
 				return `Open tasks:\n${rows
 					.map((t) => {
@@ -148,12 +254,17 @@ export async function buildUserContext(
 				// by more than a day, so the block stays about what is coming up.
 				const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 				const rows = await db
-					.select({ title: reminders.title, triggerAt: reminders.triggerAt, dismissed: reminders.dismissed })
+					.select({ id: reminders.id, title: reminders.title, triggerAt: reminders.triggerAt, dismissed: reminders.dismissed })
 					.from(reminders)
 					.where(and(eq(reminders.userId, userId), eq(reminders.dismissed, false), gte(reminders.triggerAt, since)))
 					.orderBy(asc(reminders.triggerAt))
 					.limit(l.maxReminders);
 				counts.reminders = rows.length;
+				facts.reminders = rows.map((r) => ({
+					id: r.id,
+					title: r.title,
+					triggerAt: r.triggerAt,
+				}));
 				if (!rows.length) return null;
 				return `Upcoming reminders:\n${rows
 					.map((r) => `- ${formatWhen(r.triggerAt)} — ${truncate(r.title, l.maxCharsPerItem)}`)
@@ -168,12 +279,18 @@ export async function buildUserContext(
 				// memories default to 'proposed', so this is the right filter rather
 				// than demanding 'approved'.
 				const rows = await db
-					.select({ content: memories.content, category: memories.category, importance: memories.importance })
+					.select({ id: memories.id, content: memories.content, category: memories.category, importance: memories.importance })
 					.from(memories)
 					.where(and(eq(memories.userId, userId), inArray(memories.status, ['proposed', 'approved', 'active', 'corrected'])))
 					.orderBy(desc(memories.importance), desc(memories.createdAt))
 					.limit(l.maxMemories);
 				counts.memories = rows.length;
+				facts.memories = rows.map((m) => ({
+					id: m.id,
+					category: m.category,
+					content: m.content,
+					importance: m.importance ?? null,
+				}));
 				if (!rows.length) return null;
 				return `Things you remember about the user:\n${rows
 					.map((m) => `- [${m.category}] ${truncate(m.content, l.maxCharsPerItem)}`)
@@ -188,9 +305,10 @@ export async function buildUserContext(
 		if (section) sections.push(section);
 	}
 
+	classifyFacts(facts, now);
 
 	if (!sections.length) {
-		return { text: '', counts, now };
+		return { text: '', counts, now, facts };
 	}
 
 	const header =
@@ -212,7 +330,7 @@ export async function buildUserContext(
 		text = `${text.slice(0, l.maxChars - 1)}…`;
 	}
 
-	return { text, counts, now };
+	return { text, counts, now, facts };
 }
 
 /**

@@ -86,6 +86,14 @@ class AnalyticsService {
   static const String eventVoiceSessionStart = 'voice_session_start';
   static const String eventApiError = 'api_error';
 
+  /// Daily briefing (§9.4). `enabled` on the toggle is the opt-in rate — the
+  /// only place it can be measured, because the preference is device-local.
+  static const String eventDailyBriefingEnabled = 'daily_briefing_enabled';
+
+  /// A briefing actually reached the speaker. Paired with the toggle above, it
+  /// gives §22.1's "per active user" counts for this feature.
+  static const String eventDailyBriefingSpoken = 'daily_briefing_spoken';
+
   final AnalyticsBackend _backend;
 
   bool _initialized = false;

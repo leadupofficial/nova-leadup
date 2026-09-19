@@ -32,6 +32,23 @@ abstract interface class ReminderNotifications {
     required bool exact,
   });
 
+  /// Schedules (or replaces) a notification that repeats every day at
+  /// `[hour]:[minute]` device-local time.
+  ///
+  /// This is the daily briefing's alarm (§9.4). It lives on this seam rather
+  /// than in a second wrapper so the app has exactly one
+  /// `FlutterLocalNotificationsPlugin`, one timezone database and one
+  /// exact-alarm permission check — the two features cannot drift on the parts
+  /// that are easy to get subtly wrong.
+  Future<void> scheduleDaily({
+    required int id,
+    required String title,
+    required String body,
+    required int hour,
+    required int minute,
+    required bool exact,
+  });
+
   /// Cancels the notification for [id]. Unknown ids are a no-op.
   Future<void> cancel(int id);
 }
@@ -51,6 +68,34 @@ int reminderNotificationId(String reminderId) {
     hash = (hash * 0x01000193) & 0x7fffffff;
   }
   return hash;
+}
+
+/// The next occurrence of `[hour]:[minute]` in [location], today or tomorrow.
+///
+/// Pure, so the daily-scheduling rule is unit-testable without a platform
+/// channel. A time that has already passed today rolls to tomorrow: scheduling
+/// it in the past would fire the notification immediately and then repeat a day
+/// late.
+tz.TZDateTime nextDailyOccurrence({
+  required int hour,
+  required int minute,
+  required tz.Location location,
+  DateTime? now,
+}) {
+  final current = now == null
+      ? tz.TZDateTime.now(location)
+      : tz.TZDateTime.from(now, location);
+  final scheduled = tz.TZDateTime(
+    location,
+    current.year,
+    current.month,
+    current.day,
+    hour,
+    minute,
+  );
+  return scheduled.isAfter(current)
+      ? scheduled
+      : scheduled.add(const Duration(days: 1));
 }
 
 /// The real scheduler, backed by `flutter_local_notifications`.
@@ -183,6 +228,45 @@ class FlutterLocalReminderNotifications implements ReminderNotifications {
   Future<void> cancel(int id) async {
     await initialize();
     await _plugin.cancel(id: id);
+  }
+
+  @override
+  Future<void> scheduleDaily({
+    required int id,
+    required String title,
+    required String body,
+    required int hour,
+    required int minute,
+    required bool exact,
+  }) async {
+    await initialize();
+    final details = AndroidNotificationDetails(
+      channelId,
+      channelName,
+      channelDescription: channelDescription,
+      importance: Importance.high,
+      priority: Priority.high,
+      category: AndroidNotificationCategory.reminder,
+      styleInformation: BigTextStyleInformation(body),
+    );
+    await _plugin.zonedSchedule(
+      id: id,
+      title: title,
+      body: body,
+      // The first occurrence, then `matchDateTimeComponents` repeats it daily at
+      // the same wall-clock time. Scheduling today's already-passed time without
+      // the rollover would fire immediately once and then never again.
+      scheduledDate: nextDailyOccurrence(
+        hour: hour,
+        minute: minute,
+        location: tz.local,
+      ),
+      notificationDetails: NotificationDetails(android: details),
+      androidScheduleMode: exact
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle,
+      matchDateTimeComponents: DateTimeComponents.time,
+    );
   }
 
   /// The first IANA zone whose current UTC offset matches the device's.

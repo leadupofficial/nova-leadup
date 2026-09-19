@@ -135,6 +135,8 @@ void main() {
       '/me/integrations',
       // Smart Notification Assistant (§5.21).
       '/me/notifications',
+      // Daily briefing (§9.4).
+      '/me/briefing',
       '/admin',
       '/translate',
       '/wakeword',

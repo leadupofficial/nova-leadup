@@ -16,6 +16,10 @@ class FakeReminderNotifications implements ReminderNotifications {
   final List<({int id, String body, DateTime when, bool exact})> scheduledCalls =
       <({int id, String body, DateTime when, bool exact})>[];
 
+  /// Every daily-repeating schedule call, in order.
+  final List<({int id, String body, int hour, int minute, bool exact})>
+  dailyCalls = <({int id, String body, int hour, int minute, bool exact})>[];
+
   /// Every cancelled id, in order.
   final List<int> cancelled = <int>[];
 
@@ -49,6 +53,19 @@ class FakeReminderNotifications implements ReminderNotifications {
   }
 
   @override
+  Future<void> scheduleDaily({
+    required int id,
+    required String title,
+    required String body,
+    required int hour,
+    required int minute,
+    required bool exact,
+  }) async {
+    scheduled.add(id);
+    dailyCalls.add((id: id, body: body, hour: hour, minute: minute, exact: exact));
+  }
+
+  @override
   Future<void> cancel(int id) async {
     scheduled.remove(id);
     cancelled.add(id);
@@ -59,6 +76,7 @@ class FakeReminderNotifications implements ReminderNotifications {
   void cancelAll() {
     scheduled.clear();
     scheduledCalls.clear();
+    dailyCalls.clear();
     cancelled.clear();
   }
 }

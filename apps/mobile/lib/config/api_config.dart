@@ -160,6 +160,9 @@ class ApiConfig {
   static String get memories => '$baseUrl/api/v1/memories';
   static String get reminders => '$baseUrl/api/v1/reminders';
   static String get notifications => '$baseUrl/api/v1/notifications';
+
+  /// The daily briefing (§9.4). Speakable text, composed server-side.
+  static String get briefing => '$baseUrl/api/v1/briefing';
   static String get activity => '$baseUrl/api/v1/activity';
   static String get recordings => '$baseUrl/api/v1/recordings';
   static String get tools => '$baseUrl/api/v1/tools';

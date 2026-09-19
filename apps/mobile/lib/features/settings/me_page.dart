@@ -180,6 +180,13 @@ class MePage extends ConsumerWidget {
                 ),
                 Divider(height: 1, color: c.border),
                 NovaListRow(
+                  title: 'Daily briefing',
+                  subtitle: 'Spoken summary of your day — off by default',
+                  icon: Icons.wb_sunny_outlined,
+                  onTap: () => context.push('/me/briefing'),
+                ),
+                Divider(height: 1, color: c.border),
+                NovaListRow(
                   title: 'Integrations',
                   subtitle: 'Connected services and available tools',
                   icon: Icons.extension_outlined,

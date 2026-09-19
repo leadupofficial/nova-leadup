@@ -850,3 +850,84 @@ class NovaConsentRecord {
     revokedAt: _parseDate(j['revokedAt']),
   );
 }
+
+// ─── Daily briefing ───────────────────────────────────────────────────────────
+
+/// The daily briefing (`GET /api/v1/briefing`, master document §9.4).
+///
+/// `text` is already composed and normalised server-side for speech: it carries
+/// no markdown, no bullet characters, no URLs and no emoji. The client's job is
+/// only to decide *when* to ask and to read it aloud.
+///
+/// [capabilities] is not decoration. The server reports which sources it
+/// actually had, so a screen can say honestly that NOVA has no calendar and no
+/// weather rather than implying a briefing that knows about meetings.
+class NovaBriefing {
+  const NovaBriefing({
+    required this.text,
+    this.source = 'grounded',
+    this.language = 'en',
+    this.guardRejection,
+    this.generatedAt,
+    this.counts = const <String, int>{},
+    this.capabilities = const <String, bool>{},
+  });
+
+  /// Speakable text.
+  final String text;
+
+  /// `model` when a model draft survived the server's grounding guard,
+  /// `grounded` when the text was rendered directly from the user's own rows.
+  final String source;
+
+  final String language;
+
+  /// Why a model draft was discarded, when one was.
+  final String? guardRejection;
+
+  final DateTime? generatedAt;
+
+  /// Counts behind the briefing: `overdue`, `dueToday`, `later`, `undated`,
+  /// `upcomingReminders`, `missedReminders`, `memories`.
+  final Map<String, int> counts;
+
+  /// Source flags: `calendar`, `weather`, `eveningRecap`, `locationNudges`,
+  /// `tasks`, `reminders`, `memories`.
+  final Map<String, bool> capabilities;
+
+  bool get isEmpty => text.trim().isEmpty;
+
+  int count(String name) => counts[name] ?? 0;
+
+  bool hasSource(String name) => capabilities[name] ?? false;
+
+  /// The sources the server does *not* have, in a stable order.
+  Iterable<String> get missingSources =>
+      capabilities.entries.where((e) => e.value == false).map((e) => e.key);
+
+  factory NovaBriefing.fromJson(Map<String, dynamic> j) => NovaBriefing(
+    text: (j['text'] ?? '').toString(),
+    source: (j['source'] ?? 'grounded').toString(),
+    language: (j['language'] ?? 'en').toString(),
+    guardRejection: j['guardRejection'] as String?,
+    generatedAt: _parseDate(j['generatedAt']),
+    counts: _intMap(j['counts']),
+    capabilities: _boolMap(j['capabilities']),
+  );
+
+  static Map<String, int> _intMap(Object? value) {
+    if (value is! Map) return const <String, int>{};
+    return <String, int>{
+      for (final entry in value.entries)
+        entry.key.toString(): _parseInt(entry.value),
+    };
+  }
+
+  static Map<String, bool> _boolMap(Object? value) {
+    if (value is! Map) return const <String, bool>{};
+    return <String, bool>{
+      for (final entry in value.entries)
+        entry.key.toString(): _parseBool(entry.value),
+    };
+  }
+}

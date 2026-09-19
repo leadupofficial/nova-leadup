@@ -245,6 +245,25 @@ class NovaApi {
     );
   }
 
+  // ─── Daily briefing ───────────────────────────────────────────────────────
+
+  /// Fetches the daily briefing (§9.4).
+  ///
+  /// The server returns text that is already speakable, so this method does no
+  /// formatting of its own — the caller only decides whether and when to read
+  /// it aloud. `language` is the app's language policy (`en`, `ta`, `hi`,
+  /// `tanglish`, `auto`), which the server uses to write the briefing in the
+  /// user's own language.
+  Future<NovaBriefing> getBriefing({String? language}) async {
+    final data = await _get(
+      ApiConfig.briefing,
+      query: {
+        if (language != null && language.isNotEmpty) 'language': language,
+      },
+    );
+    return NovaBriefing.fromJson(_asMap(data));
+  }
+
   // ─── Reminders ────────────────────────────────────────────────────────────
 
   Future<List<NovaReminder>> listReminders({int limit = 50}) async {

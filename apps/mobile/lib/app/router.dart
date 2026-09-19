@@ -9,6 +9,7 @@ import '../features/auth/auth_controller.dart';
 import '../features/auth/login_page.dart';
 import '../features/auth/register_page.dart';
 import '../features/activity/activity_page.dart';
+import '../features/briefing/briefing_page.dart';
 import '../features/converse/conversations_page.dart';
 import '../features/converse/converse_page.dart';
 import '../features/home/home_page.dart';
@@ -286,6 +287,13 @@ final routerProvider = Provider<GoRouter>((ref) {
                     name: 'notification-assistant',
                     builder: (context, state) =>
                         const NotificationAssistantPage(),
+                  ),
+                  // Daily briefing (§9.4). Device-local opt-in, so it sits with
+                  // the other Me settings.
+                  GoRoute(
+                    path: 'briefing',
+                    name: 'daily-briefing',
+                    builder: (context, state) => const DailyBriefingPage(),
                   ),
                 ],
               ),
