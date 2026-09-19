@@ -137,6 +137,11 @@ void main() {
       '/me/notifications',
       // Daily briefing (§9.4).
       '/me/briefing',
+      // Call-recording summaries (requirement 6c), a Me setting reachable from
+      // the UI. Deliberately not device-control: that screen is being changed by
+      // another agent and its pulse animation does not settle under this test's
+      // `pumpAndSettle`, which is not this feature's regression to own.
+      '/me/call-recordings',
       '/admin',
       '/translate',
       '/wakeword',

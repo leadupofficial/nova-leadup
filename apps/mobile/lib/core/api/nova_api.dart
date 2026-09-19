@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -638,6 +639,27 @@ class NovaApi {
     return NovaRecordingSummary.fromJson(map);
   }
 
+  /// The raw audio the server holds for [id], as bytes.
+  ///
+  /// `GET /recordings/:id/audio` is the read half of the same route
+  /// [uploadRecordingAudio] writes to. It exists so call-recording import can
+  /// probe the size of an existing recording without pulling its bytes; the
+  /// import path itself reads the user's local file and uploads through
+  /// [uploadRecordingAudio], never through here.
+  ///
+  /// The response is binary, so it is **not** unwrapped as the `{success, data}`
+  /// envelope: a JSON error body is detected and raised instead of being
+  /// returned as audio, which would otherwise mean uploading a JSON error
+  /// message as if it were a recording.
+  Future<Uint8List> readRecordingAudio(String id) {
+    return _guard<Uint8List>(
+      () => _network.get<Uint8List>(
+        ApiConfig.recordingAudio(id),
+        options: Options(responseType: ResponseType.bytes),
+      ),
+    );
+  }
+
   // ─── Tools & approvals ────────────────────────────────────────────────────
 
   Future<List<NovaToolDefinition>> listTools() async {
@@ -725,7 +747,13 @@ class NovaApi {
   }
 
   /// Returns the unwrapped `data` payload (object or list).
-  Future<dynamic> _guard(Future<Response<dynamic>> Function() call) async {
+  ///
+  /// Most routes answer JSON, so [T] is [dynamic] and [_unwrap] digs out `data`.
+  /// A binary route (`GET /recordings/:id/audio`) asks for `T == Uint8List`
+  /// instead: there is no envelope to unwrap, and the bytes are returned as they
+  /// arrived. A JSON error body is still turned into a [NovaApiException], so a
+  /// refused download can never be mistaken for audio.
+  Future<T> _guard<T>(Future<Response<dynamic>> Function() call) async {
     final Response<dynamic> response;
     try {
       response = await call();
@@ -737,7 +765,19 @@ class NovaApi {
         statusCode: e.response?.statusCode,
       );
     }
-    return _unwrap(response.data, response.statusCode);
+    if (T == Uint8List) {
+      final data = response.data;
+      if (data is Uint8List) return data as T;
+      if (data is List<int>) return Uint8List.fromList(data) as T;
+      // A JSON body on a binary route is an error, not audio.
+      _unwrap(data, response.statusCode);
+      throw NovaApiException(
+        'The server returned a body that is not audio '
+        '(HTTP ${response.statusCode}).',
+        statusCode: response.statusCode,
+      );
+    }
+    return _unwrap(response.data, response.statusCode) as T;
   }
 
   /// Like [_guard] but returns the unwrapped data without throwing on a

@@ -194,6 +194,13 @@ class MePage extends ConsumerWidget {
                 ),
                 Divider(height: 1, color: c.border),
                 NovaListRow(
+                  title: 'Call recordings',
+                  subtitle: 'Summarise recordings your dialer already saved',
+                  icon: Icons.voicemail_outlined,
+                  onTap: () => context.push('/me/call-recordings'),
+                ),
+                Divider(height: 1, color: c.border),
+                NovaListRow(
                   title: 'Integrations',
                   subtitle: 'Connected services and available tools',
                   icon: Icons.extension_outlined,

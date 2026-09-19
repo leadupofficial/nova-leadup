@@ -92,6 +92,18 @@ class NovaDeviceControl private constructor(private val context: Context) {
 
                 "media" -> result.success(media(stringArg(call, "action")))
 
+                // Meeting capture is done by the Flutter recorder (§5.11), not
+                // by Android. These ids exist so the three registries agree;
+                // if one is ever sent here, say so honestly rather than
+                // reporting a success for an intent that does not exist.
+                "startRecording", "stopRecording" -> result.success(
+                    failure(
+                        CODE_UNSUPPORTED,
+                        "Meeting recording is performed by the NOVA app itself, " +
+                            "not by an Android action. Nothing was changed on the device.",
+                    ),
+                )
+
                 else -> result.notImplemented()
             }
         } catch (t: Throwable) {
@@ -132,6 +144,11 @@ class NovaDeviceControl private constructor(private val context: Context) {
                 "granted" to granted,
                 "reason" to if (granted) null else DeviceControlCatalog.grantReason(action),
             )
+        // Meeting capture is executed in Dart, so it is not an Android
+        // capability and is not reported as one.
+        }.filter {
+            (it["capability"] as String) !=
+                DeviceControlCatalog.Capability.DART_EXECUTED.name.lowercase()
         }
 
         val panels = DeviceControlCatalog.SettingsPanel.entries.map { panel ->

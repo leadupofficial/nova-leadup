@@ -76,6 +76,19 @@ object DeviceControlCatalog {
         MEDIA_PAUSE("media_pause"),
         MEDIA_NEXT("media_next"),
         MEDIA_PREVIOUS("media_previous"),
+
+        /**
+         * Meeting capture (§5.11).
+         *
+         * **Executed in Dart, not by an Android intent.** The Flutter recorder
+         * opens the microphone, writes the file, uploads it and drives the
+         * server pipeline; Android is never asked to do any of it. These ids
+         * exist here only so the Dart, Kotlin and TypeScript registries agree on
+         * one vocabulary, and [NovaDeviceControl] answers an (impossible) call
+         * with an honest "not an Android action" failure rather than pretending.
+         */
+        START_RECORDING("start_recording"),
+        STOP_RECORDING("stop_recording"),
     }
 
     /**
@@ -85,8 +98,11 @@ object DeviceControlCatalog {
      *  * [DEEP_LINK_ONLY] — NOVA can only open the screen where the user changes
      *    it. The action itself is impossible for a third-party app.
      *  * [EXCLUDED] — deliberately not implemented (spec decision).
+     *  * [DART_EXECUTED] — Android does nothing; the Flutter app performs it
+     *    itself. It is excluded from the status payload so no native capability
+     *    is ever claimed for it.
      */
-    enum class Capability { FUNCTIONAL, DEEP_LINK_ONLY, EXCLUDED }
+    enum class Capability { FUNCTIONAL, DEEP_LINK_ONLY, EXCLUDED, DART_EXECUTED }
 
     /** A named Android Settings screen a deep link can open. */
     enum class SettingsPanel(val wireName: String, val intentAction: String) {
@@ -167,6 +183,9 @@ object DeviceControlCatalog {
      *    ("change account setting" → explicit confirm). DND also silently
      *    changes whether the user is reachable.
      *  * Media transport is L1 — local, instantly reversible playback control.
+     *  * [Action.START_RECORDING] is L3 — it opens the microphone and records
+     *    people, which §9.5 pairs with an explicit consent flow.
+     *  * [Action.STOP_RECORDING] is L1 — ending an action the user already began.
      *
      * `LEVELS` is a total map over [Action]; there is no default, so adding an
      * action without classifying it fails to compile rather than silently
@@ -183,6 +202,8 @@ object DeviceControlCatalog {
         Action.MEDIA_PAUSE to LEVEL_LOW_RISK_WRITE,
         Action.MEDIA_NEXT to LEVEL_LOW_RISK_WRITE,
         Action.MEDIA_PREVIOUS to LEVEL_LOW_RISK_WRITE,
+        Action.START_RECORDING to LEVEL_SENSITIVE,
+        Action.STOP_RECORDING to LEVEL_LOW_RISK_WRITE,
     )
 
     fun levelOf(action: Action): Int = LEVELS.getValue(action)
@@ -230,6 +251,11 @@ object DeviceControlCatalog {
         Action.MEDIA_NEXT,
         Action.MEDIA_PREVIOUS,
         -> Capability.FUNCTIONAL
+
+        // The recorder lives in Dart; Android is never asked to do this.
+        Action.START_RECORDING,
+        Action.STOP_RECORDING,
+        -> Capability.DART_EXECUTED
     }
 
     /**

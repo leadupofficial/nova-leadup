@@ -10,6 +10,7 @@ import '../features/auth/login_page.dart';
 import '../features/auth/register_page.dart';
 import '../features/activity/activity_page.dart';
 import '../features/briefing/briefing_page.dart';
+import '../features/call_recording/call_recording_page.dart';
 import '../features/converse/conversations_page.dart';
 import '../features/converse/converse_page.dart';
 import '../features/device_control/device_control_page.dart';
@@ -302,6 +303,15 @@ final routerProvider = Provider<GoRouter>((ref) {
                     path: 'device-control',
                     name: 'device-control',
                     builder: (context, state) => const DeviceControlPage(),
+                  ),
+                  // Call-recording summaries (requirement 6c). Device-local, and
+                  // deliberately not "call screening": it reads recordings the
+                  // user's own dialer already saved, in a folder they granted
+                  // through the Storage Access Framework.
+                  GoRoute(
+                    path: 'call-recordings',
+                    name: 'call-recordings',
+                    builder: (context, state) => const CallRecordingPage(),
                   ),
                 ],
               ),

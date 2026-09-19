@@ -1,5 +1,6 @@
 package com.leadup.nova
 
+import android.content.Intent
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 
@@ -16,6 +17,14 @@ import io.flutter.embedding.engine.FlutterEngine
  * project as using the deleted Android v1 embedding and refuse to build at all.
  */
 class MainActivity : FlutterFragmentActivity() {
+
+    /**
+     * The call-recording folder channel, kept only so [onActivityResult] can be
+     * forwarded to it. `ACTION_OPEN_DOCUMENT_TREE` (requirement 6c) is a system
+     * picker that only an Activity can launch and receive; every other NOVA
+     * channel is activity-free.
+     */
+    private var callRecordingFolder: NovaCallRecordingFolder? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -46,5 +55,28 @@ class MainActivity : FlutterFragmentActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             applicationContext,
         )
+
+        // Exposes the user's own call-recording folder to Dart
+        // (lib/features/call_recording/call_recording_platform.dart): the system
+        // folder picker plus `takePersistableUriPermission`, the audio files
+        // inside the chosen folder, and the bytes of one file the user selected.
+        // NOVA does not record, listen to, or screen a call — see
+        // CallRecordingFolderPolicy for why it cannot and does not.
+        callRecordingFolder = NovaCallRecordingFolder.registerChannels(
+            flutterEngine.dartExecutor.binaryMessenger,
+            this,
+            applicationContext,
+        )
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        // The folder channel answers the pending Dart future itself. A result it
+        // does not recognise is left to the superclass, so no plugin's handling
+        // is swallowed by adding this.
+        val consumed =
+            callRecordingFolder?.onActivityResult(requestCode, resultCode, data) ?: false
+        if (!consumed) {
+            super.onActivityResult(requestCode, resultCode, data)
+        }
     }
 }
