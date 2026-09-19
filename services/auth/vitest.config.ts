@@ -16,6 +16,10 @@ export default defineConfig({
 		passWithNoTests: true,
 		globals: true,
 		environment: 'node',
+		// bcryptjs is deliberately slow: the two hashPassword tests take ~2s each on an
+		// idle machine, which is close enough to the 5s default that they time out when
+		// turbo runs every package in parallel. This is load, not a hang.
+		testTimeout: 20000,
 		// Several suites import src/env.ts, which validates the environment at module
 		// load and throws "Required environment variables are not configured". These
 		// are test-only values sized to satisfy that schema (JWT/API keys >= 32 chars,
