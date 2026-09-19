@@ -98,7 +98,35 @@ export function toSpeakableText(text: string): string {
 		.replace(/^#{1,6}\s*/gm, '')
 		.replace(/\s+/g, ' ')
 		.trim();
-	return HAS_SPEAKABLE_CHAR.test(stripped) ? stripped : '';
+	const spoken = dropEmptyMinutes(stripped);
+	return HAS_SPEAKABLE_CHAR.test(spoken) ? spoken : '';
+}
+
+/**
+ * Rewrites `5:00` as `5`, so an on-the-hour time is read as a time.
+ *
+ * ElevenLabs' Flash models ship with text normalisation disabled — their docs
+ * say so, and re-enabling it is Enterprise-only — so clock times reach the
+ * model as digits. That is not uniformly handled:
+ *
+ *   English  "5:00 pm"  -> "five PM"        correct
+ *   Hindi    "5:00"     -> "पांच"             correct
+ *   Tamil    "5:00"     -> "ஐஞ்சர்"          wrong — a mangled non-word
+ *   Tamil    "5"        -> "ஐந்து"            correct ("five")
+ *
+ * Verified by synthesising each form and transcribing the audio back, so the
+ * fix is measured rather than assumed. Dropping `:00` leaves English and Hindi
+ * reading exactly as before, so this runs for every language.
+ *
+ * Only the on-the-hour case is handled. A time with minutes is still wrong in
+ * Tamil — "7:30" comes back as the English "seven thirty" inside an otherwise
+ * Tamil sentence, and none of the Tamil rewrites tried (`7 மணி 30 நிமிடம்`,
+ * `7.30`, spelled out) survived the model intact. The reliable fix for those is
+ * the one the ElevenLabs docs recommend: have the LLM write times out in words
+ * before they reach the synthesiser, rather than trying to patch digits here.
+ */
+function dropEmptyMinutes(text: string): string {
+	return text.replace(/(\d{1,2}):00(?=\D|$)/g, '$1');
 }
 
 /**
