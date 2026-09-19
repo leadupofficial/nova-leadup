@@ -50,6 +50,12 @@ apps/mobile/ios/fastlane/test_output/
 packages/shared-types/src/*.js
 packages/shared-types/src/*.d.ts.map
 packages/shared-types/packages/
+# Same failure, same fix, in packages/memory: running `tsc` on a file rather than
+# through `npm run build` ignores outDir and emits next to the source. Found
+# untracked after this session's typechecking; `git add .` would have swept it in.
+packages/memory/src/*.js
+packages/memory/src/*.d.ts
+packages/memory/src/*.d.ts.map
 # Byte-identical duplicate of packages/database/drizzle/0000_regular_colossus.sql.
 # `pnpm db:migrate` reads ./drizzle, so this copy is unused and misleading.
 packages/database/migrations/
