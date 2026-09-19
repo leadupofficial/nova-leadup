@@ -31,7 +31,13 @@ import { SttController, type SttUtteranceUsage } from './stt/controller.js';
 import { isAbortError } from './llm.js';
 import { runReply } from './reply.js';
 import { ToolApprovalBroker } from './tool-approval.js';
-import { logTurnCost } from './cost.js';
+import { logTurnCost, INPUT_BYTES_PER_SECOND } from './cost.js';
+import {
+	authorizeUsage,
+	recordUsage,
+	USAGE_METRICS,
+	type QuotaDecision,
+} from '../entitlements/index.js';
 import type { ChatMessage } from '../services/ai.js';
 
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
@@ -444,6 +450,39 @@ export class RealtimeVoiceSession {
 		this.energy.reset();
 		this.send({ type: 'final', text });
 
+		// ── Entitlement gate ───────────────────────────────────────────────
+		// The brief requires hard limits to be enforced server-side by
+		// entitlements, "never by prompting the model to behave within a limit".
+		// So the check happens here, before a single model or TTS token is paid
+		// for, and the refusal is a stable machine-readable code — the model is
+		// never told a limit exists.
+		//
+		// `amount: 1` is a "is there any allowance left?" probe, because the
+		// length of this turn is not known until it is over; the true seconds are
+		// metered after it (see `recordTurnUsage`). Worst case a caller overruns
+		// the plan by one turn, which is the honest trade for not refusing a turn
+		// mid-sentence.
+		const quota = await this.authorizeVoiceTurn();
+		if (quota && !quota.allowed) {
+			logger.info(
+				{ userId: this.user.id, plan: quota.plan, used: quota.used, limit: quota.limit },
+				'Realtime voice turn refused: voice allowance exhausted',
+			);
+			this.phase = 'idle';
+			this.send({
+				type: 'error',
+				code: quota.code,
+				message:
+					`Voice allowance reached for the ${quota.plan} plan ` +
+					`(${quota.used} of ${quota.limit} ${quota.unit} used this period).`,
+			});
+			// `done` still terminates the turn for the client's state machine; the
+			// error event is what says it failed. Same shape as the provider-error
+			// path below.
+			this.send({ type: 'done', text: '' });
+			return;
+		}
+
 		const turnId = ++this.turnSeq;
 		const controller = new AbortController();
 		const turn: ActiveTurn = { id: turnId, controller, reply: '' };
@@ -535,6 +574,11 @@ export class RealtimeVoiceSession {
 				ttsCharsByProvider: result.ttsCharsByProvider,
 			});
 
+			// Meter the voice minutes this turn actually consumed. Fire-and-forget:
+			// metering is off the reply's critical path and `recordUsage` never
+			// throws, so a slow or unavailable `usage_records` cannot fail a turn.
+			this.recordTurnUsage(sttUsage);
+
 			this.remember(text, result.text);
 			this.activeTurn = null;
 			this.endSpeaking();
@@ -562,6 +606,45 @@ export class RealtimeVoiceSession {
 			// the error event is what says it failed.
 			this.send({ type: 'done', text: turn.reply });
 		}
+	}
+
+	/**
+	 * The server-side entitlement gate for one spoken turn.
+	 *
+	 * Returns `null` when the check itself could not run, and the caller then
+	 * treats the turn as allowed: `checkQuota` already fails open on a store
+	 * error, and this second guard covers an unexpected throw. Locking every user
+	 * out of voice because the entitlement layer hiccuped would be a worse
+	 * failure than an unmetered turn, which is logged.
+	 */
+	private async authorizeVoiceTurn(): Promise<QuotaDecision | null> {
+		try {
+			return await authorizeUsage(this.user.id, USAGE_METRICS.voiceSeconds, 1);
+		} catch (err) {
+			logger.warn(
+				{ err, userId: this.user.id },
+				'Voice entitlement check failed; allowing the turn',
+			);
+			return null;
+		}
+	}
+
+	/**
+	 * Meters the caller audio this turn consumed.
+	 *
+	 * Metric: `voice_seconds`, unit `seconds`. The quantity is the PCM the turn
+	 * sent to the recogniser (`sttUsage.providers[].bytes`), divided by the known
+	 * input rate — the socket protocol fixes input at 16 kHz mono s16le, so this
+	 * is exact rather than an estimate, and it is the same quantity the STT leg of
+	 * `logTurnCost` already reports. Seconds, not minutes: a turn is typically
+	 * 5–30 s and an integer minute meter would round nearly every turn to zero and
+	 * silently allow unlimited use.
+	 */
+	private recordTurnUsage(sttUsage: SttUtteranceUsage | null): void {
+		const bytes = (sttUsage?.providers ?? []).reduce((sum, entry) => sum + entry.bytes, 0);
+		const seconds = Math.round(bytes / INPUT_BYTES_PER_SECOND);
+		if (seconds <= 0) return;
+		void recordUsage(this.user.id, USAGE_METRICS.voiceSeconds, seconds);
 	}
 
 	private endSpeaking(): void {

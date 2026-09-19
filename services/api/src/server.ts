@@ -17,12 +17,14 @@ import { activityRoutes } from './routes/activity.js';
 import { toolsRoutes } from './routes/tools.js';
 import { consentRoutes } from './routes/consent.js';
 import { notificationsRoutes } from './routes/notifications.js';
+import { briefingRoutes } from './routes/briefing.js';
 import { settingsRouter as settingsRoutes } from './routes/settings.js';
 import { streamingRoutes } from './routes/streaming.js';
 import { voiceRoutes } from './routes/voice.js';
 import { healthRoutes } from './routes/health.js';
 import { biometricRoutes } from './routes/biometric.js';
 import adminRoutes from './routes/admin.js';
+import subscriptionsRoutes from './routes/subscriptions.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { rateLimitMiddleware } from './middleware/rateLimit.js';
 import { attachRealtimeVoice } from './realtime/index.js';
@@ -67,11 +69,18 @@ apiV1.use('/activity', activityRoutes);
 apiV1.use('/tools', toolsRoutes);
 apiV1.use('/consent', consentRoutes);
 apiV1.use('/notifications', notificationsRoutes);
+// The daily briefing (§9.4). Opt-in on the client; this route only answers when
+// asked, and returns speakable text plus the list of sources it actually had.
+apiV1.use('/briefing', briefingRoutes);
 apiV1.use('/settings', settingsRoutes);
 apiV1.use('/streaming', streamingRoutes);
 apiV1.use('/voice', voiceRoutes);
 apiV1.use('/biometric', biometricRoutes);
 apiV1.use('/admin', adminRoutes);
+// `subscriptions.ts` existed but was never mounted, so `GET /api/v1/subscriptions`
+// was a 404 while the route file claimed to answer 501. Mounted here alongside
+// the rest of the API surface.
+apiV1.use('/subscriptions', subscriptionsRoutes);
 
 app.use('/api/v1', apiV1);
 

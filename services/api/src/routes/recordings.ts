@@ -21,6 +21,12 @@ import { HttpError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
 import { validate } from '../middleware/validate.js';
 import {
+	USAGE_METRICS,
+	getQuotaStore,
+	recordUsage,
+	requireEntitlement,
+} from '../entitlements/index.js';
+import {
 	CreateRecordingSchema,
 	UpdateRecordingSchema,
 	RecordingListQuerySchema,
@@ -114,7 +120,23 @@ router.get('/', authenticate, validate(RecordingListQuerySchema, 'query'), async
 	} catch (err) { next(err); }
 });
 
-router.post('/', authenticate, validate(CreateRecordingSchema), async (req: AuthenticatedRequest, res, next) => {
+/**
+ * Recording creation is entitlement-gated on `recording_seconds`.
+ *
+ * The gate is server-side and reads only the caller's plan and current-period
+ * meter; the model is never involved. The *amount* metered is the client-reported
+ * `durationSeconds`, because this service does not yet measure the uploaded audio
+ * (the upload pipeline writes a placeholder `storage_key` and is not wired). The
+ * enforcement decision is unaffected by that: the gate asks whether any
+ * allowance remains, so an under-reported duration makes the meter optimistic but
+ * cannot unlock a plan whose allowance is already spent.
+ */
+router.post(
+	'/',
+	authenticate,
+	requireEntitlement(getQuotaStore, USAGE_METRICS.recordingSeconds),
+	validate(CreateRecordingSchema),
+	async (req: AuthenticatedRequest, res, next) => {
 	try {
 		const body = (req as any).validatedBody as z.infer<typeof CreateRecordingSchema>;
 		const db = getDb();
@@ -137,10 +159,17 @@ router.post('/', authenticate, validate(CreateRecordingSchema), async (req: Auth
 			updatedAt: now,
 		}).returning();
 
+		// Meter what was consumed. Fire-and-forget: metering never fails the write
+		// it measures (`recordUsage` swallows and logs).
+		if (typeof body.durationSeconds === 'number') {
+			void recordUsage(userId, USAGE_METRICS.recordingSeconds, body.durationSeconds);
+		}
+
 		logger.info({ recordingId: recording.id, userId }, 'Recording created');
 		res.status(201).json({ success: true, data: recording });
 	} catch (err) { next(err); }
-});
+	},
+);
 
 router.get('/:id/summary', authenticate, async (req: AuthenticatedRequest, res, next) => {
 	try {
