@@ -26,6 +26,7 @@ import { SentenceChunker } from './sentence-chunker.js';
 import { openSpeechStream, toSpeakableText } from './tts.js';
 import { isAbortError } from './llm.js';
 import { runStreamingAssistantLoop } from './tool-loop.js';
+import type { ToolApprovalRequest } from './tool-approval.js';
 
 export interface ReplyHandlers {
 	/** A model delta. */
@@ -44,7 +45,13 @@ export interface ReplyHandlers {
 	 */
 	onTtsFallback?(info: { from: string; to: string; reason: string }): void;
 	/** A write tool ran, for the client to acknowledge. */
-	onTool?(call: { name: string; ok: boolean; summary: string }): void;
+	onTool?(call: {
+		name: string;
+		ok: boolean;
+		summary: string;
+		/** Set when the outcome was the approval answer, not the tool itself. */
+		approval?: 'rejected' | 'timeout' | 'cancelled' | 'payload_mismatch' | 'unbound';
+	}): void;
 	/** True once the caller has cancelled this reply. */
 	isCancelled(): boolean;
 }
@@ -58,6 +65,16 @@ export interface ReplyOptions {
 	userText: string;
 	signal: AbortSignal;
 	handlers: ReplyHandlers;
+	/**
+	 * The turn this reply belongs to, echoed on approval requests so an answer
+	 * can be matched to the turn that asked.
+	 */
+	turnId?: number;
+	/**
+	 * Asks the user to confirm a side-effecting tool. Passed straight to the tool
+	 * loop; absent only in tests that exercise the loop without a socket.
+	 */
+	approval?: ToolApprovalRequest;
 }
 
 export interface ReplyResult {
@@ -189,8 +206,15 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 			maxTokens: 1024,
 			temperature: 0.7,
 			signal,
+			turnId: options.turnId,
+			approval: options.approval,
 			onToolCall: (call) =>
-				handlers.onTool?.({ name: call.name, ok: call.ok, summary: call.summary }),
+				handlers.onTool?.({
+					name: call.name,
+					ok: call.ok,
+					summary: call.summary,
+					approval: call.approvalReason,
+				}),
 		},
 		(delta) => {
 			if (firstTokenMs === null) firstTokenMs = Date.now() - modelStartedAt;

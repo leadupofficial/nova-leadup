@@ -11,6 +11,11 @@
  *   {"type":"stop"}                  user pressed stop — finalise the utterance now
  *   {"type":"text","text":"…"}       typed input through the same pipeline
  *   {"type":"cancel"}                abort the turn in flight
+ *   {"type":"approval_response","approvalId":"…","approve":true|false,"turnId":N}
+ *                                    the user answered the confirmation sheet for
+ *                                    a side-effecting tool. `turnId` is echoed
+ *                                    so a late answer cannot be paired with a
+ *                                    later turn.
  *
  * Server → client
  *   {"type":"ready"}
@@ -29,6 +34,15 @@
  *   {"type":"token","text":"…"}      LLM delta
  *   {"type":"sentence","text":"…","index":N}  one sentence handed to TTS
  *   binary frame                    MP3 audio for the current sentence
+ *   {"type":"approval_request","approvalId":"…","tool":"…","level":1,
+ *    "summary":"…","input":{…},"expiresAt":"…"}
+ *                                    a side-effecting tool is about to run and
+ *                                    the user must confirm it. Carries the
+ *                                    resolved arguments verbatim, so the sheet
+ *                                    shows exactly what will happen (§5.7), and
+ *                                    an id, so the answer is bound to this
+ *                                    request and not a later turn. Until it is
+ *                                    answered, that tool does not execute.
  *   {"type":"speaking","value":true|false}
  *   {"type":"done","text":"…"}       the full reply
  *   {"type":"error","code":"…","message":"…"}
@@ -58,6 +72,17 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
 	z.object({ type: z.literal('stop') }),
 	z.object({ type: z.literal('text'), text: z.string().min(1).max(4000) }),
 	z.object({ type: z.literal('cancel') }),
+	z.object({
+		type: z.literal('approval_response'),
+		// The id from the `approval_request` being answered. Bounded because it
+		// is echoed straight into a refusal log line.
+		approvalId: z.string().min(1).max(128),
+		approve: z.boolean(),
+		// Optional because the id is already unique; when present it must match
+		// the turn that is waiting, which is what stops a replayed answer from a
+		// previous turn being accepted for a new one.
+		turnId: z.number().int().nonnegative().optional(),
+	}),
 ]);
 
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
@@ -76,7 +101,48 @@ export type ServerEvent =
 	 * the reply is still being written — a voice user who says "remind me"
 	 * otherwise gets no sign that anything was recorded until the answer.
 	 */
-	| { type: 'tool'; name: string; ok: boolean; summary: string }
+	| {
+			type: 'tool';
+			name: string;
+			ok: boolean;
+			summary: string;
+			/**
+			 * Set when the tool did not run because of the approval answer
+			 * rather than because the tool failed — a declined sheet, no answer
+			 * in time, a cancelled turn, or arguments that changed after
+			 * approval. The client shows that plainly instead of reporting a
+			 * tool error.
+			 */
+			approval?:
+				| 'rejected'
+				| 'timeout'
+				| 'cancelled'
+				| 'payload_mismatch'
+				| 'unbound';
+	  }
+	/**
+	 * A side-effecting tool is waiting for the user's confirmation (§5.7).
+	 *
+	 * `input` is the resolved argument object the model produced, verbatim, so
+	 * the sheet can show exactly what will be sent. `approvalId` is unique per
+	 * request, and the server refuses to execute the tool until the matching
+	 * `approval_response` arrives — so a response can never be paired with a
+	 * later request, and a request that is never answered does not execute.
+	 */
+	| {
+			type: 'approval_request';
+			approvalId: string;
+			/** Turn this request belongs to; echo it on the response. */
+			turnId: number;
+			tool: string;
+			/** Permission level, 0–3, from the same registry the gate reads. */
+			level: number;
+			/** One-line, human-readable statement of the exact action. */
+			summary: string;
+			input: Record<string, unknown>;
+			/** ISO 8601 instant after which the request is refused. */
+			expiresAt: string;
+	  }
 	| { type: 'speaking'; value: boolean }
 	| { type: 'done'; text: string }
 	| { type: 'error'; code: string; message: string };

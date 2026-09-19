@@ -12,22 +12,58 @@
  * executor, same iteration cap, same conversation replay of assistant blocks
  * followed by matching tool_result blocks. The user id comes from the
  * authenticated socket, never from the model.
+ *
+ * The one deliberate difference is the approval gate. The typed path confirms
+ * before it sends the request, so its tools execute immediately; a spoken turn
+ * arrives as raw audio, and this loop is the last point at which a
+ * side-effecting call can still be stopped. Every tool at or above the
+ * configured level is therefore put to the user first and executed only when
+ * the answer approves *that exact payload* (see `./tool-approval.js`).
  */
-import { ASSISTANT_TOOLS, MAX_TOOL_ITERATIONS } from '../services/assistant-tools.js';
 import {
-	executeToolUses,
+	ASSISTANT_TOOLS,
+	MAX_TOOL_ITERATIONS,
+	toolPermissionLevel,
+	toolRequiresConfirmation,
+	type ToolPermissionLevel,
+} from '../services/assistant-tools.js';
+import {
+	executeAssistantTool,
 	toolSummaryText,
 	toToolResultBlock,
 	type ExecutedToolCall,
 } from '../services/assistant-tool-executor.js';
-import type { ChatMessage } from '../services/ai.js';
+import type { ChatMessage, ToolUseBlock } from '../services/ai.js';
 import { logger } from '../utils/logger.js';
+import {
+	describeToolApprovalBlock,
+	type ToolApprovalDecision,
+	type ToolApprovalRequest,
+} from './tool-approval.js';
 import { streamChatCompletion } from './llm.js';
 
 export interface StreamingToolLoopOptions {
 	systemPrompt: string;
 	/** Called once per executed write tool, so the caller can surface it. */
 	onToolCall?: (call: ExecutedToolCall) => void;
+	/**
+	 * Asks the user to confirm one side-effecting tool. Resolves with the answer
+	 * or, once the broker's timeout expires, with a refusal — this loop never
+	 * executes on an unanswered request and never reads "no answer" as approval.
+	 *
+	 * Omitting it disables the gate and is only for unit tests of the loop's
+	 * other behaviour.
+	 */
+	approval?: ToolApprovalRequest;
+	/** Turn this loop belongs to, so an answer can be matched back to it. */
+	turnId?: number;
+	/**
+	 * Permission level at or above which a tool must be confirmed. Defaults to
+	 * the configured threshold (`VOICE_TOOL_CONFIRM_LEVEL`, L1 during beta).
+	 * L0 is below every value in range, so a read-only tool can never be made to
+	 * prompt however this is set.
+	 */
+	confirmationLevel?: ToolPermissionLevel;
 	maxTokens?: number;
 	temperature?: number;
 	signal?: AbortSignal;
@@ -55,6 +91,33 @@ export async function runStreamingAssistantLoop(
 	let streamed = '';
 	let model = '';
 	let usage = { inputTokens: 0, outputTokens: 0 };
+
+	/**
+	 * Decides whether one tool may run, asking the user when its level requires
+	 * it. Returns the wording to refuse with, or null to execute.
+	 */
+	const gate = async (toolUse: ToolUseBlock): Promise<ReturnType<typeof describeToolApprovalBlock>> => {
+		const level = toolPermissionLevel(toolUse.name);
+		if (!toolRequiresConfirmation(toolUse.name, options.confirmationLevel)) {
+			// L0 must never prompt: a read-only tool that asked for confirmation
+			// would make the product worse, so this branch is a hard rule.
+			return null;
+		}
+		if (!options.approval) {
+			logger.warn(
+				{ tool: toolUse.name, level, userId },
+				'Voice tool requires confirmation but no approval channel is wired — refusing to execute',
+			);
+			return { reason: 'unbound', summary: `${toolUse.name} could not be confirmed, so nothing was run.` };
+		}
+
+		const decision: ToolApprovalDecision | null = await options.approval({
+			turnId: options.turnId ?? 0,
+			toolUse,
+			level,
+		});
+		return describeToolApprovalBlock(decision, toolUse);
+	};
 
 	for (let iteration = 1; iteration <= MAX_TOOL_ITERATIONS; iteration++) {
 		const completion = await streamChatCompletion(
@@ -89,7 +152,20 @@ export async function runStreamingAssistantLoop(
 			};
 		}
 
-		const results = await executeToolUses(userId, completion.toolUses);
+		// ── The approval gate ─────────────────────────────────────────
+		// One tool at a time, in the order the model asked for them, and each
+		// one resolved before the next is considered. A tool whose arguments
+		// change between the request and execution is refused by the broker's
+		// payload check, so an approval can never be reused for a different
+		// action (§7.5).
+		const results: ExecutedToolCall[] = [];
+		for (const toolUse of completion.toolUses) {
+			const blocked = await gate(toolUse);
+			const result = blocked
+				? await executeAssistantTool(userId, toolUse, { blocked })
+				: await executeAssistantTool(userId, toolUse);
+			results.push(result);
+		}
 		toolCalls.push(...results);
 		// Report as each one lands, not at the end: the point is to acknowledge
 		// the action while the reply is still being written.

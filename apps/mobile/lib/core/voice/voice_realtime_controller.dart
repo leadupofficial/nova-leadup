@@ -12,8 +12,10 @@ import 'voice_protocol.dart';
 import 'voice_realtime_state.dart';
 import 'voice_stream_capture.dart';
 import 'voice_streaming_playback.dart';
+import 'voice_tool_approval.dart';
 
 export 'voice_realtime_state.dart';
+export 'voice_tool_approval.dart';
 
 /// Owns the whole realtime voice turn: socket, microphone, event decoding,
 /// playback and the state machine.
@@ -89,6 +91,10 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
   /// a bare protocol code by [normalizeVoiceLanguage].
   Future<void> startTurn({String language = 'auto'}) async {
     final generation = _generation;
+    // A turn started from under an open confirmation sheet supersedes it: send
+    // the "no" before the cancel, so the tool is refused rather than left
+    // waiting on a request nobody is looking at any more.
+    decideApproval(approve: false);
     await _bargeIn(generation);
     if (generation != _generation) return;
 
@@ -148,6 +154,9 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
 
   /// Aborts the turn on the server and locally. Always safe to call.
   Future<void> cancel() async {
+    // Anything the sheet was asking is now moot: refuse it explicitly so the
+    // server does not hold the tool open until its timeout.
+    decideApproval(approve: false);
     _service.send(_encoder.cancel());
     await _capture.stop();
     await _playback.stop();
@@ -200,6 +209,32 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
   void dismissToolNotice() {
     if (state.toolNotice == null) return;
     _set(state.copyWith(toolNotice: null, clearToolNotice: true));
+  }
+
+  /// Answers the pending confirmation sheet (§5.7).
+  ///
+  /// Sends the decision for the exact request the sheet displayed and clears it
+  /// from the state. Every path that closes the sheet must call this: an
+  /// unanswered request is a refusal on the server, but a *rejection* that is
+  /// sent immediately is better than leaving the turn to wait out its timeout.
+  ///
+  /// Safe to call when nothing is pending (the turn may have been cancelled
+  /// while the sheet was open) — it then does nothing.
+  void decideApproval({required bool approve}) {
+    final pending = state.pendingApproval;
+    if (pending == null) return;
+    _service.send(
+      _encoder.approvalResponse(
+        approvalId: pending.approvalId,
+        approve: approve,
+        turnId: pending.turnId,
+      ),
+    );
+    _set(state.copyWith(clearPendingApproval: true));
+    debugPrint(
+      '[VoiceRealtime] tool approval ${approve ? 'granted' : 'denied'}: '
+      '${pending.tool} (${pending.approvalId})',
+    );
   }
 
   // ── event handling ────────────────────────────────────────────────────────
@@ -335,14 +370,63 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
           _fail(code: code, message: message);
         }
 
-      case VoiceToolEvent(:final name, :final ok, :final summary):
+      case VoiceToolEvent(:final name, :final ok, :final summary, :final approval):
         // A write tool ran. Announced immediately rather than waiting for the
         // reply, because the whole point is that the user said "remind me" and
         // wants to know it was recorded. The summary is the server's own wording
         // and already names the item and its time, so it is shown as-is.
+        //
+        // A tool the approval gate stopped is not a tool failure, and must not
+        // be reported as one: if the notice said "could not create reminder" the
+        // user would think something broke rather than that NOVA is waiting for
+        // them (or that their own "no" was honoured).
+        final stopped = approval != null;
         _set(
           state.copyWith(
-            toolNotice: ok ? summary : 'Could not $name — the action failed.',
+            toolNotice: stopped
+                ? summary
+                : (ok ? summary : 'Could not $name — the action failed.'),
+            toolNoticeStopped: stopped,
+          ),
+        );
+
+      case VoiceApprovalRequestEvent(
+        :final approvalId,
+        :final turnId,
+        :final tool,
+        :final level,
+        :final summary,
+        :final input,
+        :final expiresAt,
+      ):
+        // §5.7: a side-effecting action is held until the user confirms it. The
+        // server has already stopped; this surfaces the request so the screen
+        // can raise the Tool Confirmation sheet, and nothing is sent back until
+        // the user answers.
+        //
+        // Audio is stopped first: the sheet is a decision about what NOVA is
+        // about to do, and NOVA talking over it — or continuing to hold the
+        // microphone open — is exactly the "hands-free flow" in which a prompt
+        // would otherwise be missed. It also means the next thing the user says
+        // is an answer to the sheet, not a barge-in.
+        unawaited(_playback.stop());
+        unawaited(_deviceSpeech.stop());
+        unawaited(_capture.stop());
+        _set(
+          state.copyWith(
+            partial: '',
+            reply: '',
+            micActive: false,
+            phase: VoiceRealtimePhase.thinking,
+            pendingApproval: VoiceToolApproval(
+              approvalId: approvalId,
+              turnId: turnId,
+              tool: tool,
+              permissionLevel: level,
+              summary: summary,
+              input: input,
+              expiresAt: expiresAt,
+            ),
           ),
         );
 

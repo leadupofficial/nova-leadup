@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'voice_tool_approval.dart';
+
 /// The realtime voice state machine.
 ///
 /// `idle → listening → thinking → speaking → idle`, plus [error]. [connecting]
@@ -67,6 +69,8 @@ class VoiceRealtimeState {
     this.deviceLanguageTag,
     this.speechNotice,
     this.toolNotice,
+    this.toolNoticeStopped = false,
+    this.pendingApproval,
   });
 
   final VoiceRealtimePhase phase;
@@ -110,6 +114,24 @@ class VoiceRealtimeState {
   /// acknowledged before the reply is finished being written.
   final String? toolNotice;
 
+  /// True when [toolNotice] says a tool was *not* run because the approval was
+  /// declined or never answered — as opposed to the tool failing. The two need
+  /// different wording and different tone: one is the user's own decision being
+  /// honoured, the other is a fault.
+  final bool toolNoticeStopped;
+
+  /// A side-effecting tool the server is holding until the user answers.
+  ///
+  /// The turn is paused while this is set: the tool does not run and the reply
+  /// does not continue until [VoiceRealtimeController.decideApproval] sends an
+  /// answer. Non-null is what tells the Converse screen to raise the Tool
+  /// Confirmation sheet (§5.7).
+  final VoiceToolApproval? pendingApproval;
+
+  /// True while the turn is waiting on the user rather than on the network, so
+  /// the UI can say "waiting for you" instead of claiming NOVA is thinking.
+  bool get isAwaitingApproval => pendingApproval != null;
+
   /// True for the phases in which a turn is in flight and Stop makes sense.
   bool get isTurnActive =>
       phase == VoiceRealtimePhase.listening ||
@@ -131,11 +153,14 @@ class VoiceRealtimeState {
     String? deviceLanguageTag,
     String? speechNotice,
     String? toolNotice,
+    bool? toolNoticeStopped,
+    VoiceToolApproval? pendingApproval,
     String? errorMessage,
     String? errorCode,
     bool clearError = false,
     bool clearSpeechNotice = false,
     bool clearToolNotice = false,
+    bool clearPendingApproval = false,
   }) {
     return VoiceRealtimeState(
       phase: phase ?? this.phase,
@@ -154,6 +179,12 @@ class VoiceRealtimeState {
           ? null
           : (speechNotice ?? this.speechNotice),
       toolNotice: clearToolNotice ? null : (toolNotice ?? this.toolNotice),
+      toolNoticeStopped: clearToolNotice
+          ? false
+          : (toolNoticeStopped ?? this.toolNoticeStopped),
+      pendingApproval: clearPendingApproval
+          ? null
+          : (pendingApproval ?? this.pendingApproval),
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       errorCode: clearError ? null : (errorCode ?? this.errorCode),
     );
@@ -175,6 +206,8 @@ class VoiceRealtimeState {
       other.deviceLanguageTag == deviceLanguageTag &&
       other.speechNotice == speechNotice &&
       other.toolNotice == toolNotice &&
+      other.toolNoticeStopped == toolNoticeStopped &&
+      other.pendingApproval == pendingApproval &&
       listEquals(other.commits, commits);
 
   @override
@@ -191,6 +224,9 @@ class VoiceRealtimeState {
     speechSource,
     deviceLanguageTag,
     speechNotice,
+    toolNotice,
+    toolNoticeStopped,
+    pendingApproval,
     Object.hashAll(commits),
   );
 }

@@ -60,6 +60,17 @@ voiceToolNotice(
 ) {
   final notice = voice.toolNotice;
   if (notice == null || notice.isEmpty) return null;
+  // A tool the approval gate stopped is not a failure — the user declined it, or
+  // nobody answered in time. Reporting that in the failure tone would say
+  // something broke when in fact nothing ran, which was the whole point.
+  if (voice.toolNoticeStopped) {
+    return (
+      message: notice,
+      tone: colors.warning,
+      icon: Icons.shield_outlined,
+      onDismiss: onDismiss,
+    );
+  }
   final failed = notice.startsWith('Could not ');
   return (
     message: notice,

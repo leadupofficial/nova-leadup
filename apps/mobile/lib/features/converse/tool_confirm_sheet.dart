@@ -11,26 +11,70 @@ import '../../core/design/widgets/index.dart';
 ///
 /// The blueprint is explicit that this must be shown *before* any side-effecting
 /// action: "Tool Confirmation Sheet (shown before every side-effecting action)".
-/// It is driven by a real `tool_approvals` row, so the action the user confirms
-/// is the action the server has queued — the sheet cannot invent one.
+/// On the typed path it is driven by a real `tool_approvals` row, so the action
+/// the user confirms is the action the server has queued — the sheet cannot
+/// invent one.
+///
+/// The realtime voice path reuses the same sheet rather than growing a second
+/// confirmation UI: there the "queued action" is the pending tool call on the
+/// open socket, carried verbatim in the server's `approval_request` frame, and
+/// the decision is delivered by [onDecide] instead of the approvals REST route.
+/// Everything the user sees — the payload rows, the countdown, the wording —
+/// stays in one place.
 ///
 /// The export counts down ("Auto-expires in 2:00") because an approval row
 /// carries `expires_at`; the sheet surfaces that deadline, and when it lapses the
 /// confirm button disables rather than sending a stale action.
 class ToolConfirmSheet extends ConsumerStatefulWidget {
-  const ToolConfirmSheet({super.key, required this.approval});
+  const ToolConfirmSheet({
+    super.key,
+    required this.approval,
+    this.onDecide,
+    this.title,
+    this.consequence,
+    this.confirmLabel,
+  });
 
   final NovaToolApproval approval;
 
+  /// How the answer is delivered. Absent means the typed path: the decision is
+  /// written to the approvals REST route. Supplied by the voice path, where the
+  /// answer goes back over the realtime socket instead.
+  final Future<void> Function(bool approve)? onDecide;
+
+  /// Overrides the heading. Defaults to the tool's own name.
+  final String? title;
+
+  /// Overrides the sentence under the heading, which on the typed path talks
+  /// about "external actions" — wrong for a reminder.
+  final String? consequence;
+
+  /// Overrides the confirm button's label. The voice path says "run": nothing is
+  /// sent anywhere until the server executes the tool itself.
+  final String? confirmLabel;
+
   /// Raises the sheet for [approval]. Returns true when the user approved.
-  static Future<bool?> show(BuildContext context, NovaToolApproval approval) {
+  static Future<bool?> show(
+    BuildContext context,
+    NovaToolApproval approval, {
+    Future<void> Function(bool approve)? onDecide,
+    String? title,
+    String? consequence,
+    String? confirmLabel,
+  }) {
     return showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       isDismissible: false,
       enableDrag: false,
       backgroundColor: Theme.of(context).bottomSheetTheme.backgroundColor,
-      builder: (_) => ToolConfirmSheet(approval: approval),
+      builder: (_) => ToolConfirmSheet(
+        approval: approval,
+        onDecide: onDecide,
+        title: title,
+        consequence: consequence,
+        confirmLabel: confirmLabel,
+      ),
     );
   }
 
@@ -107,15 +151,16 @@ class _ToolConfirmSheetState extends ConsumerState<ToolConfirmSheet> {
             const SizedBox(height: NovaSpace.md),
 
             Text(
-              a.toolName,
+              widget.title ?? a.toolName,
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: NovaSpace.xs),
             Text(
-              a.permissionLevel == null
-                  ? 'This action needs your confirmation before it runs.'
-                  : 'Permission level ${a.permissionLevel} — this action needs '
-                        'your confirmation before it runs.',
+              widget.consequence ??
+                  (a.permissionLevel == null
+                      ? 'This action needs your confirmation before it runs.'
+                      : 'Permission level ${a.permissionLevel} — this action '
+                            'needs your confirmation before it runs.'),
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: NovaSpace.lg),
@@ -162,8 +207,14 @@ class _ToolConfirmSheetState extends ConsumerState<ToolConfirmSheet> {
                 const SizedBox(width: NovaSpace.xs),
                 Expanded(
                   child: Text(
-                    'External actions cannot be recalled. Review carefully '
-                    'before confirming.',
+                    // Never claim "external" for a write that stays in the
+                    // user's own account: an L1 reminder is recallable, and
+                    // saying otherwise teaches people to distrust the sheet.
+                    widget.approval.permissionLevel != null &&
+                            widget.approval.permissionLevel! < 3
+                        ? 'Approve only if this is what you asked NOVA to do.'
+                        : 'External actions cannot be recalled. Review '
+                              'carefully before confirming.',
                     style: Theme.of(
                       context,
                     ).textTheme.bodySmall!.copyWith(color: c.danger),
@@ -184,7 +235,9 @@ class _ToolConfirmSheetState extends ConsumerState<ToolConfirmSheet> {
 
             const SizedBox(height: NovaSpace.lg),
             NovaPrimaryButton(
-              label: _expired ? 'Approval expired' : 'Approve and send',
+              label: _expired
+                  ? 'Approval expired'
+                  : (widget.confirmLabel ?? 'Approve and send'),
               icon: Icons.check_rounded,
               busy: _busy,
               onPressed: (_busy || _expired) ? null : () => _decide(true),
@@ -211,9 +264,16 @@ class _ToolConfirmSheetState extends ConsumerState<ToolConfirmSheet> {
       _error = null;
     });
     try {
-      await ref
-          .read(novaMutationsProvider)
-          .decideApproval(widget.approval.id, approve: approve);
+      // The voice path answers the live socket through its own callback; the
+      // typed path writes the decision to the approvals route.
+      final onDecide = widget.onDecide;
+      if (onDecide != null) {
+        await onDecide(approve);
+      } else {
+        await ref
+            .read(novaMutationsProvider)
+            .decideApproval(widget.approval.id, approve: approve);
+      }
       if (mounted) Navigator.pop(context, approve);
     } catch (e) {
       if (!mounted) return;

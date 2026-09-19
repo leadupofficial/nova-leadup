@@ -122,6 +122,90 @@ void main() {
       expect((event as VoiceToolEvent).ok, isFalse);
     });
 
+    test('a tool event carries why the approval gate stopped it', () {
+      // "Not run because you said no" must be distinguishable from "the tool
+      // failed", or the app reports a fault where the user made a choice.
+      for (final (wire, expected) in <(String, VoiceApprovalOutcome)>[
+        ('rejected', VoiceApprovalOutcome.rejected),
+        ('timeout', VoiceApprovalOutcome.timeout),
+        ('cancelled', VoiceApprovalOutcome.cancelled),
+        ('payload_mismatch', VoiceApprovalOutcome.payloadMismatch),
+        ('unbound', VoiceApprovalOutcome.unbound),
+      ]) {
+        final event =
+            decoder.decode(
+                  '{"type":"tool","name":"create_reminder","ok":false,'
+                  '"summary":"Not run.","approval":"$wire"}',
+                )
+                as VoiceToolEvent;
+        expect(event.approval, expected, reason: 'wire value $wire');
+      }
+
+      final granted =
+          decoder.decode('{"type":"tool","name":"create_reminder","ok":true,"summary":"Done."}')
+              as VoiceToolEvent;
+      expect(granted.approval, isNull);
+    });
+
+    test('an unknown approval reason is ignored rather than guessed', () {
+      final event =
+          decoder.decode(
+                '{"type":"tool","name":"create_reminder","ok":false,'
+                '"summary":"?","approval":"something_new"}',
+              )
+              as VoiceToolEvent;
+      expect(event.approval, isNull);
+    });
+
+    test('decodes the approval request the sheet is built from', () {
+      // §5.7: the sheet must show exactly what will happen. Every field it
+      // renders therefore has to survive decoding, including the payload.
+      final event = decoder.decode(
+        '{"type":"approval_request","approvalId":"appr-7","turnId":4,'
+        '"tool":"create_reminder","level":1,'
+        '"summary":"Create a reminder \\"Call the bank\\" that goes off at 2026-09-19T17:00:00+05:30.",'
+        '"input":{"title":"Call the bank","trigger_at":"2026-09-19T17:00:00+05:30"},'
+        '"expiresAt":"2026-09-19T08:00:00.000Z"}',
+      );
+      expect(event, isA<VoiceApprovalRequestEvent>());
+      final request = event as VoiceApprovalRequestEvent;
+      expect(request.approvalId, 'appr-7');
+      expect(request.turnId, 4);
+      expect(request.tool, 'create_reminder');
+      expect(request.level, 1);
+      expect(request.summary, contains('Call the bank'));
+      expect(request.input['title'], 'Call the bank');
+      expect(request.input['trigger_at'], '2026-09-19T17:00:00+05:30');
+      expect(request.expiresAt, DateTime.utc(2026, 9, 19, 8));
+    });
+
+    test('an approval request missing its optional fields still decodes', () {
+      final event =
+          decoder.decode('{"type":"approval_request"}')
+              as VoiceApprovalRequestEvent;
+      expect(event.approvalId, '');
+      expect(event.tool, 'unknown');
+      expect(event.input, isEmpty);
+      expect(event.expiresAt, isNull);
+    });
+
+    test('a malformed input payload becomes empty rather than throwing', () {
+      // A malformed frame must not take down the turn: the sheet can render an
+      // action with no parameters, and the user can still deny it.
+      final event =
+          decoder.decode('{"type":"approval_request","input":"not-a-map"}')
+              as VoiceApprovalRequestEvent;
+      expect(event.input, isEmpty);
+    });
+
+    test('the decoded input is a copy, not a view of the frame', () {
+      final event =
+          decoder.decode('{"type":"approval_request","input":{"a":1}}')
+              as VoiceApprovalRequestEvent;
+      event.input['a'] = 2;
+      expect(event.input['a'], 2);
+    });
+
     test('a fallback notice with missing fields does not throw', () {
       final event = decoder.decode('{"type":"tts"}');
       expect(event, isA<VoiceTtsFallbackEvent>());
@@ -148,6 +232,48 @@ void main() {
       expect(
         jsonDecode(encoder.text('hello')),
         <String, dynamic>{'type': 'text', 'text': 'hello'},
+      );
+    });
+
+    test('writes the approval answer with the id it is answering', () {
+      // The id is what stops an answer being paired with a later request.
+      expect(
+        jsonDecode(
+          encoder.approvalResponse(approvalId: 'appr-7', approve: true),
+        ),
+        <String, dynamic>{
+          'type': 'approval_response',
+          'approvalId': 'appr-7',
+          'approve': true,
+        },
+      );
+      expect(
+        jsonDecode(
+          encoder.approvalResponse(approvalId: 'appr-7', approve: false),
+        ),
+        <String, dynamic>{
+          'type': 'approval_response',
+          'approvalId': 'appr-7',
+          'approve': false,
+        },
+      );
+    });
+
+    test('echoes the turn when the request carried one', () {
+      expect(
+        jsonDecode(
+          encoder.approvalResponse(
+            approvalId: 'appr-7',
+            approve: true,
+            turnId: 4,
+          ),
+        ),
+        <String, dynamic>{
+          'type': 'approval_response',
+          'approvalId': 'appr-7',
+          'approve': true,
+          'turnId': 4,
+        },
       );
     });
   });

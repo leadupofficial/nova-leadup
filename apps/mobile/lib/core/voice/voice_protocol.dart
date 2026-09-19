@@ -108,6 +108,7 @@ final class VoiceToolEvent extends VoiceServerEvent {
     required this.name,
     required this.ok,
     required this.summary,
+    this.approval,
   });
   final String name;
   final bool ok;
@@ -115,6 +116,84 @@ final class VoiceToolEvent extends VoiceServerEvent {
   /// The server's one-line statement of what happened, e.g.
   /// `Reminder "Buy milk" set for Sun 20 Sept, 06:00 pm (Asia/Kolkata).`
   final String summary;
+
+  /// Why a tool did **not** run, when the reason was the approval answer rather
+  /// than the tool: the user declined, no answer arrived in time, the turn was
+  /// cancelled, or the arguments changed after approval. Null when the approval
+  /// (if one was needed) was granted.
+  final VoiceApprovalOutcome? approval;
+}
+
+/// Why the approval gate stopped a tool.
+enum VoiceApprovalOutcome {
+  /// The user answered the sheet with "Deny".
+  rejected,
+
+  /// Nobody answered before the request expired — the tool was not run.
+  timeout,
+
+  /// The turn was abandoned (barge-in, stop) while the sheet was waiting.
+  cancelled,
+
+  /// The arguments changed after approval, so the approval no longer covered
+  /// the action (blueprint §7.5).
+  payloadMismatch,
+
+  /// No approval record existed for the call at all.
+  unbound;
+
+  /// Parses the wire value, or null when the field is absent or unknown.
+  static VoiceApprovalOutcome? parse(Object? value) => switch (value) {
+    'rejected' => VoiceApprovalOutcome.rejected,
+    'timeout' => VoiceApprovalOutcome.timeout,
+    'cancelled' => VoiceApprovalOutcome.cancelled,
+    'payload_mismatch' => VoiceApprovalOutcome.payloadMismatch,
+    'unbound' => VoiceApprovalOutcome.unbound,
+    _ => null,
+  };
+}
+
+/// `{"type":"approval_request","approvalId":"...","tool":"create_reminder",
+///   "level":1,"summary":"...","input":{...},"expiresAt":"..."}`.
+///
+/// A side-effecting tool is waiting for the user's confirmation (§5.7). The
+/// server does not execute it until the matching
+/// [VoiceProtocolEncoder.approvalResponse] arrives, and never executes it if no
+/// answer arrives at all — an unanswered request is a refusal. [input] is the
+/// resolved argument object verbatim, so the sheet shows exactly what will
+/// happen rather than a paraphrase.
+final class VoiceApprovalRequestEvent extends VoiceServerEvent {
+  const VoiceApprovalRequestEvent({
+    required this.approvalId,
+    required this.turnId,
+    required this.tool,
+    required this.level,
+    required this.summary,
+    required this.input,
+    this.expiresAt,
+  });
+
+  /// Unique per request; echoed in the response so an answer cannot be paired
+  /// with a later turn's request.
+  final String approvalId;
+
+  /// The turn that asked. Echoed back so the server can drop an answer that
+  /// arrived after its turn ended rather than applying it to a later one.
+  final int turnId;
+
+  final String tool;
+
+  /// Permission level 0–3, from the server's registry.
+  final int level;
+
+  /// One-line, human-readable statement of the exact action.
+  final String summary;
+
+  /// The resolved arguments, verbatim.
+  final Map<String, dynamic> input;
+
+  /// When the request stops being answerable.
+  final DateTime? expiresAt;
 }
 
 /// A well-formed frame with a `type` this client build does not know.
@@ -189,6 +268,16 @@ class VoiceProtocolDecoder {
         name: map['name']?.toString() ?? 'unknown',
         ok: map['ok'] == true,
         summary: map['summary']?.toString() ?? '',
+        approval: VoiceApprovalOutcome.parse(map['approval']),
+      ),
+      'approval_request' => VoiceApprovalRequestEvent(
+        approvalId: map['approvalId']?.toString() ?? '',
+        turnId: _int(map['turnId']),
+        tool: map['tool']?.toString() ?? 'unknown',
+        level: _int(map['level']),
+        summary: map['summary']?.toString() ?? '',
+        input: _map(map['input']),
+        expiresAt: _date(map['expiresAt']),
       ),
       'stt' => VoiceSttFallbackEvent(
         provider: map['provider']?.toString() ?? 'unknown',
@@ -215,6 +304,18 @@ class VoiceProtocolDecoder {
     if (value is num) return value.toInt();
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
+
+  /// The tool arguments, copied into a plain map so nothing in the UI can hold
+  /// (or mutate) the decoded frame.
+  static Map<String, dynamic> _map(Object? value) {
+    if (value is! Map) return const <String, dynamic>{};
+    return <String, dynamic>{
+      for (final entry in value.entries) entry.key.toString(): entry.value,
+    };
+  }
+
+  static DateTime? _date(Object? value) =>
+      value == null ? null : DateTime.tryParse(value.toString());
 }
 
 /// Encodes the client → server control frames.
@@ -237,6 +338,24 @@ class VoiceProtocolEncoder {
   /// `{"type":"text","text":"..."}`.
   String text(String text) =>
       jsonEncode(<String, Object?>{'type': 'text', 'text': text});
+
+  /// `{"type":"approval_response","approvalId":"...","approve":true}`.
+  ///
+  /// [turnId] is echoed when the request carried one so the server can reject an
+  /// answer that arrived after its turn ended, instead of letting it approve a
+  /// later request.
+  String approvalResponse({
+    required String approvalId,
+    required bool approve,
+    int? turnId,
+  }) => jsonEncode(<String, Object?>{
+    'type': 'approval_response',
+    'approvalId': approvalId,
+    'approve': approve,
+    // Omitted entirely when absent: the frame stays the shape a server that
+    // predates this field expects.
+    'turnId': ?turnId,
+  });
 }
 
 /// The bare language codes the frozen protocol accepts in `start`.

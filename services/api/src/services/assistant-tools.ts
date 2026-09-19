@@ -15,6 +15,7 @@
  */
 import { chatCompletion, type ChatMessage, type ToolDefinition } from './ai.js';
 import { logger } from '../utils/logger.js';
+import { env } from '../utils/env.js';
 import {
 	executeToolUses,
 	toolSummaryText,
@@ -36,6 +37,87 @@ export const ASSISTANT_TOOLS_PROMPT =
 	'false, tell them plainly that it failed and why. If it succeeded, confirm what you saved and ' +
 	'repeat the resolved date and time when there is one. Use the current time and timezone given ' +
 	'above to resolve "tomorrow", "next Monday" and similar phrasing.';
+
+// ─── Permission levels (blueprint §10.1) ─────────────────────────────
+
+/**
+ * A tool's permission level, on the blueprint's 0–3 scale.
+ *
+ * L0 read-only — may run without confirmation.
+ * L1 personal low-risk write — configurable; confirm during beta.
+ * L2 external communication — always show the full payload and confirm.
+ * L3 sensitive/consequential — explicit confirm plus re-authentication.
+ */
+export type ToolPermissionLevel = 0 | 1 | 2 | 3;
+
+export const TOOL_LEVEL_READ_ONLY = 0 satisfies ToolPermissionLevel;
+export const TOOL_LEVEL_PERSONAL_WRITE = 1 satisfies ToolPermissionLevel;
+export const TOOL_LEVEL_EXTERNAL = 2 satisfies ToolPermissionLevel;
+export const TOOL_LEVEL_SENSITIVE = 3 satisfies ToolPermissionLevel;
+
+/**
+ * The single source of truth for what each assistant tool is allowed to do.
+ *
+ * It is a total map over the tool names in [ASSISTANT_TOOLS] rather than a field
+ * scattered through the definitions, so a reviewer reads every tool's level in
+ * one place and adding a tool to the list without classifying it is a compile
+ * error (`satisfies` over `Record<AssistantToolName, …>`), not a silent
+ * default. `assistant-tools.test` — the runtime half of that guarantee — fails
+ * if a name appears here with no definition or vice versa.
+ *
+ * Today all three are L1: they write only to the caller's own rows and reach
+ * nobody else. The moment an L2 tool (send email / WhatsApp) is offered, it
+ * belongs here as `TOOL_LEVEL_EXTERNAL`, and the voice gate will demand the
+ * full payload before it can run.
+ */
+export const ASSISTANT_TOOL_LEVELS = {
+	create_reminder: TOOL_LEVEL_PERSONAL_WRITE,
+	create_task: TOOL_LEVEL_PERSONAL_WRITE,
+	save_memory: TOOL_LEVEL_PERSONAL_WRITE,
+} as const satisfies Record<string, ToolPermissionLevel>;
+
+/** Every name the assistant may call, derived from the registry. */
+export type AssistantToolName = keyof typeof ASSISTANT_TOOL_LEVELS;
+
+export const ASSISTANT_TOOL_NAMES = Object.keys(ASSISTANT_TOOL_LEVELS) as AssistantToolName[];
+
+/**
+ * The level of a tool the model asked for.
+ *
+ * An unknown name is **L3**, not L0. The caller (the model) is untrusted, and
+ * this is the last branch before an executor that would answer "unknown tool"
+ * anyway — defaulting to "read-only, no prompt" here is how a tool added on the
+ * server but forgotten in this map would run unconfirmed.
+ */
+export function toolPermissionLevel(name: string): ToolPermissionLevel {
+	return name in ASSISTANT_TOOL_LEVELS
+		? ASSISTANT_TOOL_LEVELS[name as AssistantToolName]
+		: TOOL_LEVEL_SENSITIVE;
+}
+
+/**
+ * The configured confirmation threshold.
+ *
+ * Read lazily through the `env` proxy so a test (or an operator) can change
+ * `VOICE_TOOL_CONFIRM_LEVEL` and see the effect on the next turn. Default is L1
+ * — see the schema comment in `utils/env.ts`.
+ */
+export function toolConfirmationLevel(): ToolPermissionLevel {
+	return env.VOICE_TOOL_CONFIRM_LEVEL;
+}
+
+/**
+ * True when [name] may not execute on the voice path until the user confirms.
+ *
+ * L0 is never at or above any threshold in range (0–3), so a read-only tool can
+ * never be made to prompt — that is the property the voice gate depends on.
+ */
+export function toolRequiresConfirmation(
+	name: string,
+	threshold: ToolPermissionLevel = toolConfirmationLevel(),
+): boolean {
+	return toolPermissionLevel(name) >= threshold;
+}
 
 // ─── Tool definitions ────────────────────────────────────────────────
 

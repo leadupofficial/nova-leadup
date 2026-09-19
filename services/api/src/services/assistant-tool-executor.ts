@@ -70,6 +70,35 @@ export interface ExecutedToolCall {
 	error?: string;
 	/** The created row's identity, echoed to the model in the tool result. */
 	data?: Record<string, unknown>;
+	/**
+	 * Why the tool did not run, when the reason was the user's answer to the
+	 * approval request rather than the tool itself. `summary` already says so in
+	 * words for the model and the transcript; this is the machine-readable cause
+	 * the client turns into a notice.
+	 */
+	approvalReason?: ToolApprovalReason;
+}
+
+/**
+ * The ways an approval can stop a tool.
+ *
+ * `payload_mismatch` is separate from `rejected` on purpose: it means the user
+ * approved *something*, but the arguments changed before execution, so the
+ * approval does not cover what would now run (blueprint §7.5).
+ */
+export type ToolApprovalReason =
+	| 'rejected'
+	| 'timeout'
+	| 'cancelled'
+	| 'payload_mismatch'
+	| 'unbound';
+
+export interface ExecuteToolOptions {
+	/**
+	 * Refuse the call without running it, with this wording. Set by the voice
+	 * approval gate; absent on the typed path, which decides upstream.
+	 */
+	blocked?: { summary: string; reason: ToolApprovalReason };
 }
 
 function failed(toolUse: ToolUseBlock, error: string): ExecutedToolCall {
@@ -92,7 +121,23 @@ function describeIssues(error: z.ZodError): string {
 export async function executeAssistantTool(
 	userId: string,
 	toolUse: ToolUseBlock,
+	options: ExecuteToolOptions = {},
 ): Promise<ExecutedToolCall> {
+	// Checked before anything else — before validation, before the database.
+	// A tool the user did not approve must leave no trace of having been tried.
+	const blocked = options.blocked;
+	if (blocked) {
+		return {
+			toolUseId: toolUse.id,
+			name: toolUse.name,
+			input: toolUse.input,
+			ok: false,
+			summary: blocked.summary,
+			error: blocked.summary,
+			approvalReason: blocked.reason,
+		};
+	}
+
 	const db = getDb();
 
 	switch (toolUse.name) {
@@ -268,10 +313,11 @@ export async function executeAssistantTool(
 export async function executeToolUses(
 	userId: string,
 	toolUses: ToolUseBlock[],
+	options: ExecuteToolOptions = {},
 ): Promise<ExecutedToolCall[]> {
 	const results: ExecutedToolCall[] = [];
 	for (const toolUse of toolUses) {
-		results.push(await executeAssistantTool(userId, toolUse));
+		results.push(await executeAssistantTool(userId, toolUse, options));
 	}
 	return results;
 }

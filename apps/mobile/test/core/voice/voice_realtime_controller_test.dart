@@ -312,6 +312,187 @@ void main() {
       expect(harness.state.toolNotice, isNot(contains('Task created')));
     });
 
+    test('a tool the approval gate stopped is not reported as a failure', () async {
+      await harness.controller.startTurn();
+      await settle();
+
+      harness.socket.push(
+        '{"type":"tool","name":"create_reminder","ok":false,'
+        '"summary":"No confirmation arrived for create_reminder in time, so it was not run.",'
+        '"approval":"timeout"}',
+      );
+      await settle();
+
+      // The server's own wording is shown: it says what did *not* happen, which
+      // "Could not create reminder" would misreport as a fault.
+      expect(harness.state.toolNotice, contains('not run'));
+      expect(harness.state.toolNoticeStopped, isTrue);
+      expect(harness.state.toolNotice, isNot(contains('Could not')));
+    });
+  });
+
+  group('tool approval (blueprint §5.7)', () {
+    const request =
+        '{"type":"approval_request","approvalId":"appr-7","turnId":1,'
+        '"tool":"create_reminder","level":1,'
+        '"summary":"Create a reminder \\"Call the bank\\" that goes off at 2026-09-19T17:00:00+05:30.",'
+        '"input":{"title":"Call the bank","trigger_at":"2026-09-19T17:00:00+05:30"},'
+        '"expiresAt":"2026-09-19T08:00:00.000Z"}';
+
+    Future<void> startListening() async {
+      await harness.controller.startTurn();
+      await settle();
+    }
+
+    test('a request from the server is surfaced for the sheet', () async {
+      await startListening();
+      expect(harness.state.pendingApproval, isNull);
+
+      harness.socket.push(request);
+      await settle();
+
+      final pending = harness.state.pendingApproval;
+      expect(pending, isNotNull);
+      expect(pending!.approvalId, 'appr-7');
+      expect(pending.turnId, 1);
+      expect(pending.tool, 'create_reminder');
+      expect(pending.permissionLevel, 1);
+      expect(pending.summary, contains('Call the bank'));
+      expect(pending.input['trigger_at'], '2026-09-19T17:00:00+05:30');
+      expect(pending.expiresAt, DateTime.utc(2026, 9, 19, 8));
+      expect(harness.state.isAwaitingApproval, isTrue);
+    });
+
+    test('nothing is sent back until the user answers', () async {
+      await startListening();
+      harness.socket.push(request);
+      await settle();
+
+      // The server holds the tool; the client must not answer on the user's
+      // behalf, in either direction.
+      final responses = harness.controlFrames.where(
+        (frame) => frame['type'] == 'approval_response',
+      );
+      expect(responses, isEmpty);
+    });
+
+    test('the microphone and playback are stopped so the sheet is readable', () async {
+      await startListening();
+      expect(harness.capture.isStreaming, isTrue);
+
+      harness.socket.push(request);
+      await settle();
+
+      // The prompt has to interrupt the hands-free flow: if the microphone
+      // stayed open the next words would be transcribed as a new turn instead of
+      // answering the sheet, and audio would talk over it.
+      expect(harness.capture.isStreaming, isFalse);
+      expect(harness.playback.stops, greaterThan(0));
+      expect(harness.state.micActive, isFalse);
+    });
+
+    test('approving sends the answer and clears the request', () async {
+      await startListening();
+      harness.socket.push(request);
+      await settle();
+
+      harness.controller.decideApproval(approve: true);
+
+      expect(harness.controlFrames.last, <String, dynamic>{
+        'type': 'approval_response',
+        'approvalId': 'appr-7',
+        'approve': true,
+        'turnId': 1,
+      });
+      expect(harness.state.pendingApproval, isNull);
+      expect(harness.state.isAwaitingApproval, isFalse);
+    });
+
+    test('denying sends the answer and clears the request', () async {
+      await startListening();
+      harness.socket.push(request);
+      await settle();
+
+      harness.controller.decideApproval(approve: false);
+
+      expect(harness.controlFrames.last, <String, dynamic>{
+        'type': 'approval_response',
+        'approvalId': 'appr-7',
+        'approve': false,
+        'turnId': 1,
+      });
+      expect(harness.state.pendingApproval, isNull);
+    });
+
+    test('answering twice only writes one response', () async {
+      await startListening();
+      harness.socket.push(request);
+      await settle();
+
+      harness.controller.decideApproval(approve: true);
+      harness.controller.decideApproval(approve: false);
+
+      final responses = harness.controlFrames.where(
+        (frame) => frame['type'] == 'approval_response',
+      );
+      expect(responses, hasLength(1));
+    });
+
+    test('cancelling the turn refuses a request nobody answered', () async {
+      await startListening();
+      harness.socket.push(request);
+      await settle();
+
+      await harness.controller.cancel();
+
+      // Cancelling sends its own frame, so look for the refusal rather than
+      // assuming it is last.
+      final refusal = harness.controlFrames.firstWhere(
+        (frame) => frame['type'] == 'approval_response',
+      );
+      expect(refusal['approvalId'], 'appr-7');
+      expect(refusal['approve'], isFalse);
+      expect(harness.state.pendingApproval, isNull);
+    });
+
+    test('starting a new turn refuses the sheet it supersedes', () async {
+      await startListening();
+      harness.socket.push(request);
+      await settle();
+
+      await harness.controller.startTurn();
+      await settle();
+
+      final refusal = harness.controlFrames.lastWhere(
+        (frame) => frame['type'] == 'approval_response',
+      );
+      expect(refusal['approve'], isFalse);
+      expect(harness.state.pendingApproval, isNull);
+    });
+
+    test('two turns cannot share one approval id', () async {
+      await startListening();
+      harness.socket.push(request);
+      await settle();
+      harness.controller.decideApproval(approve: true);
+      expect(harness.state.pendingApproval, isNull);
+
+      // The same id arriving again is a distinct request only if the server
+      // minted one; the client stores whatever it is given and echoes it back,
+      // which is the whole point of the id being server-generated.
+      harness.socket.push(
+        request.replaceFirst('"appr-7"', '"appr-9"').replaceFirst('"turnId":1', '"turnId":2'),
+      );
+      await settle();
+      expect(harness.state.pendingApproval?.approvalId, 'appr-9');
+
+      harness.controller.decideApproval(approve: true);
+      expect(harness.controlFrames.last['approvalId'], 'appr-9');
+      expect(harness.controlFrames.last['turnId'], 2);
+    });
+  });
+
+  group('turn completion and failure', () {
     test('done returns to idle once the microphone has been stopped', () async {
       await harness.controller.startTurn();
       await settle();

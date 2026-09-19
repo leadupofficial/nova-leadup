@@ -60,6 +60,10 @@ class _ConversePageState extends ConsumerState<ConversePage> {
   bool _noticeIsError = false;
   bool _promptedApproval = false;
 
+  /// The voice approval request currently on screen, so the sheet is raised once
+  /// per request rather than on every rebuild while it waits for an answer.
+  String? _showingVoiceApproval;
+
   @override
   void initState() {
     super.initState();
@@ -99,6 +103,9 @@ class _ConversePageState extends ConsumerState<ConversePage> {
       setState(() => _showNotice(message, error: true));
 
   /// Blueprint §5.7: a side-effecting action must be confirmed before it runs.
+  ///
+  /// This is the typed path's queue: the server has already parked an approval
+  /// row and is waiting for the decision through the approvals route.
   Future<void> _maybePromptApproval() async {
     if (_promptedApproval || !mounted) return;
     try {
@@ -112,6 +119,71 @@ class _ConversePageState extends ConsumerState<ConversePage> {
       // A missing approvals endpoint must not block the conversation.
     }
   }
+
+  /// The voice path's equivalent of [_maybePromptApproval].
+  ///
+  /// A spoken turn reaches the tool loop over the open socket, where there is no
+  /// `tool_approvals` row to poll — the server emitted `approval_request` and is
+  /// holding the tool until this answers. The sheet is the same one the typed
+  /// path uses, driven by the payload the server sent, and the answer goes back
+  /// over the socket instead of the approvals route.
+  ///
+  /// The turn is genuinely paused here: no tool runs and no more of the reply is
+  /// generated until the user answers, so this is a real prompt and not a
+  /// notification. The microphone and playback were stopped when the request
+  /// arrived (see [VoiceRealtimeController]), which is what makes it usable
+  /// hands-free — the user is not talking over NOVA to read it.
+  Future<void> _maybePromptVoiceApproval(VoiceRealtimeState voice) async {
+    final pending = voice.pendingApproval;
+    if (pending == null) {
+      // A request that went away while its sheet was up (cancelled turn, timeout
+      // on the server) takes the sheet with it.
+      if (_showingVoiceApproval != null && mounted) {
+        _showingVoiceApproval = null;
+        Navigator.of(context).maybePop();
+      }
+      return;
+    }
+    if (!mounted || _showingVoiceApproval == pending.approvalId) return;
+
+    _showingVoiceApproval = pending.approvalId;
+    try {
+      final approved = await ToolConfirmSheet.show(
+        context,
+        NovaToolApproval(
+          id: pending.approvalId,
+          toolName: pending.tool,
+          toolInput: pending.input,
+          permissionLevel: pending.permissionLevel,
+          expiresAt: pending.expiresAt,
+        ),
+        // Answered over the socket, not the approvals route: there is no row.
+        onDecide: (approve) async => _realtime.decideApproval(approve: approve),
+        title: _approvalTitle(pending),
+        consequence: pending.consequence,
+        confirmLabel: pending.isExternal ? 'Approve and send' : 'Approve and run',
+      );
+      if (!mounted) return;
+      // Safety net for a sheet dismissed without a decision: the server treats
+      // no answer as a refusal, but saying "no" now is faster than waiting for
+      // its timeout, and the state is cleared either way.
+      if (approved == null) _realtime.decideApproval(approve: false);
+    } catch (error) {
+      if (mounted) {
+        _noticeError('Could not show that confirmation: $error');
+        _realtime.decideApproval(approve: false);
+      }
+    } finally {
+      if (_showingVoiceApproval == pending.approvalId) {
+        _showingVoiceApproval = null;
+      }
+    }
+  }
+
+  /// The sheet's heading: the server's one-line statement of what will happen,
+  /// which is more useful than the tool's internal name.
+  String _approvalTitle(VoiceToolApproval approval) =>
+      approval.summary.isEmpty ? approval.tool : approval.summary;
 
   Future<void> _ensureConversation() async {
     if (ref.read(activeConversationProvider) != null) return;
@@ -382,6 +454,17 @@ class _ConversePageState extends ConsumerState<ConversePage> {
       if (next.commits.length > rendered) {
         _appendVoiceCommits(next.commits.sublist(rendered));
       }
+    });
+
+    // Raise the Tool Confirmation sheet for a side-effecting tool the voice
+    // server is holding (§5.7). Registered here rather than in `initState`
+    // because `ref.listen` must be called from `build` to stay tied to this
+    // element's lifecycle; it fires the handling exactly once per change.
+    ref.listen<VoiceRealtimeState>(voiceRealtimeProvider, (previous, next) {
+      final was = previous?.pendingApproval;
+      final now = next.pendingApproval;
+      if (was?.approvalId == now?.approvalId && was != null) return;
+      unawaited(_maybePromptVoiceApproval(next));
     });
 
     final live = _liveBubbles(voice);

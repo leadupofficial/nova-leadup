@@ -30,6 +30,7 @@ import { isSupportedLanguage, normalizeLanguage } from './language.js';
 import { SttController, type SttUtteranceUsage } from './stt/controller.js';
 import { isAbortError } from './llm.js';
 import { runReply } from './reply.js';
+import { ToolApprovalBroker } from './tool-approval.js';
 import { logTurnCost } from './cost.js';
 import type { ChatMessage } from '../services/ai.js';
 
@@ -98,6 +99,17 @@ export class RealtimeVoiceSession {
 	private endOfSpeechTimer: ReturnType<typeof setTimeout> | null = null;
 	private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
 	private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+	/**
+	 * Confirms side-effecting tools before they run (§5.7).
+	 *
+	 * Per-session, and the only route by which the tool loop can learn the
+	 * user's answer: without it, the loop refuses to run a tool it cannot
+	 * confirm rather than executing it.
+	 */
+	private readonly approvals = new ToolApprovalBroker({
+		emit: (event) => this.send(event),
+	});
 
 	constructor(socket: WebSocket, user: RealtimeUser) {
 		this.socket = socket;
@@ -325,6 +337,14 @@ export class RealtimeVoiceSession {
 				this.send({ type: 'done', text: partial });
 				return;
 			}
+			case 'approval_response': {
+				// The user answered the confirmation sheet. A response for an id
+				// this socket is not waiting on is ignored rather than treated as
+				// a failure: the turn may already have been cancelled, and the
+				// tool then simply does not run.
+				this.approvals.respond(message);
+				return;
+			}
 			default:
 				return;
 		}
@@ -383,6 +403,16 @@ export class RealtimeVoiceSession {
 		const turn = this.activeTurn;
 		this.activeTurn = null;
 		if (!turn) return;
+		// Release anything this turn was waiting on before it is dropped. The
+		// tool does not run: an interrupted turn is not an approval, and leaving
+		// the request outstanding would hold the loop until its timeout.
+		const cancelled = this.approvals.cancelTurn(turn.id);
+		if (cancelled) {
+			logger.info(
+				{ userId: this.user.id, turnId: turn.id, approvals: cancelled },
+				'Turn aborted with approvals outstanding — refusing them',
+			);
+		}
 		try {
 			turn.controller.abort();
 		} catch {
@@ -429,6 +459,12 @@ export class RealtimeVoiceSession {
 				history: this.history,
 				userText: text,
 				signal: controller.signal,
+				turnId,
+				// The gate: the loop asks here before it runs anything at or above
+				// the configured level, and the answer only ever comes from this
+				// socket. This is the voice path's equivalent of the typed path's
+				// Tool Confirmation sheet (§5.7).
+				approval: (request) => this.approvals.request(request),
 				handlers: {
 					isCancelled,
 					onToken: (delta) => {
@@ -451,9 +487,19 @@ export class RealtimeVoiceSession {
 						if (!isCancelled()) this.send({ type: 'tts', provider: info.to, fallback: true, reason: info.reason });
 					},
 					// Tell the client the moment a write tool runs, so it can say
-					// something while the spoken reply is still being written.
+					// something while the spoken reply is still being written. A
+					// tool the approval gate stopped is reported the same way, with
+					// the reason, so the user is never left thinking it ran.
 					onTool: (call) => {
-						if (!isCancelled()) this.send({ type: 'tool', name: call.name, ok: call.ok, summary: call.summary });
+						if (!isCancelled()) {
+							this.send({
+								type: 'tool',
+								name: call.name,
+								ok: call.ok,
+								summary: call.summary,
+								approval: call.approval,
+							});
+						}
 					},
 				},
 			});
