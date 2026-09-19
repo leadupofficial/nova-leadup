@@ -161,7 +161,7 @@ apps/mobile_old/
 | `auth` | `@nova/auth` (mounted as a service AND imported as a library) | 3003 | Authentication & authorization |
 | `realtime-gateway` | `@nova/realtime-gateway` | 3002 | WebSocket realtime communication hub |
 | `voice-api` | `@nova/voice-api` | — | **DEAD CODE — see below** |
-| `notification-service` | `@nova/notification-service` | 3006 | **DEAD CODE — see below** |
+| `notification-service` | `@nova/notification-service` | 3006 | Push/in-app notifications — **runs in production** as `nova-notifications` |
 | `workflow-engine` | `@nova/workflow-engine` | 3010 | Workflow automation engine |
 | `agent-orchestrator` | `@nova/agent-orchestrator` | — | **DEAD CODE — see below** |
 | `integration-service` | `@nova/integration-service` | 3011 | Third-party integrations |
@@ -170,15 +170,19 @@ apps/mobile_old/
 
 > ### Five of these services do not run
 >
-> `agent-orchestrator`, `api_disabled`, `notification-service`, `voice-api`, `worker`
-> and `workers` are excluded from the build: their `build` and `typecheck` scripts are
+> `agent-orchestrator`, `api_disabled`, `voice-api`, `worker` and `workers` are
+> excluded from the build: their `build` and `typecheck` scripts are
 > no-ops with a message pointing at their pending deletion. They are listed above only
 > because this map is a map of what is in the tree, not of what runs.
 >
 > Their `test` scripts are untouched and still pass, so their suites are not silently
-> broken — but nothing deploys them and no route reaches them. Two of them were
-> crashed on the last recorded smoke run (`BACKEND_SMOKE_REPORT.md`) and nobody
-> noticed, which is how dead services usually look from the outside.
+> broken — but nothing deploys them and no route reaches them. Some were crashed on
+> the last recorded smoke run (`BACKEND_SMOKE_REPORT.md`) and nobody noticed, which
+> is how dead services usually look from the outside.
+>
+> `notification-service` is NOT in that list. It was briefly marked dead here because
+> a check for the string `notification-service` does not match its container name
+> `nova-notifications`; it is running and in use.
 >
 > Also note `auth`: it is a running service **and** a library. Its `src/index.ts`
 > exports the middleware that seventeen files across six services import. It used to
