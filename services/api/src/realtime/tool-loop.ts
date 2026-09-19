@@ -26,6 +26,8 @@ import { streamChatCompletion } from './llm.js';
 
 export interface StreamingToolLoopOptions {
 	systemPrompt: string;
+	/** Called once per executed write tool, so the caller can surface it. */
+	onToolCall?: (call: ExecutedToolCall) => void;
 	maxTokens?: number;
 	temperature?: number;
 	signal?: AbortSignal;
@@ -89,6 +91,9 @@ export async function runStreamingAssistantLoop(
 
 		const results = await executeToolUses(userId, completion.toolUses);
 		toolCalls.push(...results);
+		// Report as each one lands, not at the end: the point is to acknowledge
+		// the action while the reply is still being written.
+		for (const result of results) options.onToolCall?.(result);
 
 		if (iteration === MAX_TOOL_ITERATIONS) {
 			logger.warn(

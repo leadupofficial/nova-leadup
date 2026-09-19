@@ -47,6 +47,28 @@ voiceSpeechNotice(
   );
 }
 
+/// What a write tool just did, if anything.
+///
+/// Shown the moment the tool returns rather than folded into the reply: the user
+/// spoke an instruction ("remind me to…") and wants to know it landed, and the
+/// spoken reply is still being written at that point.
+({String message, Color tone, IconData icon, VoidCallback onDismiss})?
+voiceToolNotice(
+  VoiceRealtimeState voice,
+  NovaColors colors,
+  VoidCallback onDismiss,
+) {
+  final notice = voice.toolNotice;
+  if (notice == null || notice.isEmpty) return null;
+  final failed = notice.startsWith('Could not ');
+  return (
+    message: notice,
+    tone: failed ? colors.danger : colors.success,
+    icon: failed ? Icons.error_outline_rounded : Icons.check_circle_outline_rounded,
+    onDismiss: onDismiss,
+  );
+}
+
 /// The provisional bubble for the user's live transcript, if any.
 Widget? voiceLiveTranscript(VoiceRealtimeState voice) {
   final partial = voice.partial.trim();

@@ -98,6 +98,25 @@ final class VoiceTtsFallbackEvent extends VoiceServerEvent {
   final String reason;
 }
 
+/// `{"type":"tool","name":"create_reminder","ok":true,"summary":"..."}`.
+///
+/// A write tool ran during this turn. Surfaced because a voice user who says
+/// "remind me" otherwise gets no sign that anything was recorded until the reply
+/// finishes — and the reply can take seconds.
+final class VoiceToolEvent extends VoiceServerEvent {
+  const VoiceToolEvent({
+    required this.name,
+    required this.ok,
+    required this.summary,
+  });
+  final String name;
+  final bool ok;
+
+  /// The server's one-line statement of what happened, e.g.
+  /// `Reminder "Buy milk" set for Sun 20 Sept, 06:00 pm (Asia/Kolkata).`
+  final String summary;
+}
+
 /// A well-formed frame with a `type` this client build does not know.
 ///
 /// Ignored by the controller rather than treated as a failure: the server may
@@ -166,6 +185,11 @@ class VoiceProtocolDecoder {
         _int(map['index']),
       ),
       'speaking' => VoiceSpeakingEvent(map['value'] == true),
+      'tool' => VoiceToolEvent(
+        name: map['name']?.toString() ?? 'unknown',
+        ok: map['ok'] == true,
+        summary: map['summary']?.toString() ?? '',
+      ),
       'stt' => VoiceSttFallbackEvent(
         provider: map['provider']?.toString() ?? 'unknown',
         fallback: map['fallback'] == true,

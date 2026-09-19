@@ -197,6 +197,11 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
     _set(state.copyWith(clearSpeechNotice: true));
   }
 
+  void dismissToolNotice() {
+    if (state.toolNotice == null) return;
+    _set(state.copyWith(toolNotice: null, clearToolNotice: true));
+  }
+
   // ── event handling ────────────────────────────────────────────────────────
 
   void _onFrame(dynamic frame) {
@@ -329,6 +334,17 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
           unawaited(_deviceSpeech.stop());
           _fail(code: code, message: message);
         }
+
+      case VoiceToolEvent(:final name, :final ok, :final summary):
+        // A write tool ran. Announced immediately rather than waiting for the
+        // reply, because the whole point is that the user said "remind me" and
+        // wants to know it was recorded. The summary is the server's own wording
+        // and already names the item and its time, so it is shown as-is.
+        _set(
+          state.copyWith(
+            toolNotice: ok ? summary : 'Could not $name — the action failed.',
+          ),
+        );
 
       case VoiceSttFallbackEvent(:final provider, :final fallback, :final reason):
         if (!fallback) break;

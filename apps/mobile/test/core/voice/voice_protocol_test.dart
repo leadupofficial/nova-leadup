@@ -101,6 +101,27 @@ void main() {
       expect(fallback.fallback, isTrue);
     });
 
+    test('decodes the tool event', () {
+      // The app has to know an action landed before the spoken reply finishes.
+      final event = decoder.decode(
+        '{"type":"tool","name":"create_reminder","ok":true,'
+        '"summary":"Reminder set for Buy milk on Sun 20 Sept, 06:00 pm (Asia/Kolkata)."}',
+      );
+      expect(event, isA<VoiceToolEvent>());
+      final tool = event as VoiceToolEvent;
+      expect(tool.name, 'create_reminder');
+      expect(tool.ok, isTrue);
+      expect(tool.summary, contains('Buy milk'));
+      expect(tool.summary, contains('06:00 pm'));
+    });
+
+    test('a failed tool event is still decoded', () {
+      final event = decoder.decode(
+        '{"type":"tool","name":"create_task","ok":false,"summary":"Could not create task."}',
+      );
+      expect((event as VoiceToolEvent).ok, isFalse);
+    });
+
     test('a fallback notice with missing fields does not throw', () {
       final event = decoder.decode('{"type":"tts"}');
       expect(event, isA<VoiceTtsFallbackEvent>());

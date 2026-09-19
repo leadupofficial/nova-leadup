@@ -442,6 +442,11 @@ export class RealtimeVoiceSession {
 					onTtsFallback: (info) => {
 						if (!isCancelled()) this.send({ type: 'tts', provider: info.to, fallback: true, reason: info.reason });
 					},
+					// Tell the client the moment a write tool runs, so it can say
+					// something while the spoken reply is still being written.
+					onTool: (call) => {
+						if (!isCancelled()) this.send({ type: 'tool', name: call.name, ok: call.ok, summary: call.summary });
+					},
 				},
 			});
 

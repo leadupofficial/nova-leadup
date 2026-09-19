@@ -43,6 +43,8 @@ export interface ReplyHandlers {
 	 * client's device voice is the only remaining option.
 	 */
 	onTtsFallback?(info: { from: string; to: string; reason: string }): void;
+	/** A write tool ran, for the client to acknowledge. */
+	onTool?(call: { name: string; ok: boolean; summary: string }): void;
 	/** True once the caller has cancelled this reply. */
 	isCancelled(): boolean;
 }
@@ -169,7 +171,14 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 	const result = await runStreamingAssistantLoop(
 		options.userId,
 		messages,
-		{ systemPrompt, maxTokens: 1024, temperature: 0.7, signal },
+		{
+			systemPrompt,
+			maxTokens: 1024,
+			temperature: 0.7,
+			signal,
+			onToolCall: (call) =>
+				handlers.onTool?.({ name: call.name, ok: call.ok, summary: call.summary }),
+		},
 		(delta) => {
 			if (firstTokenMs === null) firstTokenMs = Date.now() - modelStartedAt;
 			streamed += delta;

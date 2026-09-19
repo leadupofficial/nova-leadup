@@ -283,6 +283,35 @@ void main() {
       expect(harness.state.speechNotice, contains('deepgram'));
     });
 
+    test('a tool result is surfaced as soon as it lands', () async {
+      await harness.controller.startTurn();
+      await settle();
+
+      harness.socket.push(
+        '{"type":"tool","name":"create_reminder","ok":true,'
+        '"summary":"Reminder set for Buy milk on Sun 20 Sept, 06:00 pm."}',
+      );
+      await settle();
+
+      // Shown before any reply text, so a spoken "remind me" is acknowledged
+      // while the answer is still being written.
+      expect(harness.state.toolNotice, contains('Buy milk'));
+      expect(harness.state.reply, '');
+    });
+
+    test('a failed tool reports failure instead of the summary', () async {
+      await harness.controller.startTurn();
+      await settle();
+
+      harness.socket.push(
+        '{"type":"tool","name":"create_task","ok":false,"summary":"Task created."}',
+      );
+      await settle();
+
+      expect(harness.state.toolNotice, contains('Could not'));
+      expect(harness.state.toolNotice, isNot(contains('Task created')));
+    });
+
     test('done returns to idle once the microphone has been stopped', () async {
       await harness.controller.startTurn();
       await settle();

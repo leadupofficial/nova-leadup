@@ -66,6 +66,7 @@ class VoiceRealtimeState {
     this.speechSource = VoiceSpeechSource.cloud,
     this.deviceLanguageTag,
     this.speechNotice,
+    this.toolNotice,
   });
 
   final VoiceRealtimePhase phase;
@@ -104,6 +105,11 @@ class VoiceRealtimeState {
   /// voice: either that the device voice is covering, or that it cannot.
   final String? speechNotice;
 
+  /// What a write tool just did, e.g. `Reminder "Buy milk" set for Sun 20 Sept,
+  /// 06:00 pm`. Shown as soon as it happens so a spoken "remind me" is
+  /// acknowledged before the reply is finished being written.
+  final String? toolNotice;
+
   /// True for the phases in which a turn is in flight and Stop makes sense.
   bool get isTurnActive =>
       phase == VoiceRealtimePhase.listening ||
@@ -124,10 +130,12 @@ class VoiceRealtimeState {
     VoiceSpeechSource? speechSource,
     String? deviceLanguageTag,
     String? speechNotice,
+    String? toolNotice,
     String? errorMessage,
     String? errorCode,
     bool clearError = false,
     bool clearSpeechNotice = false,
+    bool clearToolNotice = false,
   }) {
     return VoiceRealtimeState(
       phase: phase ?? this.phase,
@@ -145,6 +153,7 @@ class VoiceRealtimeState {
       speechNotice: clearSpeechNotice
           ? null
           : (speechNotice ?? this.speechNotice),
+      toolNotice: clearToolNotice ? null : (toolNotice ?? this.toolNotice),
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       errorCode: clearError ? null : (errorCode ?? this.errorCode),
     );
@@ -165,6 +174,7 @@ class VoiceRealtimeState {
       other.speechSource == speechSource &&
       other.deviceLanguageTag == deviceLanguageTag &&
       other.speechNotice == speechNotice &&
+      other.toolNotice == toolNotice &&
       listEquals(other.commits, commits);
 
   @override

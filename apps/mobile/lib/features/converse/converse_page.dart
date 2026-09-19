@@ -339,6 +339,12 @@ class _ConversePageState extends ConsumerState<ConversePage> {
         _realtime.clearError,
       );
     }
+    // A tool confirmation outranks the voice caveat: "the reminder is set" is
+    // what the user just asked for, and the voice notice is a standing footnote.
+    final tool = voiceToolNotice(voice, c, _realtime.dismissToolNotice);
+    if (tool != null) {
+      return (tool.message, tool.tone, tool.icon, tool.onDismiss);
+    }
     final speech = voiceSpeechNotice(voice, c, _realtime.dismissSpeechNotice);
     if (speech != null) {
       return (speech.message, speech.tone, speech.icon, speech.onDismiss);

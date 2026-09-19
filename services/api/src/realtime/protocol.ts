@@ -70,6 +70,13 @@ export type ServerEvent =
 	| { type: 'final'; text: string }
 	| { type: 'token'; text: string }
 	| { type: 'sentence'; text: string; index: number }
+	/**
+	 * A write tool ran during this turn. `summary` is the server's one-line
+	 * statement of what happened, so the app can acknowledge the action while
+	 * the reply is still being written — a voice user who says "remind me"
+	 * otherwise gets no sign that anything was recorded until the answer.
+	 */
+	| { type: 'tool'; name: string; ok: boolean; summary: string }
 	| { type: 'speaking'; value: boolean }
 	| { type: 'done'; text: string }
 	| { type: 'error'; code: string; message: string };
