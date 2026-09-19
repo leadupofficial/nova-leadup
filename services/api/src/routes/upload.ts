@@ -9,7 +9,13 @@ const router: ReturnType<typeof Router> = Router();
 router.use(authenticate);
 
 router.get('/', (req: AuthenticatedRequest, res: Response) => {
-	res.status(200).json({ success: true, data: [], message: 'Upload endpoint - implementation pending' });
+	res.status(501).json({
+		success: false,
+		error: {
+			code: 'NOT_IMPLEMENTED',
+			message: 'File upload is not implemented yet.',
+		},
+	});
 });
 
 export default router;
