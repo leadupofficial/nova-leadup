@@ -113,7 +113,6 @@ void main() {
     });
     await tester.pump();
     await tester.pump();
-
     expect(captured, hasLength(1));
     expect(captured.single.path, endsWith('/recordings'));
     final body = captured.single.data as Map<String, dynamic>;
@@ -127,5 +126,10 @@ void main() {
     expect(find.byType(LiveWaveform), findsOneWidget);
     expect(find.widgetWithText(NovaSecondaryButton, 'Pause'), findsOneWidget);
     expect(find.widgetWithText(NovaPrimaryButton, 'Stop recording'), findsOneWidget);
-  });
+    // This is the only test here that leaves the fake-async zone to do real file
+    // and network I/O, which makes it the only one whose duration depends on how
+    // busy the machine is. It was observed failing once while a build ran
+    // alongside and passing in isolation and on every unloaded re-run. A longer
+    // budget keeps a slow machine from being reported as a broken recording.
+  }, timeout: const Timeout(Duration(minutes: 2)));
 }
