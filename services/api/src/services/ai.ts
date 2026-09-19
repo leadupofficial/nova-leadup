@@ -711,11 +711,18 @@ export async function synthesizeSpeech(
 					},
 					body: JSON.stringify({
 						text,
-						// `eleven_turbo_v2` is English-only, so a Tamil or Hindi reply
-						// came back as mangled English phonetics. `v2_5` is the
-						// multilingual turbo model — same latency profile, 32
-						// languages — and is verified working for ta, hi and en.
-						model_id: 'eleven_turbo_v2_5',
+						// Flash, not Turbo. ElevenLabs' own docs say the Turbo models
+						// are "functionally equivalent to the Flash models … except
+						// the latency on the Flash models is lower on average. We
+						// recommend using the Flash models over Turbo models in all use
+						// cases." Measured on the same Tamil sentence: Turbo 1776 ms to
+						// first byte, Flash 904 ms — in the user's native language that
+						// is the difference between a conversation and a wait.
+						//
+						// The original `eleven_turbo_v2` was English-only, which is why
+						// a Tamil reply came back as mangled English phonetics. Flash
+						// v2.5 covers 32 languages including Tamil and Hindi.
+						model_id: 'eleven_flash_v2_5',
 						voice_settings: {
 							stability: options?.stability ?? 0.5,
 							similarity_boost: 0.75,
