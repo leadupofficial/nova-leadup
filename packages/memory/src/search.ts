@@ -70,7 +70,14 @@ export class MemorySearch {
  limit: number,
  ): Promise<Record<string, unknown>[]> {
  // Vector search via pgvector <=> operator.
- // Parameters are bound via Drizzle sql`` template literals (not string concat).
+ //
+ // The embedding is bound as a parameter and cast in SQL, never interpolated with
+ // `sql.raw()`. `raw()` bypasses Drizzle's escaping entirely, so this line becomes
+ // an injection point the moment the value stops being a constant — and the comment
+ // here used to promise exactly that ("production: call embedding API"), which would
+ // have fed a real vector through it. A bound parameter is safe whatever it holds,
+ // so completing this stub can no longer open the hole.
+ //
  // Embedding vector is zeroed in MVP — production: call embedding API.
  const embeddingJson = JSON.stringify(new Array(128).fill(0));
 
@@ -79,7 +86,7 @@ export class MemorySearch {
  SELECT memories.* FROM memories
  INNER JOIN memory_embeddings ON memory_embeddings.memory_id = memories.id
  WHERE memories.user_id = ${userId}
- ORDER BY memory_embeddings.embedding <=> ${sql.raw(`'${embeddingJson}'::vector`)}
+ ORDER BY memory_embeddings.embedding <=> ${embeddingJson}::vector
  LIMIT ${limit}
  `
  );

@@ -24,6 +24,9 @@ import {
  index,
  unique,
  primaryKey,
+ date,
+ numeric,
+ uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm/relations';
 
@@ -971,7 +974,10 @@ export const leadAnalytics = pgTable('lead_analytics', {
  revenueGenerated: numeric('revenue_generated', { precision: 12, scale: 2 }).default('0.00'),
  createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => [
- index('lead_analytics_user_date_idx').on(table.userId, table.date).unique(),
+ // `uniqueIndex`, not `index(...).unique()` — `IndexBuilder` has no `unique()`
+ // method in any drizzle version this repo has used, so this declaration never
+ // compiled. The intent was clearly uniqueness on (user_id, date).
+ uniqueIndex('lead_analytics_user_date_idx').on(table.userId, table.date),
 ]);
 
 export const leadAnalyticsRelations = relations(leadAnalytics, ({ one }) => ({
