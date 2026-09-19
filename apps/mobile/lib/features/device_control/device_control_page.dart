@@ -249,13 +249,26 @@ class _DeviceControlPageState extends ConsumerState<DeviceControlPage> {
       confirmed: true,
     );
     if (!mounted) return;
+
+    // A command the app itself performed can say where to go next (starting a
+    // recording opens the recorder, stopping one opens its summary). Only ever
+    // set when the action genuinely ran.
+    final route = outcome?.extras['route'];
+    if (outcome?.ok == true && route is String && route.isNotEmpty) {
+      context.push(route);
+      return;
+    }
     _snack(outcome?.message ?? 'The action did not run.');
   }
 
   /// §5.7-style confirmation: the exact action and payload, before anything runs.
   Future<bool?> _confirm(DeviceActionRequest request) {
     final c = context.nova;
-    final changesDeviceSetting = request.level >= DeviceControlLevels.sensitive;
+    // Only brightness and DND actually change a device-wide setting; starting a
+    // recording opens the microphone instead, and must not claim otherwise.
+    final changesDeviceSetting =
+        request.action == DeviceAction.setBrightness ||
+        request.action == DeviceAction.setDnd;
     return showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(

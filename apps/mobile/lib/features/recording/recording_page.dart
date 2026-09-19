@@ -1,25 +1,27 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
+import 'live_waveform.dart';
+import 'recording_controller.dart';
+import 'recording_widgets.dart';
 
 /// Recording — port of `recording/recording.html` (blueprint §5.11).
 ///
-/// Creates a real `audio_recordings` row via `POST /api/v1/recordings`, ticks a
-/// live timer, records the consent acknowledgement the design insists on
-/// ("Ensure everyone knows this conversation is being recorded"), and on stop
-/// persists the duration and status before opening the summary.
+/// Real microphone capture. Recording is **off by default**: the screen opens on
+/// the §9.5 consent reminder ("Ensure everyone knows this conversation is being
+/// recorded") and Start stays disabled until it is acknowledged. Starting writes
+/// the `audio_recordings` row with `consentRecorded: true`, opens the microphone
+/// and runs the elapsed timer; pausing genuinely pauses capture and the timer
+/// stops with it. On stop the bytes are uploaded to
+/// `POST /recordings/:id/audio` (raw body, not base64) and the server is asked to
+/// transcribe; a failed upload is stated plainly and the row is kept, never
+/// reported as stored.
 ///
-/// NOT YET IMPLEMENTED: actual microphone capture and speaker diarisation. The
-/// design shows a detected-participant breakdown with per-speaker percentages;
-/// that requires the STT pipeline (`services/api/src/services/ai.ts` exposes
-/// `transcribeAudio`) plus a provider key, so this screen currently records the
-/// session metadata and the timer only. It is labelled as such in the UI rather
-/// than showing invented speaker data.
+/// Speaker diarisation does not exist in the pipeline (`speakerIndex` is always
+/// 0 and means "unattributed"), so the screen says that rather than showing the
+/// export's per-speaker percentages.
 class RecordingPage extends ConsumerStatefulWidget {
   const RecordingPage({super.key, this.title, this.language});
 
@@ -31,246 +33,182 @@ class RecordingPage extends ConsumerStatefulWidget {
 }
 
 class _RecordingPageState extends ConsumerState<RecordingPage> {
-  Timer? _ticker;
-  int _seconds = 0;
-  bool _consentAcknowledged = false;
-  bool _starting = true;
-  bool _saving = false;
-  String? _recordingId;
-  String? _error;
-
-  String get _timer {
-    final m = (_seconds ~/ 60).toString().padLeft(2, '0');
-    final s = (_seconds % 60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
+  late final TextEditingController _titleController;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _start());
+    _titleController = TextEditingController(text: widget.title ?? 'Meeting');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(recordingControllerProvider.notifier).prepareNewSession();
+    });
   }
 
   @override
   void dispose() {
-    _ticker?.cancel();
+    _titleController.dispose();
     super.dispose();
   }
 
   Future<void> _start() async {
-    try {
-      final rec = await ref
-          .read(novaMutationsProvider)
-          .startRecording(
-            title: widget.title ?? 'Meeting',
-            language: widget.language,
-          );
-      if (!mounted) return;
-      setState(() {
-        _recordingId = rec.id;
-        _starting = false;
-      });
-      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (mounted) setState(() => _seconds++);
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _starting = false;
-        _error = e.toString().replaceFirst(
-          RegExp(r'^NovaApiException\(\d*\): '),
-          '',
-        );
-      });
-    }
+    await ref
+        .read(recordingControllerProvider.notifier)
+        .start(title: _titleController.text, language: widget.language);
   }
 
   Future<void> _stop() async {
-    final id = _recordingId;
-    if (id == null || _saving) return;
-    setState(() => _saving = true);
-    _ticker?.cancel();
-    try {
-      await ref
-          .read(novaMutationsProvider)
-          .finishRecording(id, durationSeconds: _seconds);
-      if (!mounted) return;
-      context.go('/recordings/$id');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _saving = false;
-        _error = e
-            .toString()
-            .replaceFirst(RegExp(r'^NovaApiException\(\d*\): '), '');
-      });
-    }
+    final id = await ref.read(recordingControllerProvider.notifier).stop();
+    if (!mounted) return;
+    if (id != null) context.go('/recordings/$id');
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final c = context.nova;
+  Future<void> _retryUpload() async {
+    final id = await ref.read(recordingControllerProvider.notifier).retryUpload();
+    if (!mounted) return;
+    if (id != null) context.go('/recordings/$id');
+  }
 
-    return NovaScaffold(
-      topBar: Row(
-        children: [
-          NovaIconButton(
-            icon: Icons.arrow_back_rounded,
-            size: 36,
-            tooltip: 'Back',
-            onTap: () => context.go('/tasks'),
+  Future<void> _back() async {
+    final controller = ref.read(recordingControllerProvider.notifier);
+    if (ref.read(recordingControllerProvider).isActive) {
+      final leave = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('A recording is in progress'),
+          content: const Text(
+            'Leaving now stops the microphone and discards this recording. '
+            'The saved row stays, without audio.',
           ),
-          const Spacer(),
-          if (!_starting && _recordingId != null)
-            const NovaStatusPill(label: 'Recording')
-          else
-            NovaStatusPill(
-              label: 'Starting',
-              tone: c.warning,
-              animate: true,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Keep recording'),
             ),
-          const Spacer(),
-          const SizedBox(width: 36),
-        ],
-      ),
-      child: Column(
-        children: [
-          const SizedBox(height: NovaSpace.lg),
-          Text(
-            _timer,
-            style: NovaTheme.heroName(c).copyWith(
-              fontSize: 56,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-          const SizedBox(height: NovaSpace.xs),
-          Text(
-            widget.title ?? 'Meeting',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: NovaSpace.lg),
-          NovaWaveform(bars: 7, height: 28, color: c.danger),
-
-          const SizedBox(height: NovaSpace.xl),
-          NovaCard(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.info_outline_rounded, size: 18, color: c.warning),
-                const SizedBox(width: NovaSpace.sm),
-                Expanded(
-                  child: Text(
-                    'Ensure everyone knows this conversation is being '
-                    'recorded.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: NovaSpace.sm),
-
-          // Consent is recorded as a real row before the session is finalised.
-          NovaCard(
-            child: SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _consentAcknowledged,
-              onChanged: (v) => setState(() => _consentAcknowledged = v),
-              title: const Text('Everyone has been told'),
-              subtitle: Text(
-                'Stored with the recording as your consent record',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
-          ),
-
-          const SizedBox(height: NovaSpace.md),
-          _FactRow(
-            icon: '🌐',
-            label: 'Language',
-            value: widget.language ?? 'Auto-detect (Tamil + English)',
-          ),
-          const SizedBox(height: NovaSpace.xs),
-          const _FactRow(
-            icon: '👥',
-            label: 'Speakers',
-            value: 'Detected after transcription',
-          ),
-          const SizedBox(height: NovaSpace.xs),
-          const _FactRow(
-            icon: '📝',
-            label: 'Transcription',
-            value: 'Runs when the meeting ends',
-          ),
-
-          if (_error != null) ...[
-            const SizedBox(height: NovaSpace.md),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(NovaSpace.sm),
-              decoration: BoxDecoration(
-                color: c.danger.withValues(alpha: 0.12),
-                borderRadius: NovaRadius.rControl,
-                border: Border.all(color: c.danger.withValues(alpha: 0.4)),
-              ),
-              child: Text(
-                _error!,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall!.copyWith(color: c.danger),
-              ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Discard'),
             ),
           ],
-
-          const SizedBox(height: NovaSpace.xl),
-          NovaPrimaryButton(
-            label: 'Stop recording',
-            icon: Icons.stop_rounded,
-            gradient: c.recordingGradient,
-            busy: _saving,
-            onPressed: _starting || _recordingId == null ? null : _stop,
-          ),
-          const SizedBox(height: NovaSpace.xs),
-          Text(
-            'Microphone capture is not wired up yet — this session stores its '
-            'metadata and duration only.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ],
-      ),
-    );
+        ),
+      );
+      if (leave != true) return;
+      await controller.discard();
+    }
+    if (!mounted) return;
+    context.go('/tasks');
   }
-}
-
-class _FactRow extends StatelessWidget {
-  const _FactRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  final String icon;
-  final String label;
-  final String value;
 
   @override
   Widget build(BuildContext context) {
     final c = context.nova;
-    return Row(
-      children: [
-        Text(icon, style: const TextStyle(fontSize: 15)),
-        const SizedBox(width: NovaSpace.xs),
-        Text(label, style: NovaTheme.overline(c)),
-        const Spacer(),
-        Flexible(
-          child: Text(
-            value,
-            textAlign: TextAlign.right,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
+    final state = ref.watch(recordingControllerProvider);
+
+    return PopScope(
+      canPop: !state.isActive,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _back();
+      },
+      child: NovaScaffold(
+        topBar: Row(
+          children: [
+            NovaIconButton(
+              icon: Icons.arrow_back_rounded,
+              size: 36,
+              tooltip: 'Back',
+              onTap: _back,
+            ),
+            const Spacer(),
+            NovaStatusPill(
+              label: recordingStatusLabel(state.phase),
+              tone: state.phase == RecordingPhase.failed ? c.danger : null,
+              animate: state.isBusy || state.phase == RecordingPhase.recording,
+            ),
+            const Spacer(),
+            const SizedBox(width: 36),
+          ],
         ),
-      ],
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // §9.5: the indicator stays on screen the whole time capture is
+            // active — recording or paused.
+            if (state.isActive) ...[
+              RecordingIndicatorBar(
+                paused: state.phase == RecordingPhase.paused,
+                elapsed: state.elapsedLabel,
+              ),
+              const SizedBox(height: NovaSpace.md),
+            ],
+            RecordingTimer(seconds: state.elapsedSeconds),
+            const SizedBox(height: NovaSpace.xs),
+            Text(
+              state.title ?? widget.title ?? 'Meeting',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: NovaSpace.lg),
+            LiveWaveform(
+              levels: state.levels,
+              active: state.phase == RecordingPhase.recording,
+            ),
+            const SizedBox(height: NovaSpace.xs),
+            Text(
+              state.levels.isEmpty
+                  ? 'No audio level yet.'
+                  : 'Live input level from the microphone.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: NovaSpace.lg),
+
+            if (state.phase == RecordingPhase.consent ||
+                state.phase == RecordingPhase.failed)
+              RecordingConsentPanel(
+                controller: _titleController,
+                acknowledged: state.consentAcknowledged,
+                canStart: state.canStart,
+                language: widget.language,
+                onAcknowledged: (v) => ref
+                    .read(recordingControllerProvider.notifier)
+                    .acknowledgeConsent(v),
+                onStart: _start,
+              )
+            else if (state.isActive)
+              RecordingActivePanel(
+                paused: state.phase == RecordingPhase.paused,
+                onPause: () =>
+                    ref.read(recordingControllerProvider.notifier).pause(),
+                onResume: () =>
+                    ref.read(recordingControllerProvider.notifier).resume(),
+                onStop: _stop,
+              )
+            else
+              RecordingProgressPanel(state: state),
+
+            if (state.error != null) ...[
+              const SizedBox(height: NovaSpace.md),
+              RecordingErrorCard(message: state.error!, recordingId: state.recordingId),
+              if (state.phase == RecordingPhase.failed &&
+                  state.recordingId != null) ...[
+                const SizedBox(height: NovaSpace.sm),
+                NovaPrimaryButton(
+                  label: 'Retry upload',
+                  icon: Icons.cloud_upload_rounded,
+                  onPressed: _retryUpload,
+                ),
+              ],
+            ],
+            const SizedBox(height: NovaSpace.md),
+            Text(
+              'Speaker labels are not available — the transcript is not split '
+              'by speaker, so NOVA does not show a speaker breakdown.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

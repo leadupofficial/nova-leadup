@@ -18,6 +18,7 @@
  },
  "dependencies": {
  "@anthropic-ai/sdk": "^0.50.0",
+ "@aws-sdk/client-s3": "^3.670.0",
  "@nova/ai-core": "workspace:*",
  "@nova/auth": "workspace:*",
  "@nova/database": "workspace:*",

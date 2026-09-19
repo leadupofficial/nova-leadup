@@ -103,6 +103,10 @@ class DeviceVoiceCommand {
       DeviceAction.mediaPause ||
       DeviceAction.mediaNext ||
       DeviceAction.mediaPrevious => DeviceActionRequest(action),
+      // Executed in Dart by the recorder; the request only carries the action so
+      // the level gate and the confirmation sheet have something to show.
+      DeviceAction.startRecording ||
+      DeviceAction.stopRecording => DeviceActionRequest(action),
     };
   }
 }
@@ -135,6 +139,9 @@ DeviceVoiceCommand? matchDeviceVoiceCommand(String transcript) {
   return _matchDnd(normalized) ??
       _matchBrightness(normalized) ??
       _matchMedia(normalized) ??
+      // Must run before _matchOpenApp: "start recording" otherwise looks like a
+      // request to launch an app called "recording".
+      _matchRecording(normalized) ??
       _matchCall(original) ??
       _matchDeepLink(original) ??
       _matchWifiBluetooth(normalized) ??
@@ -296,6 +303,36 @@ DeviceVoiceCommand? _matchMedia(String text) {
     return const DeviceVoiceCommand(
       action: DeviceAction.mediaPlay,
       summary: 'Resume playback.',
+    );
+  }
+  return null;
+}
+
+DeviceVoiceCommand? _matchRecording(String text) {
+  if (_hasAny(text, const <String>[
+    'start recording',
+    'start a recording',
+    'start recording this meeting',
+    'record this meeting',
+    'record the meeting',
+    'begin recording',
+  ])) {
+    return const DeviceVoiceCommand(
+      action: DeviceAction.startRecording,
+      summary: 'Start recording this meeting.',
+    );
+  }
+  if (_hasAny(text, const <String>[
+    'stop recording',
+    'stop the recording',
+    'end recording',
+    'end the recording',
+    'finish recording',
+    'finish the recording',
+  ])) {
+    return const DeviceVoiceCommand(
+      action: DeviceAction.stopRecording,
+      summary: 'Stop the current recording.',
     );
   }
   return null;

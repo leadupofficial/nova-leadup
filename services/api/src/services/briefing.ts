@@ -43,6 +43,7 @@ import {
 	type BriefingCounts,
 } from './briefing-speech.js';
 import { logger } from '../utils/logger.js';
+import { ORDINARY_CAPITALIZED } from './grounding-words.js';
 
 /**
  * What the briefing can and cannot see, stated rather than implied.
@@ -119,36 +120,11 @@ export interface GuardVerdict {
 }
 
 /**
- * Ordinary English words a briefing may capitalise — a sentence opener, a
- * pronoun, a discourse marker.
- *
- * This exists so the proper-noun rule below can look at *every* capitalised
- * token rather than only the ones in the middle of a sentence, which is where
- * an invented name would otherwise hide by starting a sentence ("Ramesh will
- * see you at noon."). Anything capitalised that is neither one of these nor a
- * word from the user's own rows is treated as a name the model made up.
+ * Ordinary English words a briefing may capitalise, shared with the meeting
+ * summariser so the two anti-fabrication guards cannot disagree about what
+ * counts as prose. See `grounding-words.ts` for what may and may not be added.
  */
-const COMMON_CAPITALIZED = new Set([
-	'a', 'about', 'after', 'again', 'all', 'also', 'an', 'and', 'another', 'any',
-	'are', 'around', 'as', 'at', 'be', 'before', 'but', 'by', 'can', 'clear',
-	'currently', 'do', 'due', 'each', 'else', 'even', 'evening', 'every',
-	'everything', 'finally', 'first', 'firstly', 'flagged', 'for', 'from',
-	'get', 'good', 'greeting', 'had', 'has', 'have', 'he', 'hello', 'here',
-	'hey', 'hi', 'his', 'how', 'i', 'if', 'in', 'is', 'it', 'its', 'just',
-	'last', 'later', 'let', 'look', 'looking', 'made', 'make', 'maybe',
-	'meanwhile', 'might', 'more', 'morning', 'most', 'my', 'need', 'needs',
-	'next', 'no', 'not', 'nothing', 'now', 'of', 'okay', 'on', 'one', 'only',
-	'or', 'other', 'otherwise', 'our', 'out', 'overdue', 'perhaps', 'plus',
-	'quick', 'quickly', 'really', 'reminder', 'reminders', 'right', 'scheduled',
-	'second', 'see', 'she', 'shortly', 'should', 'since', 'so', 'some', 'start',
-	'still', 'straight', 'summary', 'take', 'task', 'tasks', 'than', 'that',
-	'the', 'their', 'them', 'then', 'there', 'these', 'they', 'thing', 'things',
-	'third', 'this', 'those', 'three', 'through', 'to', 'today', 'together',
-	'tomorrow', 'tonight', 'too', 'two', 'under', 'until', 'up', 'upcoming',
-	'us', 'waiting', 'want', 'wanted', 'was', 'we', 'well', 'were', 'what',
-	'when', 'where', 'which', 'while', 'who', 'why', 'will', 'with', 'worth',
-	'would', 'yes', 'yet', 'you', 'your', 'yours',
-]);
+const COMMON_CAPITALIZED = ORDINARY_CAPITALIZED;
 
 /**
  * Nouns that name an *occasion*. §9.4's briefing must never conjure one, and

@@ -125,6 +125,8 @@ void main() {
           'media_pause',
           'media_next',
           'media_previous',
+          'start_recording',
+          'stop_recording',
         },
       );
     });

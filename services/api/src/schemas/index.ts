@@ -468,6 +468,27 @@ export const RecordingListQuerySchema = z.object({
 	direction: z.enum(['forward', 'backward']).default('forward'),
 });
 
+/**
+ * Metadata that rides in the query string of the raw audio upload.
+ *
+ * The body of that request is the audio itself (see `routes/recordings.ts`), so
+ * anything else has to come from somewhere — and the query string is what is
+ * left of a `Content-Type: audio/wav` request that has no JSON body.
+ */
+export const RecordingAudioQuerySchema = z.object({
+	language: z.string().max(50).optional(),
+	durationSeconds: z.coerce.number().int().min(0).max(86_400).optional(),
+});
+
+/** Body of the async process request. Every field is optional. */
+export const ProcessRecordingSchema = z
+	.object({
+		language: z.string().max(50).optional(),
+	})
+	// `POST /:id/process` is a legitimate request with no body at all — it means
+	// "start the pipeline" — so an absent body is `{}` rather than a 400.
+	.default({});
+
 // ─── Activity centre schemas ──────────────────────────────────────────────────
 
 export const ActivityListQuerySchema = z.object({

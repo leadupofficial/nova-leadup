@@ -197,5 +197,17 @@ class ApiConfig {
   static String avatar(String id) => '$settingsAvatars/$id';
   static String recording(String id) => '$recordings/$id';
   static String recordingSummary(String id) => '${recording(id)}/summary';
+
+  /// Raw audio bytes for one recording. `POST` with the bytes as the whole body
+  /// — not base64, not multipart (see `NovaApi.uploadRecordingAudio`).
+  static String recordingAudio(String id) => '${recording(id)}/audio';
+
+  /// Kicks the transcription/summarisation pipeline. Answers `202` immediately.
+  static String recordingProcess(String id) => '${recording(id)}/process';
+
+  /// What the server can currently do (`transcription`, `objectStorage`, the
+  /// upload ceiling). Read rather than assumed, so the UI can be honest about a
+  /// pipeline that is not configured.
+  static String get recordingCapabilities => '$recordings/capabilities';
   static String approvalDecision(String id) => '$approvals/$id/decide';
 }

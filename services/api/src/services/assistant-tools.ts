@@ -149,6 +149,13 @@ export function toolRequiresConfirmation(
  *    which §10.1 rates sensitive/consequential ("change account setting" →
  *    explicit confirm).
  *  * media transport — L1: local and instantly reversible.
+ *  * `start_recording` — L3: it opens the microphone and records the people in
+ *    the room. §9.5 requires a visible recording indicator and a consent flow,
+ *    and §15.4 requires recording to be off by default and explicit, so this is
+ *    the one device action that must always be confirmed before it runs.
+ *  * `stop_recording` — L1: ending a session that is already running changes
+ *    nothing on the device, and making the user confirm *stopping* a recording
+ *    is the wrong failure mode.
  *
  * Not present here, on purpose: Wi-Fi and Bluetooth toggles (Android 10/12 made
  * them impossible for third-party apps, so the app only deep-links to Settings),
@@ -165,6 +172,8 @@ export const DEVICE_CONTROL_TOOL_LEVELS = {
 	media_pause: TOOL_LEVEL_PERSONAL_WRITE,
 	media_next: TOOL_LEVEL_PERSONAL_WRITE,
 	media_previous: TOOL_LEVEL_PERSONAL_WRITE,
+	start_recording: TOOL_LEVEL_SENSITIVE,
+	stop_recording: TOOL_LEVEL_PERSONAL_WRITE,
 } as const satisfies Record<string, ToolPermissionLevel>;
 
 /** Every device-control action name, derived from the registry. */

@@ -13,6 +13,8 @@
 /// but has no `build.yaml` and zero generated files, so codegen is not wired up.
 library;
 
+import 'package:flutter/foundation.dart';
+
 DateTime? _parseDate(Object? value) {
   if (value is String && value.isNotEmpty) {
     return DateTime.tryParse(value)?.toLocal();
@@ -39,6 +41,14 @@ bool _parseBool(Object? value, [bool fallback = false]) {
   if (value is num) return value != 0;
   if (value is String) return value.toLowerCase() == 'true';
   return fallback;
+}
+
+/// A trimmed, non-empty string, or null. Used where "absent" and "empty" must
+/// mean the same thing (an owner or a due date that was not extracted).
+String? _stringOrNull(Object? value) {
+  if (value == null) return null;
+  final text = value.toString().trim();
+  return text.isEmpty ? null : text;
 }
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────
@@ -706,6 +716,110 @@ class NovaRecording {
   );
 }
 
+/// One extracted action item.
+///
+/// The server's structured form is
+/// `{text, owner, dueDate, dueDateIso}`; an older revision returned bare
+/// strings, so [fromJson] accepts either and never throws on the other.
+@immutable
+class NovaActionItem {
+  const NovaActionItem({
+    required this.text,
+    this.owner,
+    this.dueDate,
+    this.dueDateIso,
+  });
+
+  final String text;
+
+  /// Who owns it, or null when the transcript did not name anyone. Rendered as
+  /// "Unassigned" rather than left blank.
+  final String? owner;
+
+  /// Human wording for the deadline, or null. Rendered as "No due date".
+  final String? dueDate;
+
+  /// Machine-readable deadline, when the server could resolve one.
+  final String? dueDateIso;
+
+  factory NovaActionItem.fromJson(Object? value) {
+    if (value is Map) {
+      final m = Map<String, dynamic>.from(value);
+      final text = (m['text'] ?? m['title'] ?? m['item'] ?? '').toString();
+      return NovaActionItem(
+        text: text,
+        owner: _stringOrNull(m['owner'] ?? m['assignee']),
+        dueDate: _stringOrNull(m['dueDate'] ?? m['due_date']),
+        dueDateIso: _stringOrNull(m['dueDateIso'] ?? m['due_date_iso']),
+      );
+    }
+    return NovaActionItem(text: value?.toString() ?? '');
+  }
+}
+
+/// A contact the transcript or model surfaced. No contact permission, no
+/// address book — this is only what was said or inferred.
+@immutable
+class NovaExtractedContact {
+  const NovaExtractedContact({
+    required this.detail,
+    this.name,
+    this.source = 'transcript',
+  });
+
+  final String? name;
+
+  /// The phone number, email or handle as it appeared.
+  final String detail;
+
+  /// `transcript` when it was said aloud, `model` when it was inferred.
+  final String source;
+
+  factory NovaExtractedContact.fromJson(Object? value) {
+    if (value is Map) {
+      final m = Map<String, dynamic>.from(value);
+      return NovaExtractedContact(
+        name: _stringOrNull(m['name']),
+        detail: (m['detail'] ?? m['value'] ?? m['text'] ?? '').toString(),
+        source: (m['source'] ?? 'transcript').toString(),
+      );
+    }
+    return NovaExtractedContact(detail: value?.toString() ?? '');
+  }
+}
+
+/// One transcript segment. `speakerIndex` is always 0 and means
+/// **unattributed** — the pipeline does not diarise, so this is never rendered
+/// as a speaker label.
+@immutable
+class NovaTranscriptSegment {
+  const NovaTranscriptSegment({
+    required this.id,
+    required this.text,
+    this.speakerIndex = 0,
+    this.startMs = 0,
+    this.endMs = 0,
+    this.confidence,
+  });
+
+  final String id;
+  final String text;
+  final int speakerIndex;
+  final int startMs;
+  final int endMs;
+  final double? confidence;
+
+  factory NovaTranscriptSegment.fromJson(Map<String, dynamic> j) =>
+      NovaTranscriptSegment(
+        id: (j['id'] ?? '').toString(),
+        text: (j['text'] ?? '').toString(),
+        speakerIndex: (j['speakerIndex'] as num?)?.toInt() ?? 0,
+        startMs: (j['startMs'] as num?)?.toInt() ?? 0,
+        endMs: (j['endMs'] as num?)?.toInt() ?? 0,
+        confidence: (j['confidence'] as num?)?.toDouble(),
+      );
+}
+
 class NovaRecordingSummary {
   const NovaRecordingSummary({
     required this.id,
@@ -719,40 +833,142 @@ class NovaRecordingSummary {
   final String id;
   final String? summary;
   final List<String> decisions;
-  final List<String> actionItems;
-  final List<String> extractedContacts;
+  final List<NovaActionItem> actionItems;
+  final List<NovaExtractedContact> extractedContacts;
   final DateTime? createdAt;
 
+  /// True when the summary row exists but has no readable content — which is a
+  /// different fact from "the pipeline has not run yet".
+  bool get isEmpty =>
+      (summary == null || summary!.trim().isEmpty) &&
+      decisions.isEmpty &&
+      actionItems.isEmpty &&
+      extractedContacts.isEmpty;
+
   factory NovaRecordingSummary.fromJson(Map<String, dynamic> j) {
-    List<String> asList(Object? v) {
-      if (v is List) return v.map((e) => e.toString()).toList();
+    List<String> strings(Object? v) {
+      if (v is List) {
+        return v.map((e) => e.toString()).where((s) => s.isNotEmpty).toList();
+      }
       if (v is String && v.isNotEmpty) return [v];
+      return const [];
+    }
+
+    List<T> objects<T>(Object? v, T Function(Object?) parse) {
+      if (v is List) return v.map(parse).toList();
+      if (v is String && v.isNotEmpty) return [parse(v)];
       return const [];
     }
 
     return NovaRecordingSummary(
       id: (j['id'] ?? '').toString(),
-      summary: j['summary'] as String?,
-      decisions: asList(j['decisions']),
-      actionItems: asList(j['actionItems'] ?? j['action_items']),
-      extractedContacts: asList(j['extractedContacts']),
+      summary: _stringOrNull(j['summary']),
+      decisions: strings(j['decisions']),
+      actionItems: objects(j['actionItems'] ?? j['action_items'], NovaActionItem.fromJson),
+      extractedContacts: objects(
+        j['extractedContacts'] ?? j['extracted_contacts'],
+        NovaExtractedContact.fromJson,
+      ),
       createdAt: _parseDate(j['createdAt']),
     );
   }
 }
 
-/// A recording together with its transcript and summary, as the
+/// Where the uploaded audio ended up, as the server reports it.
+@immutable
+class NovaRecordingStorage {
+  const NovaRecordingStorage({
+    required this.objectStorage,
+    this.key,
+    this.bytes,
+    this.checksum,
+  });
+
+  /// True when the bytes reached object storage. False means the server kept
+  /// them another way — the UI must not say "stored in object storage" then.
+  final bool objectStorage;
+  final String? key;
+  final int? bytes;
+  final String? checksum;
+
+  factory NovaRecordingStorage.fromJson(Map<String, dynamic> j) =>
+      NovaRecordingStorage(
+        objectStorage: _parseBool(j['objectStorage']),
+        key: _stringOrNull(j['key']),
+        bytes: (j['bytes'] as num?)?.toInt(),
+        checksum: _stringOrNull(j['checksum']),
+      );
+
+  static const NovaRecordingStorage unknown = NovaRecordingStorage(
+    objectStorage: false,
+  );
+}
+
+/// The result of `POST /recordings/:id/audio`.
+@immutable
+class NovaRecordingUpload {
+  const NovaRecordingUpload({required this.recording, required this.storage});
+
+  final NovaRecording recording;
+  final NovaRecordingStorage storage;
+}
+
+/// What `GET /recordings/capabilities` reports.
+@immutable
+class NovaRecordingCapabilities {
+  const NovaRecordingCapabilities({
+    this.transcription = 'unavailable',
+    this.diarisation = false,
+    this.objectStorage = false,
+    this.maxUploadBytes = 0,
+    this.reason = const {},
+  });
+
+  /// `async`, `sync` or `unavailable`.
+  final String transcription;
+
+  /// Always false today: the pipeline does not attribute speakers.
+  final bool diarisation;
+  final bool objectStorage;
+  final int maxUploadBytes;
+
+  /// Why a capability is missing, as prose the UI can show.
+  final Map<String, dynamic> reason;
+
+  bool get canTranscribe => transcription != 'unavailable';
+
+  factory NovaRecordingCapabilities.fromJson(Map<String, dynamic> j) =>
+      NovaRecordingCapabilities(
+        transcription: (j['transcription'] ?? 'unavailable').toString(),
+        diarisation: _parseBool(j['diarisation']),
+        objectStorage: _parseBool(j['objectStorage']),
+        maxUploadBytes: (j['maxUploadBytes'] as num?)?.toInt() ?? 0,
+        reason: j['reason'] is Map
+            ? Map<String, dynamic>.from(j['reason'] as Map)
+            : const {},
+      );
+}
+
+/// A recording together with its transcript, segments and summary, as the
 /// `/recordings/:id` detail route returns them.
 class NovaRecordingDetail {
   const NovaRecordingDetail({
     required this.recording,
     this.transcript,
     this.summary,
+    this.segments = const [],
   });
 
   final NovaRecording recording;
   final String? transcript;
   final NovaRecordingSummary? summary;
+  final List<NovaTranscriptSegment> segments;
+
+  /// True when nothing was extracted at all — the state that must be stated
+  /// plainly instead of rendering empty sections.
+  bool get hasNothing =>
+      (transcript == null || transcript!.trim().isEmpty) &&
+      (summary == null || summary!.isEmpty);
 }
 
 // ─── Tools & approvals ────────────────────────────────────────────────────────

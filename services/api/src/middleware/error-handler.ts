@@ -25,6 +25,16 @@ export class HttpError extends Error implements AppError {
 export function errorHandler(err: AppError, req: Request, res: Response, next: NextFunction) {
 	if (res.headersSent) return next(err);
 
+	// `body-parser` marks an over-limit request with `type: 'entity.too.large'`
+	// and a 413 status but no error code, so the raw-audio upload route would
+	// otherwise report it as an unlabelled 413/500. Labelling it here keeps the
+	// client's error handling to a single branch.
+	if ((err as { type?: string }).type === 'entity.too.large') {
+		err.statusCode = 413;
+		err.code = 'PAYLOAD_TOO_LARGE';
+		err.message = 'The uploaded file is too large.';
+	}
+
 	const statusCode = err.statusCode || 500;
 	const code = err.code || 'INTERNAL_ERROR';
 

@@ -44,7 +44,15 @@ enum DeviceAction {
   mediaPlay('media_play'),
   mediaPause('media_pause'),
   mediaNext('media_next'),
-  mediaPrevious('media_previous');
+  mediaPrevious('media_previous'),
+
+  /// Meeting capture (§5.11). These two are **executed in Dart by the recorder,
+  /// not by an Android intent** — `NovaDeviceControl.kt` refuses them with an
+  /// honest "not an Android action" failure. They live in the same registry
+  /// because the voice matcher, the level gate and the server tool registry all
+  /// key off one vocabulary; the wire ids must agree across the three.
+  startRecording('start_recording'),
+  stopRecording('stop_recording');
 
   const DeviceAction(this.wireName);
 
@@ -64,6 +72,10 @@ enum DeviceAction {
       this == mediaNext ||
       this == mediaPrevious;
 
+  /// True for the actions the in-app recorder performs itself.
+  bool get isMeetingCapture =>
+      this == startRecording || this == stopRecording;
+
   /// A short label for the control screen.
   String get label => switch (this) {
     openApp => 'Open an app',
@@ -76,6 +88,8 @@ enum DeviceAction {
     mediaPause => 'Pause',
     mediaNext => 'Next track',
     mediaPrevious => 'Previous track',
+    startRecording => 'Start recording',
+    stopRecording => 'Stop recording',
   };
 }
 
@@ -120,7 +134,12 @@ enum DeviceCapability {
   deepLinkOnly('deep_link_only'),
 
   /// Deliberately not implemented (spec decision).
-  excluded('excluded');
+  excluded('excluded'),
+
+  /// Android does not perform it at all: the app itself does, in Dart. Reported
+  /// so a native "capability" is never claimed for something the OS was never
+  /// asked to do (the meeting-recording actions are the only members today).
+  dartExecuted('dart_executed');
 
   const DeviceCapability(this.wireName);
 
@@ -159,7 +178,11 @@ class DeviceControlLevels {
   ///    call reaches someone outside the user's account;
   ///  * brightness and Do Not Disturb are L3 — each changes a device-wide
   ///    setting (§10.1 "change account setting" → explicit confirm);
-  ///  * media transport is L1 — local and instantly reversible.
+  ///  * media transport is L1 — local and instantly reversible;
+  ///  * starting a meeting recording is L3 — it opens the microphone and records
+  ///    people, which §9.5 pairs with an explicit consent flow;
+  ///  * stopping one is L1 — the low-risk, reversible end of an action the user
+  ///    already began.
   static const Map<DeviceAction, int> levels = <DeviceAction, int>{
     DeviceAction.openApp: lowRiskWrite,
     DeviceAction.openDeepLink: external,
@@ -171,6 +194,8 @@ class DeviceControlLevels {
     DeviceAction.mediaPause: lowRiskWrite,
     DeviceAction.mediaNext: lowRiskWrite,
     DeviceAction.mediaPrevious: lowRiskWrite,
+    DeviceAction.startRecording: sensitive,
+    DeviceAction.stopRecording: lowRiskWrite,
   };
 
   static int levelOf(DeviceAction action) {

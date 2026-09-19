@@ -504,18 +504,24 @@ class NovaApi {
     required String title,
     String? language,
     List<String>? participants,
+    bool? consentRecorded,
   }) async {
     final data = await _post(ApiConfig.recordings, {
       'title': title,
       'language': ?language,
       'participants': ?participants,
+      'consentRecorded': ?consentRecorded,
     });
     return NovaRecording.fromJson(_object(data));
   }
 
-  /// One recording plus its transcript and summary, as the detail route returns
-  /// them. `transcript` is a plain string; `summary` may be null when the
-  /// pipeline has not run yet.
+  /// One recording plus its transcript, segments and summary, as the detail
+  /// route returns them.
+  ///
+  /// `transcript` is an object (`{fullText, …}`) in this route's payload, but a
+  /// bare string in older revisions, so both are accepted. `segments` are
+  /// carried through even though the pipeline never attributes a speaker: the
+  /// UI states that absence rather than inventing a speaker breakdown.
   Future<NovaRecordingDetail> getRecording(String id) async {
     final data = await _get(ApiConfig.recording(id));
     final map = _asMap(data);
@@ -524,17 +530,86 @@ class NovaApi {
         : map;
     final summaryJson = map['summary'];
     final transcript = map['transcript'];
+    final rawSegments = map['segments'];
     return NovaRecordingDetail(
       recording: NovaRecording.fromJson(recJson),
       transcript: transcript is String
-          ? transcript
-          : (transcript is Map ? transcript['fullText'] as String? : null),
+          ? (transcript.isEmpty ? null : transcript)
+          : (transcript is Map
+                ? _nonEmptyString(transcript['fullText'])
+                : null),
       summary: summaryJson is Map
           ? NovaRecordingSummary.fromJson(
               Map<String, dynamic>.from(summaryJson),
             )
           : null,
+      segments: rawSegments is List
+          ? rawSegments
+                .whereType<Map>()
+                .map(
+                  (s) => NovaTranscriptSegment.fromJson(
+                    Map<String, dynamic>.from(s),
+                  ),
+                )
+                .toList()
+          : const [],
     );
+  }
+
+  /// Uploads the raw audio for [id].
+  ///
+  /// The body is the audio itself, with the container MIME type in
+  /// `Content-Type` — the route does **not** accept base64 or multipart. Query
+  /// parameters carry the language and duration the pipeline should assume.
+  ///
+  /// A `413` means the payload exceeded the server's ceiling and a `503` with
+  /// `STORAGE_UNAVAILABLE` means the bytes were not stored; both surface as a
+  /// [NovaApiException] carrying the status and the server's own message, so the
+  /// caller can say what actually happened instead of claiming success.
+  Future<NovaRecordingUpload> uploadRecordingAudio(
+    String id,
+    List<int> bytes,
+    String mimeType, {
+    String? language,
+    int? durationSeconds,
+  }) async {
+    final data = await _postBytes(
+      ApiConfig.recordingAudio(id),
+      bytes,
+      mimeType,
+      query: {
+        'language': ?language,
+        'durationSeconds': ?durationSeconds,
+      },
+    );
+    final map = _asMap(data);
+    final storageJson = map['storage'];
+    return NovaRecordingUpload(
+      recording: map['recording'] is Map
+          ? NovaRecording.fromJson(
+              Map<String, dynamic>.from(map['recording'] as Map),
+            )
+          : NovaRecording.fromJson(const {}),
+      storage: storageJson is Map
+          ? NovaRecordingStorage.fromJson(
+              Map<String, dynamic>.from(storageJson),
+            )
+          : NovaRecordingStorage.unknown,
+    );
+  }
+
+  /// Asks the server to transcribe and summarise [id]. Answers `202` at once;
+  /// the result arrives later through [getRecording].
+  Future<void> processRecording(String id, {String? language}) async {
+    await _post(ApiConfig.recordingProcess(id), {'language': ?language});
+  }
+
+  /// What the server can currently do. Read rather than assumed: a deployment
+  /// with no STT provider reports `transcription: 'unavailable'` with a reason,
+  /// and the screen says so instead of promising a transcript.
+  Future<NovaRecordingCapabilities> getRecordingCapabilities() async {
+    final data = await _get(ApiConfig.recordingCapabilities);
+    return NovaRecordingCapabilities.fromJson(_asMap(data));
   }
 
   Future<NovaRecording> updateRecording(
@@ -627,6 +702,24 @@ class NovaApi {
   Future<dynamic> _patch(String url, Map<String, dynamic> body) =>
       _guard(() => _network.patch<dynamic>(url, data: body));
 
+  /// Posts a raw byte body (no JSON envelope, no base64) with [mimeType] as the
+  /// container type. Error handling is identical to the other verbs — [_guard]
+  /// still turns a `413`/`503` into a [NovaApiException] with the status and the
+  /// server's message.
+  Future<dynamic> _postBytes(
+    String url,
+    List<int> bytes,
+    String mimeType, {
+    Map<String, dynamic>? query,
+  }) => _guard(
+    () => _network.post<dynamic>(
+      url,
+      data: bytes,
+      queryParameters: query,
+      options: Options(headers: {'Content-Type': mimeType}),
+    ),
+  );
+
   Future<void> _delete(String url) async {
     await _guard(() => _network.delete<dynamic>(url));
   }
@@ -678,6 +771,13 @@ class NovaApi {
   Map<String, dynamic> _asMap(dynamic value) {
     if (value is Map) return Map<String, dynamic>.from(value);
     return const {};
+  }
+
+  /// A trimmed, non-empty string, or null.
+  String? _nonEmptyString(Object? value) {
+    if (value is! String) return null;
+    final text = value.trim();
+    return text.isEmpty ? null : text;
   }
 
   Map<String, dynamic> _object(dynamic data) {

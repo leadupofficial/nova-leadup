@@ -1,10 +1,19 @@
 /**
  * NOVA API — Audio recordings, transcripts and summaries.
  *
- * Backed by `audio_recordings`, `transcripts` and `recording_summaries`
- * (packages/database/src/schema.ts). Every statement is scoped to
- * `req.user!.id`; a row that exists but belongs to another user is reported as
- * 404, never 403, so the endpoint never confirms another user's recordings.
+ * Backed by `audio_recordings`, `transcripts`, `transcript_segments` and
+ * `recording_summaries` (packages/database/src/schema.ts). Every statement is
+ * scoped to `req.user!.id`; a row that exists but belongs to another user is
+ * reported as 404, never 403, so the endpoint never confirms another user's
+ * recordings.
+ *
+ * ## The pipeline these routes drive
+ *
+ * `POST /` creates the row; the rest of the capture pipeline — the raw audio
+ * upload, the asynchronous processing request and the capability report — lives
+ * in `routes/recordings-capture.ts`, and the work itself in
+ * `services/recording-pipeline.ts`. The `status` column those routes write is
+ * the honest lifecycle the client polls.
  *
  * List pagination follows the `/tasks`, `/reminders` and `/conversations`
  * convention: cursor over `id`, ordered by creation time, `limit + 1` to detect
@@ -14,7 +23,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../db/connection.js';
-import { audioRecordings, transcripts, recordingSummaries } from '@nova/database';
+import {
+	audioRecordings,
+	transcripts,
+	transcriptSegments,
+	recordingSummaries,
+} from '@nova/database';
 import { eq, desc, and, isNull, sql, gt, lt, asc } from 'drizzle-orm';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error-handler.js';
@@ -31,39 +45,17 @@ import {
 	UpdateRecordingSchema,
 	RecordingListQuerySchema,
 	parseCursorPagination,
-	decodeCursor,
 	encodeCursor,
 } from '../schemas/index.js';
+import { recordingCaptureRoutes } from './recordings-capture.js';
+import { parseCursor, parseRecordingId as parseId } from './recordings-shared.js';
 
 const router: ReturnType<typeof Router> = Router();
 
-const IdSchema = z.object({ id: z.string().uuid() });
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function parseId(raw: string): string {
-	const parsed = IdSchema.safeParse({ id: raw });
-	if (!parsed.success) {
-		throw new HttpError(400, 'Invalid recording ID format', 'INVALID_ID');
-	}
-	return parsed.data.id;
-}
-
-/**
- * Decode a list cursor and reject non-UUID payloads before they reach Postgres,
- * where `id > 'not-a-uuid'` would surface as a 500 rather than a 400.
- */
-function parseCursor(raw: string): string {
-	let id: string;
-	try {
-		id = decodeCursor(raw);
-	} catch {
-		throw new HttpError(400, 'Invalid cursor', 'INVALID_CURSOR');
-	}
-	if (!UUID_RE.test(id)) {
-		throw new HttpError(400, 'Invalid cursor', 'INVALID_CURSOR');
-	}
-	return id;
-}
+// The capture half (capabilities, audio upload, async processing) is registered
+// first so its literal `/capabilities` path is matched before the `/:id`
+// parameter route below, which would otherwise treat it as an id.
+router.use('/', recordingCaptureRoutes);
 
 // ─── /recordings ─────────────────────────────────────────────────────────────
 
@@ -125,11 +117,13 @@ router.get('/', authenticate, validate(RecordingListQuerySchema, 'query'), async
  *
  * The gate is server-side and reads only the caller's plan and current-period
  * meter; the model is never involved. The *amount* metered is the client-reported
- * `durationSeconds`, because this service does not yet measure the uploaded audio
- * (the upload pipeline writes a placeholder `storage_key` and is not wired). The
- * enforcement decision is unaffected by that: the gate asks whether any
- * allowance remains, so an under-reported duration makes the meter optimistic but
- * cannot unlock a plan whose allowance is already spent.
+ * `durationSeconds`, because the audio has not been uploaded yet at this point
+ * (the capture is still running) — the row is created first so the client has an
+ * id to upload against. `POST /:id/audio` replaces the placeholder `storage_key`
+ * with the real object key once the bytes are stored, and reports the true byte
+ * count; the enforcement decision here is unaffected, because the gate asks
+ * whether any allowance remains, so an under-reported duration makes the meter
+ * optimistic but cannot unlock a plan whose allowance is already spent.
  */
 router.post(
 	'/',
@@ -149,9 +143,11 @@ router.post(
 			language: body.language ?? null,
 			participants: body.participants ?? [],
 			status: 'recording',
-			// `storage_key` is NOT NULL and has no default. Until the upload
-			// pipeline writes the real object key, the row carries a placeholder
-			// scoped to its owner rather than failing the insert.
+			// `storage_key` is NOT NULL with no default, and at this moment the
+			// capture is still running so no object exists yet. The placeholder is
+			// scoped to its owner and is replaced by the real key in
+			// `POST /:id/audio`; it is never treated as evidence of stored audio
+			// (see `recordedAudioIsPresent`).
 			storageKey: body.storageKey ?? `recordings/${userId}/${randomUUID()}`,
 			durationSeconds: body.durationSeconds ?? null,
 			consentRecorded: body.consentRecorded ?? false,
@@ -170,6 +166,7 @@ router.post(
 	} catch (err) { next(err); }
 	},
 );
+
 
 router.get('/:id/summary', authenticate, async (req: AuthenticatedRequest, res, next) => {
 	try {
@@ -225,12 +222,22 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 			.where(eq(recordingSummaries.recordingId, id))
 			.limit(1);
 
+		// Segments are the transcript's own boundaries, as the provider reported
+		// them. `speakerIndex` is always 0 — there is no diarisation here — so a
+		// client must not read it as a speaker number.
+		const segments = transcript
+			? await db.select().from(transcriptSegments)
+				.where(eq(transcriptSegments.transcriptId, transcript.id))
+				.orderBy(asc(transcriptSegments.startMs))
+			: [];
+
 		res.status(200).json({
 			success: true,
 			data: {
 				recording,
 				transcript: transcript ?? null,
 				summary: summary ?? null,
+				segments,
 			},
 		});
 	} catch (err) { next(err); }

@@ -138,6 +138,11 @@ class DeviceActionRequest {
   }) => DeviceControlLevels.requiresConfirmation(action, threshold: threshold);
 
   /// The method name on `nova/device_control`.
+  ///
+  /// [DeviceAction.startRecording] and [DeviceAction.stopRecording] are executed
+  /// in Dart by the recorder; their method names exist only so that a mistaken
+  /// call still reaches Kotlin's honest "not an Android action" refusal instead
+  /// of looking like a missing case.
   String get method => switch (action) {
     DeviceAction.openApp => 'openApp',
     DeviceAction.openDeepLink => 'openDeepLink',
@@ -149,6 +154,8 @@ class DeviceActionRequest {
     DeviceAction.mediaPause ||
     DeviceAction.mediaNext ||
     DeviceAction.mediaPrevious => 'media',
+    DeviceAction.startRecording => 'startRecording',
+    DeviceAction.stopRecording => 'stopRecording',
   };
 
   /// The arguments map, with the exact keys the Kotlin handler reads.
@@ -165,6 +172,9 @@ class DeviceActionRequest {
     DeviceAction.mediaPause ||
     DeviceAction.mediaNext ||
     DeviceAction.mediaPrevious => <String, Object?>{'action': action.wireName},
+    // Nothing is sent to Android for the two capture actions.
+    DeviceAction.startRecording ||
+    DeviceAction.stopRecording => const <String, Object?>{},
   };
 
   /// A sentence describing exactly what will happen, for the confirmation sheet.
@@ -184,6 +194,11 @@ class DeviceActionRequest {
     DeviceAction.mediaPause => 'Send pause to the active media session.',
     DeviceAction.mediaNext => 'Skip to the next track.',
     DeviceAction.mediaPrevious => 'Go back to the previous track.',
+    DeviceAction.startRecording =>
+      'Open the microphone and start recording this meeting. Everyone present '
+          'must know they are being recorded.',
+    DeviceAction.stopRecording =>
+      'Stop the current recording, save it and send it for transcription.',
   };
 
   @override

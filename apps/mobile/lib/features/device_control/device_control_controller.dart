@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'device_control_models.dart';
 import 'device_control_platform.dart';
 import 'device_control_voice_commands.dart';
+import '../recording/recording_controller.dart';
 
 /// Native transport for device & system control.
 ///
@@ -223,6 +224,11 @@ class DeviceControlController extends Notifier<DeviceControlState> {
     DeviceVoiceCommand command, {
     bool confirmed = false,
   }) async {
+    // The two meeting-capture actions are executed by the recorder in Dart, not
+    // by an Android intent, so they never reach `perform`/the platform channel.
+    final capture = await _runMeetingCapture(command, confirmed: confirmed);
+    if (capture != null) return capture;
+
     var request = command.resolve(state.status);
     if (request == null && command.needsCurrentState) {
       // A relative brightness or a DND toggle needs the current value. Read it
@@ -260,6 +266,43 @@ class DeviceControlController extends Notifier<DeviceControlState> {
   void clearError() {
     if (state.error == null) return;
     state = state.copyWith(clearError: true);
+  }
+
+  /// Runs a matched meeting-capture command through the in-app recorder.
+  ///
+  /// Returns null when [command] is not a capture action, so the normal device
+  /// path continues. `start_recording` is L3 and never runs without [confirmed];
+  /// the confirmation sheet shows the §9.5 consent wording ("Everyone present
+  /// must know they are being recorded"), so a confirmed start also records the
+  /// consent acknowledgement for that session. Nothing is faked: the message
+  /// returned is the recorder's own outcome.
+  Future<DeviceOutcome?> _runMeetingCapture(
+    DeviceVoiceCommand command, {
+    required bool confirmed,
+  }) async {
+    final action = command.action;
+    if (!action.isMeetingCapture) return null;
+
+    // Both actions are at or above the L1 confirmation threshold, and speech
+    // never pre-confirms: nothing runs until the caller has shown the sheet.
+    if (!confirmed) {
+      return _record(DeviceOutcome.confirmationRequired);
+    }
+
+    final recorder = ref.read(recordingControllerProvider.notifier);
+    final result = action == DeviceAction.startRecording
+        ? await recorder.startFromVoice(consentAcknowledged: true)
+        : await recorder.stopFromVoice();
+
+    return _record(
+      DeviceOutcome(
+        code: result.ok ? DeviceOutcomeCode.ok : DeviceOutcomeCode.failed,
+        message: result.message,
+        extras: <String, Object?>{
+          if (result.route != null) 'route': result.route,
+        },
+      ),
+    );
   }
 
   DeviceOutcome _record(DeviceOutcome outcome) {

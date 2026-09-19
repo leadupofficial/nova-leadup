@@ -535,7 +535,31 @@ export async function openAIChatCompletion(
 
 // ─── Speech-to-Text (Deepgram — English default) ─────────────────────
 
-export async function transcribeAudio(audioBuffer: Buffer, language: string = 'en'): Promise<{ transcript: string; confidence: number; language: string }> {
+/**
+ * One recognised word with the provider's own timing for it.
+ *
+ * Present only when the provider returns word-level timing — Deepgram does by
+ * default, Sarvam and Google on this integration do not. Callers must treat it
+ * as optional: a missing list means "timing unknown", never "no speech".
+ */
+export interface TranscribedWord {
+	word: string;
+	startSeconds: number;
+	endSeconds: number;
+	confidence: number;
+}
+
+/**
+ * Transcribe a whole audio file with Deepgram.
+ *
+ * `punctuate=true&smart_format=true` are requested explicitly. Deepgram leaves
+ * both off by default, and without them the transcript arrives as one
+ * unpunctuated run of words — which costs the meeting pipeline its sentence
+ * boundaries twice over: the stored segments cannot end at a sentence, and the
+ * extractive summary has no sentences to quote. Asking for punctuation is what
+ * makes `transcript_segments` and the grounded fallback meaningful.
+ */
+export async function transcribeAudio(audioBuffer: Buffer, language: string = 'en'): Promise<{ transcript: string; confidence: number; language: string; words?: TranscribedWord[] }> {
 	if (!env.DEEPGRAM_API_KEY) {
 		throw new Error('DEEPGRAM_API_KEY is not configured');
 	}
@@ -545,7 +569,7 @@ export async function transcribeAudio(audioBuffer: Buffer, language: string = 'e
 	const timeoutId = setTimeout(() => controller.abort(), 30_000);
 
 	try {
-		const response = await fetch('https://api.deepgram.com/v1/listen', {
+		const response = await fetch('https://api.deepgram.com/v1/listen?punctuate=true&smart_format=true', {
 			method: 'POST',
 			signal: controller.signal,
 			headers: {
@@ -560,14 +584,46 @@ export async function transcribeAudio(audioBuffer: Buffer, language: string = 'e
 			throw new Error(`Deepgram STT failed (${response.status}): ${text}`);
 		}
 
-		const result = await response.json() as { results?: { channels?: { alternatives: { transcript: string; confidence: number }[] }[] } };
+		const result = await response.json() as {
+			results?: {
+				channels?: {
+					alternatives: {
+						transcript: string;
+						confidence: number;
+						words?: Array<{
+							word?: string;
+							punctuated_word?: string;
+							start?: number;
+							end?: number;
+							confidence?: number;
+						}>;
+					}[];
+				}[];
+			};
+		};
 		const channel = result.results?.channels?.[0];
 		const alternative = channel?.alternatives?.[0];
+
+		// Word timing is passed through when the provider supplied it, so the
+		// meeting pipeline can store real segment boundaries instead of
+		// inventing them. Absent for providers that do not return it.
+		const words: TranscribedWord[] | undefined = alternative?.words?.length
+			? alternative.words
+				.filter((w) => typeof w.start === 'number' && typeof w.end === 'number')
+				.map((w) => ({
+					word: w.punctuated_word || w.word || '',
+					startSeconds: w.start as number,
+					endSeconds: w.end as number,
+					confidence: typeof w.confidence === 'number' ? w.confidence : 0,
+				}))
+				.filter((w) => w.word.length > 0)
+			: undefined;
 
 		return {
 			transcript: alternative?.transcript || '',
 			confidence: alternative?.confidence || 0,
 			language: (result.results?.channels?.[0] as any)?.detected_language || language,
+			...(words ? { words } : {}),
 		};
 	} finally {
 		clearTimeout(timeoutId);
@@ -1095,7 +1151,7 @@ export async function translateText(
 export async function transcribeAudioForLanguage(
 	audioBuffer: Buffer,
 	language: string
-): Promise<{ transcript: string; confidence: number; language: string; provider: string }> {
+): Promise<{ transcript: string; confidence: number; language: string; provider: string; words?: TranscribedWord[] }> {
 	const provider = getSttProviderForLanguage(language as any);
 	try {
 		if (provider === 'sarvam') {
