@@ -74,6 +74,12 @@ export interface SpeechStreamOptions {
 	 * happened. Absent when the language has no Deepgram voice.
 	 */
 	onFallback?: (info: TtsFallbackInfo) => void;
+	/**
+	 * Fired exactly once per sentence with the provider that actually
+	 * synthesised it, so cost accounting can bill the fallback's rate rather
+	 * than the primary's. Not called for a sentence that no provider could voice.
+	 */
+	onProvider?: (provider: string) => void;
 }
 
 /**
@@ -142,7 +148,9 @@ function dropEmptyMinutes(text: string): string {
  */
 export async function openSpeechStream(options: SpeechStreamOptions): Promise<ReadableStream<Uint8Array>> {
 	try {
-		return await openSarvamSpeechStream(options);
+		const body = await openSarvamSpeechStream(options);
+		options.onProvider?.(PRIMARY_STREAM_PROVIDER);
+		return body;
 	} catch (err) {
 		if (options.signal?.aborted || (err as { name?: string } | null)?.name === 'AbortError') throw err;
 
@@ -159,6 +167,7 @@ export async function openSpeechStream(options: SpeechStreamOptions): Promise<Re
 			const clip = await synthesizeSpeech(options.text, DEFAULT_ELEVENLABS_VOICE_ID, {
 				signal: options.signal,
 			});
+			options.onProvider?.('elevenlabs');
 			options.onFallback?.({ from: PRIMARY_STREAM_PROVIDER, to: 'elevenlabs', reason });
 			return singleClip(clip.audioBuffer);
 		}
@@ -179,6 +188,7 @@ export async function openSpeechStream(options: SpeechStreamOptions): Promise<Re
 			const clip = await synthesizeSpeechDeepgram(options.text, options.language, {
 				signal: options.signal,
 			});
+			options.onProvider?.('deepgram');
 			options.onFallback?.({ from: PRIMARY_STREAM_PROVIDER, to: 'deepgram', reason });
 			return singleClip(clip.audioBuffer);
 		}

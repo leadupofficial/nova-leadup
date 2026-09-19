@@ -50,6 +50,19 @@ export interface SttFallbackInfo {
 	message: string;
 }
 
+/**
+ * What one utterance sent to STT, for cost accounting.
+ *
+ * Bytes are counted at the point they are written to a provider, so the total
+ * includes audio replayed into a fallback socket — that replay is sent to a
+ * second provider and can be billed by it too. `provider` is the recogniser
+ * that produced the transcript, which is the one the turn is priced against.
+ */
+export interface SttUtteranceUsage {
+	provider: SttProviderName | null;
+	providers: Array<{ provider: SttProviderName; bytes: number }>;
+}
+
 export interface SttControllerOptions {
 	userId: string;
 	/** Interim transcript from the provider. */
@@ -86,6 +99,10 @@ export class SttController {
 	private replay: Buffer[] = [];
 	private replayBytes = 0;
 	private replayCapped = false;
+	/** Bytes written to each provider during the current utterance (live + replay). */
+	private bytesByProvider = new Map<SttProviderName, number>();
+	/** Snapshot of the utterance that was just finalised, for cost accounting. */
+	private lastUtterance: SttUtteranceUsage | null = null;
 	/** Set by `requestFinal`, re-sent if the fallback socket is not open yet. */
 	private finalRequested = false;
 
@@ -139,6 +156,8 @@ export class SttController {
 					},
 					onFinal: (text) => {
 						if (this.session !== session) return;
+						// Snapshot before the reset below clears the counters.
+						this.captureUtterance(session.provider);
 						// The utterance is done, so its replay buffer is spent.
 						this.resetTurn();
 						this.options.onFinal(text);
@@ -222,8 +241,12 @@ export class SttController {
 		this.options.onFallback?.({ from, to, code, message: message.slice(0, 300) });
 
 		// Replay what the user already said. The fallback queues it until its own
-		// handshake completes, so nothing is lost while it connects.
-		for (const chunk of this.replay) session.sendAudio(chunk);
+		// handshake completes, so nothing is lost while it connects. Counted
+		// separately: this audio is written to a second provider.
+		for (const chunk of this.replay) {
+			session.sendAudio(chunk);
+			this.countBytes(session.provider, chunk.length);
+		}
 		this.replay = [];
 		this.replayBytes = 0;
 		this.replayCapped = false;
@@ -231,6 +254,7 @@ export class SttController {
 
 	sendAudio(pcm: Buffer): void {
 		if (!this.session) return;
+		this.countBytes(this.session.provider, pcm.length);
 		// Keep this utterance's audio so a fatal rejection can be replayed into
 		// the fallback. After the turn has fallen back nothing else can consume
 		// it, so buffering stops there.
@@ -259,12 +283,29 @@ export class SttController {
 		this.session?.keepAlive();
 	}
 
+	/** The utterance that was just finalised, for per-turn cost accounting. */
+	lastUtteranceUsage(): SttUtteranceUsage | null {
+		return this.lastUtterance;
+	}
+
+	private countBytes(provider: SttProviderName, bytes: number): void {
+		this.bytesByProvider.set(provider, (this.bytesByProvider.get(provider) ?? 0) + bytes);
+	}
+
+	private captureUtterance(provider: SttProviderName): void {
+		this.lastUtterance = {
+			provider,
+			providers: [...this.bytesByProvider.entries()].map(([name, bytes]) => ({ provider: name, bytes })),
+		};
+	}
+
 	/** Called at the start of every utterance and once one is transcribed. */
 	private resetTurn(): void {
 		this.replay = [];
 		this.replayBytes = 0;
 		this.replayCapped = false;
 		this.finalRequested = false;
+		this.bytesByProvider.clear();
 	}
 
 	/** Idempotent teardown; never throws. */

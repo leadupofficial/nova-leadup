@@ -67,6 +67,12 @@ export interface ReplyResult {
 	toolCalls: ExecutedToolCall[];
 	iterations: number;
 	capped: boolean;
+	/**
+	 * Characters handed to synthesis this reply, keyed by the provider that
+	 * actually spoke them. Per provider because a mid-reply fallback changes
+	 * the rate the characters are billed at.
+	 */
+	ttsCharsByProvider: Record<string, number>;
 }
 
 function abortError(): Error {
@@ -91,6 +97,8 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 	let ttsFallbackReported = false;
 	/** Serialises sentence synthesis so audio is emitted in text order. */
 	let ttsChain: Promise<void> = Promise.resolve();
+	/** Characters billed per synthesiser, for the per-turn cost record. */
+	const ttsCharsByProvider: Record<string, number> = {};
 
 	const check = (): void => {
 		if (signal.aborted) throw abortError();
@@ -111,6 +119,11 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 					text: speakable,
 					language: options.language,
 					signal,
+					// Billed when the sentence is handed over, regardless of how
+					// much of the stream the client ends up playing.
+					onProvider: (provider) => {
+						ttsCharsByProvider[provider] = (ttsCharsByProvider[provider] ?? 0) + speakable.length;
+					},
 					onFallback: (info) => {
 						// The primary fails on every sentence while it is down, so
 						// report the switch once rather than once per sentence.
@@ -210,5 +223,6 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 		toolCalls: result.toolCalls,
 		iterations: result.iterations,
 		capped: result.capped,
+		ttsCharsByProvider,
 	};
 }

@@ -27,9 +27,10 @@ import { ClientMessageSchema, DEFAULT_LANGUAGE } from './protocol.js';
 import type { ClientMessage, ServerEvent } from './protocol.js';
 import { EnergyBargeIn, MAX_SOCKET_BUFFER_BYTES, sleep } from './audio.js';
 import { isSupportedLanguage, normalizeLanguage } from './language.js';
-import { SttController } from './stt/controller.js';
+import { SttController, type SttUtteranceUsage } from './stt/controller.js';
 import { isAbortError } from './llm.js';
 import { runReply } from './reply.js';
+import { logTurnCost } from './cost.js';
 import type { ChatMessage } from '../services/ai.js';
 
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
@@ -71,6 +72,8 @@ export class RealtimeVoiceSession {
 	private activeTurn: ActiveTurn | null = null;
 	private turnSeq = 0;
 	private speaking = false;
+	/** STT usage of the utterance that produced the turn now starting. */
+	private pendingStt: SttUtteranceUsage | null = null;
 
 	private history: ChatMessage[] = [];
 
@@ -110,6 +113,8 @@ export class RealtimeVoiceSession {
 				}
 			},
 			onFinal: (text) => {
+				// Snapshot the utterance's STT usage before the next turn resets it.
+				this.pendingStt = this.stt.lastUtteranceUsage();
 				void this.beginTurn(text);
 			},
 			onSpeechStart: () => {
@@ -398,6 +403,9 @@ export class RealtimeVoiceSession {
 
 	private async beginTurn(rawText: string): Promise<void> {
 		const text = rawText.trim();
+		// Consume the snapshot either way, so a later typed turn cannot inherit it.
+		const sttUsage = this.pendingStt;
+		this.pendingStt = null;
 		if (this.closed || !text) return;
 
 		// A final arriving mid-reply is a barge-in that the provider already
@@ -464,6 +472,22 @@ export class RealtimeVoiceSession {
 				},
 				'Realtime voice turn complete',
 			);
+
+			// Per-turn cost of the three billed legs. Logging only — synchronous,
+			// no network call, no await, so it is off the reply's critical path.
+			logTurnCost({
+				userId: this.user.id,
+				turnId,
+				language: this.language,
+				stt: sttUsage,
+				llm: {
+					provider: 'anthropic',
+					model: result.model,
+					inputTokens: result.usage.inputTokens,
+					outputTokens: result.usage.outputTokens,
+				},
+				ttsCharsByProvider: result.ttsCharsByProvider,
+			});
 
 			this.remember(text, result.text);
 			this.activeTurn = null;
