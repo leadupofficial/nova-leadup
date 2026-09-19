@@ -51,6 +51,8 @@ const CREATE_TASK_DESCRIPTION = [
 	'Add a task to the user\'s task list.',
 	'Use this when the user asks to add, note down or keep track of something to do but gives no specific time to be alerted',
 	'("add a task to send the invoice"). If they give a deadline, put it in `due_at` as an ISO 8601 date-time.',
+	'When they name a day but no time ("due tomorrow"), use the end of that day — 18:00 in the user timezone —',
+	'not midnight. A task due tomorrow is due by the end of tomorrow, and midnight sorts it to the very start of the day.',
 ].join(' ');
 
 const SAVE_MEMORY_DESCRIPTION = [
@@ -72,7 +74,8 @@ export const ASSISTANT_TOOLS: ToolDefinition[] = [
 				trigger_at: {
 					type: 'string',
 					description:
-						'When to notify, ISO 8601, e.g. "2026-09-19T17:00:00+05:30". A value with no offset is read in the user timezone. Must be in the future.',
+						'When to notify, ISO 8601, e.g. "2026-09-19T17:00:00+05:30". A value with no offset is read in the user timezone. Must be in the future. ' +
+						'If the user gives a day but no time, send 18:00 that day rather than a date on its own: a bare date is read as midnight, which would fire at the very start of the day.',
 				},
 				timezone: {
 					type: 'string',
@@ -93,7 +96,8 @@ export const ASSISTANT_TOOLS: ToolDefinition[] = [
 				due_at: {
 					type: 'string',
 					description:
-						'Optional deadline, ISO 8601, e.g. "2026-09-19T17:00:00+05:30". A value with no offset is read in the user timezone.',
+						'Optional deadline, ISO 8601, e.g. "2026-09-19T17:00:00+05:30". A value with no offset is read in the user timezone. ' +
+						'If the user gives a day but no time, send 18:00 that day rather than a date on its own: a bare date is read as midnight, which is the start of the day, not the deadline.',
 				},
 			},
 			required: ['title'],
