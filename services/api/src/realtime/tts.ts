@@ -25,12 +25,15 @@
 import { env } from '../utils/env.js';
 import { HttpError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
-import { synthesizeSpeechDeepgram, toDeepgramVoiceModel } from '../services/ai.js';
+import { synthesizeSpeech, synthesizeSpeechDeepgram, toDeepgramVoiceModel } from '../services/ai.js';
 
 export const SARVAM_TTS_STREAM_URL = 'https://api.sarvam.ai/text-to-speech/stream';
 
 /** The realtime path's primary (and, for now, only) streaming provider. */
 export const PRIMARY_STREAM_PROVIDER = 'sarvam';
+
+/** ElevenLabs' stock narrator voice, used when the request names none. */
+export const DEFAULT_ELEVENLABS_VOICE_ID = '21m00Tcm4TlvDq8ikWAM';
 
 /** Sarvam's default v3 speaker; overridable so the voice can change later. */
 export const DEFAULT_SPEAKER = 'priya';
@@ -115,47 +118,62 @@ export async function openSpeechStream(options: SpeechStreamOptions): Promise<Re
 	} catch (err) {
 		if (options.signal?.aborted || (err as { name?: string } | null)?.name === 'AbortError') throw err;
 
+		const reason = err instanceof Error ? err.message : String(err);
+
+		// Cloud fallback #1 — Deepgram Aura. English and six European/Japanese
+		// languages only; it ships no Indic voices at all.
 		const model = toDeepgramVoiceModel(options.language);
-		if (!model || !env.DEEPGRAM_API_KEY) {
-			// No cloud voice for this language (Deepgram ships no Indic voices) or
-			// no key: keep the primary's error so the client can play its device
-			// voice rather than waiting on a fallback that cannot work.
-			throw err;
+		if (model && env.DEEPGRAM_API_KEY) {
+			logger.warn(
+				{ primary: PRIMARY_STREAM_PROVIDER, fallback: 'deepgram', model, language: options.language, reason },
+				'Streaming TTS primary failed; Deepgram is speaking this sentence instead'
+			);
+			const clip = await synthesizeSpeechDeepgram(options.text, options.language, {
+				signal: options.signal,
+			});
+			options.onFallback?.({ from: PRIMARY_STREAM_PROVIDER, to: 'deepgram', reason });
+			return singleClip(clip.audioBuffer);
 		}
 
-		logger.warn(
-			{
-				primary: PRIMARY_STREAM_PROVIDER,
-				fallback: 'deepgram',
-				model,
-				language: options.language,
-				reason: err instanceof Error ? err.message : String(err),
-			},
-			'Streaming TTS primary failed; Deepgram is speaking this sentence instead'
-		);
+		// Cloud fallback #2 — ElevenLabs on its multilingual model, which does
+		// cover Tamil, Hindi and the rest of the Indic set. Without this, an
+		// unfunded Sarvam account meant Tamil had no cloud voice left at all and
+		// fell straight to the device — which is exactly the state this was in.
+		if (env.ELEVENLABS_API_KEY) {
+			logger.warn(
+				{ primary: PRIMARY_STREAM_PROVIDER, fallback: 'elevenlabs', language: options.language, reason },
+				'Streaming TTS primary failed; ElevenLabs is speaking this sentence instead'
+			);
+			const clip = await synthesizeSpeech(options.text, DEFAULT_ELEVENLABS_VOICE_ID, {
+				signal: options.signal,
+			});
+			options.onFallback?.({ from: PRIMARY_STREAM_PROVIDER, to: 'elevenlabs', reason });
+			return singleClip(clip.audioBuffer);
+		}
 
-		const clip = await synthesizeSpeechDeepgram(options.text, options.language, {
-			signal: options.signal,
-		});
-		options.onFallback?.({
-			from: PRIMARY_STREAM_PROVIDER,
-			to: 'deepgram',
-			reason: err instanceof Error ? err.message : String(err),
-		});
-
-		// Deepgram's `/v1/speak` is a single POST that returns the whole clip, so
-		// a sentence arrives in one piece rather than progressively. The realtime
-		// path still streams *sentence by sentence* — speech for sentence 1 starts
-		// while the model is still writing sentence 3 — but there is no
-		// within-sentence progression here. That is the accepted trade-off for
-		// having a working cloud voice while the streaming primary is dead.
-		return new ReadableStream<Uint8Array>({
-			start(controller) {
-				controller.enqueue(new Uint8Array(clip.audioBuffer));
-				controller.close();
-			},
-		});
+		// Nothing cloud-side can voice this language: keep the primary's error so
+		// the client plays its device voice rather than waiting on a fallback that
+		// cannot work.
+		throw err;
 	}
+}
+
+/**
+ * Wraps a whole clip as a one-chunk stream.
+ *
+ * Neither fallback streams progressively — both are single POSTs returning the
+ * finished audio — so a *sentence* arrives in one piece. The realtime path still
+ * streams sentence by sentence: speech for sentence 1 begins while the model is
+ * still writing sentence 3. There is just no within-sentence progression here,
+ * which is the accepted trade for having a working cloud voice at all.
+ */
+function singleClip(audio: Buffer): ReadableStream<Uint8Array> {
+	return new ReadableStream<Uint8Array>({
+		start(controller) {
+			controller.enqueue(new Uint8Array(audio));
+			controller.close();
+		},
+	});
 }
 
 /** The primary streaming attempt, isolated so `openSpeechStream` can fall back. */

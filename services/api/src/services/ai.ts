@@ -685,7 +685,7 @@ export async function synthesizeSpeechDeepgram(
 export async function synthesizeSpeech(
 	text: string,
 	voiceId: string,
-	options?: { speed?: number; stability?: number }
+	options?: { speed?: number; stability?: number; signal?: AbortSignal }
 ): Promise<{ audioBuffer: Buffer; contentType: string; durationMs: number }> {
 	if (!env.ELEVENLABS_API_KEY) {
 		throw new Error('ELEVENLABS_API_KEY is not configured');
@@ -694,6 +694,9 @@ export async function synthesizeSpeech(
 	// P0-06: AbortSignal timeout — 60 seconds for TTS
 	const controller = new AbortController();
 	const timeoutId = setTimeout(() => controller.abort(), 60_000);
+	// A caller's signal (barge-in cancelling an in-flight sentence) aborts the
+	// request too, rather than leaving it to run to completion unheard.
+	options?.signal?.addEventListener('abort', () => controller.abort(), { once: true });
 
 	try {
 		const response = await withCircuitBreaker(
@@ -708,7 +711,11 @@ export async function synthesizeSpeech(
 					},
 					body: JSON.stringify({
 						text,
-						model_id: 'eleven_turbo_v2',
+						// `eleven_turbo_v2` is English-only, so a Tamil or Hindi reply
+						// came back as mangled English phonetics. `v2_5` is the
+						// multilingual turbo model — same latency profile, 32
+						// languages — and is verified working for ta, hi and en.
+						model_id: 'eleven_turbo_v2_5',
 						voice_settings: {
 							stability: options?.stability ?? 0.5,
 							similarity_boost: 0.75,

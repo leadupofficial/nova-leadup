@@ -359,6 +359,38 @@ router.post('/tts', authenticate, validate(TtsSchema), async (req: Authenticated
 					logger.warn({ err: fallbackErr, language }, 'Sarvam TTS fallback also failed');
 				}
 			}
+			// Cloud fallback #3 — ElevenLabs on its multilingual model, which covers
+			// Tamil, Hindi and the rest of the Indic set. This is what stops an
+			// unfunded Sarvam account from meaning "the user hears nothing": with
+			// both Sarvam and the Deepgram voices unavailable (Deepgram has no Indic
+			// voices at all), this is the only cloud path left for Tamil.
+			if (voiceProvider !== 'elevenlabs' && env.ELEVENLABS_API_KEY) {
+				try {
+					const fallback = await synthesizeSpeech(
+						body.text,
+						body.voiceId || '21m00Tcm4TlvDq8ikWAM'
+					);
+					logger.warn(
+						{ language, primary: voiceProvider, fallback: 'elevenlabs', reason: ttsErr },
+						'TTS provider failed; served by the ElevenLabs fallback'
+					);
+					res.status(200).json({
+						success: true,
+						data: {
+							audioData: fallback.audioBuffer.toString('base64'),
+							url: null,
+							contentType: fallback.contentType,
+							voice: body.voiceId || 'default',
+							durationMs: Math.round((fallback.audioBuffer.length / 16000) * 1000),
+							provider: 'elevenlabs-fallback',
+							language,
+						},
+					});
+					return;
+				} catch (fallbackErr) {
+					logger.warn({ err: fallbackErr, language }, 'ElevenLabs TTS fallback also failed');
+				}
+			}
 			logger.warn(
 				{ language, primary: voiceProvider, fallback: 'device', reason: ttsErr },
 				'No cloud TTS voice available; the client must use its device voice'
