@@ -4,7 +4,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { getDb } from '../db/connection.js';
-import { tasks } from '@nova/database';
+import { tasks, users } from '@nova/database';
 import { eq, desc, and, sql, gt, lt, asc } from 'drizzle-orm';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error-handler.js';
@@ -24,6 +24,23 @@ const router: ReturnType<typeof Router> = Router();
 
 const TaskStatus = z.enum(['pending', 'in_progress', 'completed', 'cancelled']);
 
+/**
+ * Refuse an assignee id that does not name a real user.
+ *
+ * `tasks.assignee_id` carries a foreign key, so a dangling id would fail at the
+ * database regardless — but as an opaque 23503 the error handler would surface
+ * as a 500. Checking here turns it into a 400 the caller can act on, and keeps
+ * the API honest: an assignment it reports as accepted really names a user.
+ */
+async function assertAssigneeExists(db: ReturnType<typeof getDb>, assigneeId: string): Promise<void> {
+	const [assignee] = await db.select({ id: users.id }).from(users)
+		.where(eq(users.id, assigneeId))
+		.limit(1);
+	if (!assignee) {
+		throw new HttpError(400, 'Assignee does not exist', 'ASSIGNEE_NOT_FOUND');
+	}
+}
+
 // ─── /tasks ──────────────────────────────────────────────────────────────────
 
 router.get('/', authenticate, validate(TaskListQuerySchema, 'query'), async (req: AuthenticatedRequest, res, next) => {
@@ -39,6 +56,7 @@ router.get('/', authenticate, validate(TaskListQuerySchema, 'query'), async (req
 		const whereClauses = [eq(tasks.userId, userId)];
 		if (q.status) whereClauses.push(eq(tasks.status, q.status));
 		if (q.priority) whereClauses.push(eq(tasks.priority, q.priority));
+		if (q.assigneeId) whereClauses.push(eq(tasks.assigneeId, q.assigneeId));
 
 		const cursorColumn = tasks.id;
 
@@ -94,11 +112,16 @@ router.post('/', authenticate, validate(CreateTaskSchema), async (req: Authentic
 		const userId = req.user!.id;
 		const now = new Date();
 
+		if (body.assigneeId !== undefined) {
+			await assertAssigneeExists(db, body.assigneeId);
+		}
+
 		const [task] = await db.insert(tasks).values({
 			userId,
 			title: body.title,
 			description: body.description ?? null,
 			priority: body.priority,
+			assigneeId: body.assigneeId ?? null,
 			dueAt: body.dueAt ?? null,
 			tags: body.tags ?? [],
 			source: 'manual',
@@ -158,7 +181,16 @@ router.patch('/:id', authenticate, validate(UpdateTaskSchema), async (req: Authe
 		if (body.priority !== undefined) updateData.priority = body.priority;
 		if (body.dueAt !== undefined) updateData.dueAt = body.dueAt;
 		if (body.tags !== undefined) updateData.tags = body.tags;
-		if (body.assigneeId !== undefined) updateData.assigneeId = body.assigneeId;
+		if (body.assigneeId !== undefined) {
+			// `null` is the documented way to clear the delegation; a real id
+			// must name a user, for the same reason as on create.
+			if (body.assigneeId === null) {
+				updateData.assigneeId = null;
+			} else {
+				await assertAssigneeExists(db, body.assigneeId);
+				updateData.assigneeId = body.assigneeId;
+			}
+		}
 
 		const [updated] = await db.update(tasks)
 			.set(updateData)

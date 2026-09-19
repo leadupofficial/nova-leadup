@@ -15,6 +15,13 @@
       "when": 1789817228838,
       "tag": "0001_glorious_karma",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789820152334,
+      "tag": "0002_public_harry_osborn",
+      "breakpoints": true
     }
   ]
 }

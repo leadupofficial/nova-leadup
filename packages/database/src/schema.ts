@@ -328,6 +328,13 @@ export const tasks = pgTable('tasks', {
  description: text('description'),
  status: varchar('status', { length: 50 }).default('pending').notNull(),
  priority: varchar('priority', { length: 50 }).default('medium').notNull(),
+ // The task's owner/delegate, per the master document §5.8 ("owner" and
+ // "Waiting on others"). Nullable: an unassigned task is the normal case.
+ // `set null`, not `cascade`, deliberately — a task belongs to its creator
+ // (`userId`), not to the person it was handed to, so deleting the assignee's
+ // account must clear the delegation, never destroy the creator's task.
+ // Mirrors `reminders.linkedTaskId`.
+ assigneeId: uuid('assignee_id').references(() => users.id, { onDelete: 'set null' }),
  dueAt: timestamp('due_at'),
  completedAt: timestamp('completed_at'),
  source: varchar('source', { length: 50 }).default('manual').notNull(),
