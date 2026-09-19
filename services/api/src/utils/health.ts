@@ -230,7 +230,12 @@ export async function runHealthChecks(): Promise<HealthReport> {
 
 	let status: 'healthy' | 'degraded' | 'unhealthy';
 	if (summary.down === 0) {
-		status = summary.disabled > 0 ? 'healthy' : 'healthy';
+		// Nothing is failing. A check reporting `disabled` means it could not be run —
+		// typically a dependency this deployment does not configure — which is not the
+		// same as a failure, so it does not downgrade the status. This was previously
+		// written as `summary.disabled > 0 ? 'healthy' : 'healthy'`, which read as
+		// though a distinction were being made when the branches were identical.
+		status = 'healthy';
 	} else if (summary.down === summary.total) {
 		status = 'unhealthy';
 	} else {
