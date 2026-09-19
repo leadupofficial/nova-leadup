@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/providers.dart';
 import '../../core/api/models.dart';
 import '../../core/api/nova_api.dart';
 import '../../core/api/providers.dart';
@@ -46,7 +47,14 @@ class _ConversePageState extends ConsumerState<ConversePage> {
   bool _speaking = false;
 
   /// Off by default: NOVA must never start talking at a user unprompted.
+  ///
+  /// Persisted, though. The choice used to live only in widget state, so anyone
+  /// who *did* want spoken replies had to switch it back on after every restart,
+  /// which reads as the setting being broken rather than as a default.
   bool _speakReplies = false;
+
+  /// Preference key for [_speakReplies]. `shared_preferences` prefixes this.
+  static const String speakRepliesPreferenceKey = 'nova_speak_replies';
 
   String? _notice;
   bool _noticeIsError = false;
@@ -57,6 +65,11 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     super.initState();
     _realtime = ref.read(voiceRealtimeProvider.notifier);
     _playback = ref.read(voicePlaybackProvider);
+    // Restore the persisted choice before the first frame, so the toggle does
+    // not visibly flip from off to on after the page paints.
+    _speakReplies =
+        ref.read(sharedPreferencesProvider).getBool(speakRepliesPreferenceKey) ??
+        false;
     _speakingSub = _playback.playingStream.listen((playing) {
       if (mounted && _speaking != playing) setState(() => _speaking = playing);
     });
@@ -385,8 +398,19 @@ class _ConversePageState extends ConsumerState<ConversePage> {
                   speakReplies: _speakReplies,
                   onBack: () => context.go('/'),
                   onHistory: () => context.push('/conversations'),
-                  onToggleSpeak: () =>
-                      setState(() => _speakReplies = !_speakReplies),
+                  onToggleSpeak: () {
+                    final next = !_speakReplies;
+                    setState(() => _speakReplies = next);
+                    // Persist so the choice survives a restart.
+                    unawaited(
+                      ref
+                          .read(sharedPreferencesProvider)
+                          .setBool(speakRepliesPreferenceKey, next),
+                    );
+                    // Switching speech off mid-sentence should stop it now
+                    // rather than let the current reply finish talking.
+                    if (!next) unawaited(_playback.stop());
+                  },
                 ),
 
                 if (notice != null)
