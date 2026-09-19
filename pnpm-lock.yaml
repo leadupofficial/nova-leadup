@@ -784,6 +784,9 @@ importers:
       compression:
         specifier: ^1.7.4
         version: 1.8.1
+      dotenv:
+        specifier: ^16.4.0
+        version: 16.6.1
       express:
         specifier: ^4.21.0
         version: 4.22.2

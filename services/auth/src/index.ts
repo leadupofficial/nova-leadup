@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 /**
  * @nova/auth — Authentication and RBAC Service
  *
@@ -105,10 +106,34 @@ app.use((_req, res) => {
 // Global error handler (RFC 7807)
 app.use(errorHandler);
 
-const server = app.listen(PORT, () => {
+// Listen ONLY when this file is the process entry point.
+//
+// This module is both the auth service AND the home of `authenticateJwt`, which
+// seventeen files across six other services import. Because the server started at
+// module scope, every one of those imports booted a second auth server on whatever
+// PORT happened to be set - invisible while each container had its own namespace and
+// its own default, and a hard EADDRINUSE the moment a service set PORT for itself.
+// The integration service died on exactly that: it imported the middleware, and
+// @nova/auth took the port first.
+//
+// Importing a library must not have side effects. The container runs
+// `node dist/index.js`, so this stays true there.
+const isEntryPoint = (() => {
+ const entry = process.argv[1];
+ if (!entry) return false;
+ try {
+ return import.meta.url === pathToFileURL(entry).href;
+ } catch {
+ return false;
+ }
+})();
+
+if (isEntryPoint) {
+ const server = app.listen(PORT, () => {
  console.log(`[auth] @nova/auth listening on :${PORT}`);
-});
-server.timeout = 30_000;
-(server as any).setTimeout(30_000);
+ });
+ server.timeout = 30_000;
+ (server as any).setTimeout(30_000);
+}
 
 export default app;

@@ -6,7 +6,12 @@ import morgan from 'morgan';
 import { integrationRoutes } from './routes/integrations.js';
 
 const app: Express = express();
-const PORT = process.env.PORT || 3005;
+// `process.env.PORT` is a STRING. Passing it straight to `listen()` makes Node treat
+// it as a unix socket path rather than a TCP port, which fails with EADDRINUSE
+// against a stale socket file - indistinguishable at a glance from a real port
+// clash, and it reproduces on any port number. services/api already parses; this one
+// did not.
+const PORT = parseInt(process.env.PORT || '3005', 10);
 
 app.use(helmet());
 app.use(cors({ origin: ['http://localhost:3000', 'http://localhost:3004', 'http://localhost:3005'] }));
