@@ -11,6 +11,7 @@ import './setup.js';
 import app from '../server.js';
 import { getDb } from '../db/connection.js';
 import jwt from 'jsonwebtoken';
+import { PgDialect } from 'drizzle-orm/pg-core';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 
@@ -115,5 +116,87 @@ describe('DELETE /api/v1/tasks/:id', () => {
       .delete(`/api/v1/tasks/${OTHER_TASK_ID}`)
       .set(authHeader(token));
     expect(res.status).toBe(204);
+  });
+});
+
+describe('task priority', () => {
+  // Regression: the API required, validated and accepted `priority`, then
+  // dropped it before the INSERT because `tasks` had no such column. The
+  // in-memory builder echoes the inserted `values`, so these assertions fail
+  // if the route ever omits the field again.
+  it('persists the priority sent on create', async () => {
+    const token = createToken();
+    const res = await request(app)
+      .post('/api/v1/tasks')
+      .set(authHeader(token))
+      .send({ title: 'Urgent task', priority: 'urgent', status: 'pending' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.priority).toBe('urgent');
+  });
+
+  it('rejects an invalid priority on create', async () => {
+    const token = createToken();
+    const res = await request(app)
+      .post('/api/v1/tasks')
+      .set(authHeader(token))
+      .send({ title: 'Bad priority', priority: 'super-urgent', status: 'pending' });
+    expect(res.status).toBe(400);
+    expect(res.body).toHaveProperty('error', 'VALIDATION_ERROR');
+  });
+
+  it('updates the priority of an existing task', async () => {
+    const token = createToken();
+    const res = await request(app)
+      .patch(`/api/v1/tasks/${VALID_TASK_ID}`)
+      .set(authHeader(token))
+      .send({ priority: 'low' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.priority).toBe('low');
+  });
+
+  it('rejects an invalid priority on update', async () => {
+    const token = createToken();
+    const res = await request(app)
+      .patch(`/api/v1/tasks/${VALID_TASK_ID}`)
+      .set(authHeader(token))
+      .send({ priority: 'whenever' });
+    expect(res.status).toBe(400);
+    expect(res.body).toHaveProperty('error', 'VALIDATION_ERROR');
+  });
+
+  it('filters the list query by priority', async () => {
+    // The shared in-memory builder ignores `where`, so the rows it returns can
+    // never prove the predicate was applied. Capture the `where` Drizzle hands
+    // the driver and stringify it with a real Postgres dialect instead.
+    const captured: unknown[] = [];
+    const capturingDb = {
+      select: () => ({
+        from: () => ({
+          where: (where: unknown) => {
+            captured.push(where);
+            const chain: Record<string, unknown> = {
+              orderBy: () => chain,
+              limit: () => Promise.resolve([]),
+              then: (onFulfilled?: unknown, onRejected?: unknown) =>
+                Promise.resolve([]).then(onFulfilled as never, onRejected as never),
+              catch: (onRejected?: unknown) => Promise.resolve([]).catch(onRejected as never),
+            };
+            return chain;
+          },
+        }),
+      }),
+    } as unknown as ReturnType<typeof getDb>;
+    vi.mocked(getDb).mockReturnValueOnce(capturingDb);
+
+    const token = createToken();
+    const res = await request(app)
+      .get('/api/v1/tasks?priority=urgent')
+      .set(authHeader(token));
+    expect(res.status).toBe(200);
+
+    const compiled = captured.map((where) => new PgDialect().sqlToQuery(where as never));
+    const priorityQuery = compiled.find((c) => c.sql.includes('"priority"'));
+    expect(priorityQuery).toBeDefined();
+    expect(priorityQuery!.params).toContain('urgent');
   });
 });

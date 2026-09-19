@@ -119,6 +119,82 @@ export function toolRequiresConfirmation(
 	return toolPermissionLevel(name) >= threshold;
 }
 
+// ─── Device-control actions (blueprint §9.2) ─────────────────────────
+
+/**
+ * The device-control actions, and the permission level each carries.
+ *
+ * These execute on the phone, not on the server — `NovaDeviceControl.kt` is the
+ * only thing that can open an app, dial, or change a setting — but the level is
+ * a property of the action, not of where it runs, so it is classified here
+ * beside [ASSISTANT_TOOL_LEVELS], sharing the same scale and the same
+ * configured threshold.
+ *
+ * They are deliberately **not** added to [ASSISTANT_TOOLS]. This server has no
+ * executor for them; offering them to the model would produce a tool call the
+ * executor answers with "unknown tool", which is worse than not offering it.
+ * The mobile registry
+ * (`apps/mobile/lib/features/device_control/device_control_models.dart`) and the
+ * Kotlin one (`DeviceControlCatalog.kt`) mirror this table, and each side has a
+ * test pinning it, so a level changed in one place without the others is caught.
+ *
+ * The deliberate choices, against §10.1:
+ *
+ *  * `open_app` / `open_settings` — L1: personal, low-risk, reversible.
+ *  * `open_deep_link` — L2: an arbitrary URI leaves the app for content it did
+ *    not choose, i.e. external communication.
+ *  * `dial_number` — L2: §9.2 says "show number, confirm"; a call reaches
+ *    someone outside the user's account.
+ *  * `set_brightness` / `set_dnd` — L3: each changes a device-wide setting,
+ *    which §10.1 rates sensitive/consequential ("change account setting" →
+ *    explicit confirm).
+ *  * media transport — L1: local and instantly reversible.
+ *
+ * Not present here, on purpose: Wi-Fi and Bluetooth toggles (Android 10/12 made
+ * them impossible for third-party apps, so the app only deep-links to Settings),
+ * SMS (deferred by §9.2) and screen reading (excluded from the consumer MVP).
+ */
+export const DEVICE_CONTROL_TOOL_LEVELS = {
+	open_app: TOOL_LEVEL_PERSONAL_WRITE,
+	open_deep_link: TOOL_LEVEL_EXTERNAL,
+	open_settings: TOOL_LEVEL_PERSONAL_WRITE,
+	dial_number: TOOL_LEVEL_EXTERNAL,
+	set_brightness: TOOL_LEVEL_SENSITIVE,
+	set_dnd: TOOL_LEVEL_SENSITIVE,
+	media_play: TOOL_LEVEL_PERSONAL_WRITE,
+	media_pause: TOOL_LEVEL_PERSONAL_WRITE,
+	media_next: TOOL_LEVEL_PERSONAL_WRITE,
+	media_previous: TOOL_LEVEL_PERSONAL_WRITE,
+} as const satisfies Record<string, ToolPermissionLevel>;
+
+/** Every device-control action name, derived from the registry. */
+export type DeviceControlActionName = keyof typeof DEVICE_CONTROL_TOOL_LEVELS;
+
+export const DEVICE_CONTROL_ACTION_NAMES = Object.keys(
+	DEVICE_CONTROL_TOOL_LEVELS,
+) as DeviceControlActionName[];
+
+/**
+ * The level of a device-control action.
+ *
+ * An unknown name is L3 for the same reason [toolPermissionLevel] defaults that
+ * way: the caller is untrusted, and a device action added on one side without
+ * being classified on the other must not slip through as low-risk.
+ */
+export function deviceControlActionLevel(name: string): ToolPermissionLevel {
+	return name in DEVICE_CONTROL_TOOL_LEVELS
+		? DEVICE_CONTROL_TOOL_LEVELS[name as DeviceControlActionName]
+		: TOOL_LEVEL_SENSITIVE;
+}
+
+/** True when a device-control action must be confirmed before it runs. */
+export function deviceControlRequiresConfirmation(
+	name: string,
+	threshold: ToolPermissionLevel = toolConfirmationLevel(),
+): boolean {
+	return deviceControlActionLevel(name) >= threshold;
+}
+
 // ─── Tool definitions ────────────────────────────────────────────────
 
 const CREATE_REMINDER_DESCRIPTION = [

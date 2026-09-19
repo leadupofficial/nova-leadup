@@ -327,6 +327,7 @@ export const tasks = pgTable('tasks', {
  title: varchar('title', { length: 500 }).notNull(),
  description: text('description'),
  status: varchar('status', { length: 50 }).default('pending').notNull(),
+ priority: varchar('priority', { length: 50 }).default('medium').notNull(),
  dueAt: timestamp('due_at'),
  completedAt: timestamp('completed_at'),
  source: varchar('source', { length: 50 }).default('manual').notNull(),

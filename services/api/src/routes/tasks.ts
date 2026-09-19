@@ -28,13 +28,17 @@ const TaskStatus = z.enum(['pending', 'in_progress', 'completed', 'cancelled']);
 
 router.get('/', authenticate, validate(TaskListQuerySchema, 'query'), async (req: AuthenticatedRequest, res, next) => {
 	try {
-		const q = parseCursorPagination(req) as z.infer<typeof TaskListQuerySchema>;
+		// `parseCursorPagination` understands only cursor/limit/direction; the
+		// validated query is authoritative once `validate()` has run, so the
+		// `status`/`priority` filters are actually read rather than ignored.
+		const validatedQuery = (req as unknown as { validatedQuery?: z.infer<typeof TaskListQuerySchema> }).validatedQuery;
+		const q = validatedQuery ?? (parseCursorPagination(req) as z.infer<typeof TaskListQuerySchema>);
 		const db = getDb();
 		const userId = req.user!.id;
 
 		const whereClauses = [eq(tasks.userId, userId)];
 		if (q.status) whereClauses.push(eq(tasks.status, q.status));
-		// priority column is not yet in the tasks table schema; filter only by status
+		if (q.priority) whereClauses.push(eq(tasks.priority, q.priority));
 
 		const cursorColumn = tasks.id;
 
@@ -90,11 +94,11 @@ router.post('/', authenticate, validate(CreateTaskSchema), async (req: Authentic
 		const userId = req.user!.id;
 		const now = new Date();
 
-		// priority is not in DB schema; intentionally omitted
 		const [task] = await db.insert(tasks).values({
 			userId,
 			title: body.title,
 			description: body.description ?? null,
+			priority: body.priority,
 			dueAt: body.dueAt ?? null,
 			tags: body.tags ?? [],
 			source: 'manual',
@@ -151,6 +155,7 @@ router.patch('/:id', authenticate, validate(UpdateTaskSchema), async (req: Authe
 		if (body.title !== undefined) updateData.title = body.title;
 		if (body.description !== undefined) updateData.description = body.description;
 		if (body.status !== undefined) updateData.status = body.status;
+		if (body.priority !== undefined) updateData.priority = body.priority;
 		if (body.dueAt !== undefined) updateData.dueAt = body.dueAt;
 		if (body.tags !== undefined) updateData.tags = body.tags;
 		if (body.assigneeId !== undefined) updateData.assigneeId = body.assigneeId;

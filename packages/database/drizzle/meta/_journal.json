@@ -8,6 +8,13 @@
       "when": 1788980837405,
       "tag": "0000_regular_colossus",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789817228838,
+      "tag": "0001_glorious_karma",
+      "breakpoints": true
     }
   ]
 }
