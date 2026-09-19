@@ -1,14 +1,25 @@
 # NOVA — Requirements Verification
 
-**Method:** every claim below was produced by running something against the live system
-or by reading the exact source, on 2026-09-19. Nothing here is inferred from a document.
-Where a document and the code disagree, the code is reported and the document is named.
+**Method:** every claim below was produced by running something against the live
+system or by reading the exact source. Nothing here is inferred from a document.
+Where a document and the code disagree, the code is reported and the document named.
 
-Production: `https://nova.leadup.in` · API healthy · 261 mobile tests passing.
+Production: `https://nova.leadup.in` · API healthy.
+
+> **This document was first written when most of the product did not exist, and has
+> been revised as work landed.** The status table below is current. Sections further
+> down are marked with the date they were verified; where an earlier section says
+> something is missing that now works, the table is right and the prose is history.
+> The revision is recorded rather than silently rewritten because the earlier claims
+> were the evidence that drove the work.
 
 ---
 
-## Status summary
+## Status summary (current)
+
+Gates at the time of writing: `pnpm run build` 27/27 · `pnpm run typecheck` 31/31 ·
+`turbo run test` 34/34 · `services/api` vitest 241 passing · `flutter analyze` clean ·
+`flutter test` 564 passing, 5 skipped.
 
 | # | Requirement (owner's brief) | Status |
 |---|---|---|
@@ -17,27 +28,62 @@ Production: `https://nova.leadup.in` · API healthy · 261 mobile tests passing.
 | 2 | Low-latency real-time voice | **Works** — 2.4–3.4 s measured |
 | 2 | Hands-free, no button | **Works** |
 | 2 | Barge-in | **Works** |
-| 2 | Custom / configurable wake word | **Partial** — service exists, phrase is not configurable |
-| 3 | Background notification monitoring | **Not implemented** |
-| 3 | Proactive spoken updates | **Not implemented** |
+| 2 | Custom / configurable wake word | **Works, within what is installed** — see the caveat below |
+| 3 | Background notification monitoring | **Works** — real listener service, binds on device |
+| 3 | Proactive spoken updates | **Works, opt-in** — off by default per §9.4 |
 | 4 | Create/manage reminders by voice | **Works** |
 | 4 | Speak reminders when they trigger | **Partial** — speaks only while the app is alive |
-| 5 | Cost efficiency measured | **Works** — instrumented, rates unset |
+| 5 | Cost efficiency measured | **Works** — instrumented; rates still unset |
 | 5 | Low latency | **Works** |
-| 6a | Device & system control | **Not implemented** |
-| 6b | Meeting intelligence | **Not implemented** — metadata only |
-| 6c | Call screening | **Not implemented** |
-| 6d | Briefings / nudges | **Not implemented** |
-| 6d | Cross-platform sync | **Faked** — reports success, does nothing |
-| — | Tool confirmation before side-effecting actions (§5.7) | **Bypassed on the voice path** |
+| 6a | Device & system control | **Works where Android permits** — Wi-Fi/Bluetooth are deep-link only by platform policy |
+| 6b | Meeting capture, transcription, summaries | **Works** — verified on real audio in production |
+| 6c | Call screening | **Delivered as the lawful version** — the user's own dialer recordings via SAF, not live screening |
+| 6d | Daily briefing | **Works** — verified in production |
+| 6d | Evening recap, weather, traffic nudges | **Not built, not stubbed** — no provider exists and the master document does not define them |
+| 6d | Cross-platform sync | **Still not real** — see below |
 
-**Working: 8. Partial: 3. Not implemented: 6. One subsystem actively misreports.**
+### Nothing in the live product misreports success
+
+An earlier revision of this document said `integration-service` reported connections
+that never happened. **That was wrong, and I checked rather than assuming.** The
+source was already changed to answer 501 in an earlier round; what I saw was a
+comment describing the old behaviour. The deployed container does still hold the old
+code — but the service is **not routed**: nginx sends `/` to the console, `/api/` to
+the API, `/ws/realtime` and `/socket.io/` to the gateway, and there is no rule
+pointing at the integration service's port at all. Nothing public can reach that
+endpoint, so it cannot mislead anyone.
+
+The honest position: the source is correct, the running container is stale, and the
+whole service is unreachable. It should either be deployed and routed, or removed —
+it is currently a container nobody can call. That is untidiness, not a live defect,
+and the difference matters enough to state.
+
+### Evening recap, weather and traffic nudges
+
+**Not built, and deliberately not stubbed.** The owner's brief asks for all three.
+None appears in the master document, and there is no weather provider, table or route
+anywhere in this repository. Rather than return invented data, the briefing endpoint
+reports capability flags (`weather: false`, `eveningRecap: false`,
+`locationNudges: false`) and the settings screen shows a NOT CONNECTED list. A fake
+weather line would be worse than an absent one.
+
+
+### Wake word caveat
+
+The wake word is **model-driven**: openWakeWord reads classifiers from
+`android/app/src/main/assets/wakeword/models.json`. The user can select among
+installed models, and the setting persists. Only one model ships — `hey_jarvis` —
+so today the honest screen says so rather than offering a choice that does nothing.
+Adding "Hey Nova" means adding a real ONNX classifier to that manifest; the comment
+in the file documents how, and no fake model was shipped to make the screen look
+fuller than it is.
 
 ---
 
 ## What works, with evidence
 
 ### Voice pipeline (requirements 1, 2, 4, 5)
+
 
 A live Tamil turn against production completes end to end, and a real spoken exchange
 was held on a physical device — audio in, transcript `Vanakkam nova.`, a sensible Tamil
