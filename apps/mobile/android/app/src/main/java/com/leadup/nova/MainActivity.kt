@@ -36,5 +36,15 @@ class MainActivity : FlutterFragmentActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             applicationContext,
         )
+
+        // Exposes device & system control to Dart
+        // (lib/features/device_control/device_control_platform.dart): opening
+        // apps and deep links, the dialer, the Wi-Fi/Bluetooth settings panels,
+        // brightness and Do Not Disturb (each behind its special access), and
+        // media transport keys.
+        NovaDeviceControl.registerChannels(
+            flutterEngine.dartExecutor.binaryMessenger,
+            applicationContext,
+        )
     }
 }

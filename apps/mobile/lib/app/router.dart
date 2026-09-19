@@ -12,6 +12,7 @@ import '../features/activity/activity_page.dart';
 import '../features/briefing/briefing_page.dart';
 import '../features/converse/conversations_page.dart';
 import '../features/converse/converse_page.dart';
+import '../features/device_control/device_control_page.dart';
 import '../features/home/home_page.dart';
 import '../features/memory/memory_page.dart';
 import '../features/notifications/notification_assistant_page.dart';
@@ -294,6 +295,13 @@ final routerProvider = Provider<GoRouter>((ref) {
                     path: 'briefing',
                     name: 'daily-briefing',
                     builder: (context, state) => const DailyBriefingPage(),
+                  ),
+                  // Device & system control (§9.2). Device-local, and the place
+                  // the Wi-Fi/Bluetooth-by-deep-link limits are disclosed.
+                  GoRoute(
+                    path: 'device-control',
+                    name: 'device-control',
+                    builder: (context, state) => const DeviceControlPage(),
                   ),
                 ],
               ),

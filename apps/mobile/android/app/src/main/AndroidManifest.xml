@@ -13,6 +13,41 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!--
+      Device & system control (§9.2).
+
+      Exactly two permissions are added, and both are ones Android can actually
+      grant to a third-party app — each through a dedicated Settings screen the
+      user must approve, which is why they are *special* accesses rather than
+      runtime prompts:
+
+        * WRITE_SETTINGS       — screen brightness. Granted on
+                                 Settings → Apps → NOVA → Modify system settings
+                                 (Settings.ACTION_MANAGE_WRITE_SETTINGS).
+        * ACCESS_NOTIFICATION_POLICY — Do Not Disturb. Granted on
+                                 Settings → Notifications → Do Not Disturb access
+                                 (Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).
+
+      Deliberately NOT added, because a third-party app cannot be granted them or
+      because the capability is out of scope:
+
+        * CALL_PHONE / ANSWER_PHONE_CALLS — §9.2 says "Show number, confirm", so
+          dialling is ACTION_DIAL only; NOVA never places a call itself.
+        * BLUETOOTH_CONNECT / BLUETOOTH_SCAN — Bluetooth enable()/disable() became
+          no-ops for third-party apps on Android 12; no permission restores it, so
+          NOVA only deep-links to the Bluetooth screen.
+        * CHANGE_WIFI_STATE / ACCESS_WIFI_STATE — setWifiEnabled stopped working for
+          third-party apps on Android 10; NOVA only deep-links to the Wi-Fi screen.
+        * QUERY_ALL_PACKAGES — a restricted Play permission. App launching uses a
+          <queries> launcher intent instead.
+        * PACKAGE_USAGE_STATS, MEDIA_CONTENT_CONTROL, any Accessibility permission —
+          not needed, and screen reading is excluded from the consumer MVP.
+        * WRITE_SECURE_SETTINGS — signature-level; an app can never be granted it.
+        * SEND_SMS — §9.2 defers SMS explicitly.
+    -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />
@@ -25,6 +60,26 @@
         -->
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <!--
+          Device & system control (§9.2): lets NOVA resolve the launcher entry
+          point of an installed app in order to open it. This is the narrow,
+          policy-safe alternative to QUERY_ALL_PACKAGES — it makes launcher apps
+          visible and nothing else.
+        -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- Deep links opened with ACTION_VIEW. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <!-- ACTION_DIAL: the dialer that shows the confirmed number. -->
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
         </intent>
     </queries>
 

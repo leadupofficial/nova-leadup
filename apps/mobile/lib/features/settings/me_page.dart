@@ -187,6 +187,13 @@ class MePage extends ConsumerWidget {
                 ),
                 Divider(height: 1, color: c.border),
                 NovaListRow(
+                  title: 'Device control',
+                  subtitle: 'Apps, dialler, media, brightness and DND',
+                  icon: Icons.phonelink_setup_outlined,
+                  onTap: () => context.push('/me/device-control'),
+                ),
+                Divider(height: 1, color: c.border),
+                NovaListRow(
                   title: 'Integrations',
                   subtitle: 'Connected services and available tools',
                   icon: Icons.extension_outlined,
