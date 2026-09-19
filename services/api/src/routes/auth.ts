@@ -170,7 +170,10 @@ async function resolveUserRole(userId: string): Promise<string> {
 		// Unknown-but-bound role: surface it rather than silently downgrading to `user`.
 		return preferred ?? slugs[0] ?? DEFAULT_ROLE;
 	} catch (error) {
-		logger.warn('[auth] could not resolve role bindings; defaulting to', DEFAULT_ROLE, error);
+		logger.warn(
+			{ err: error, fallbackRole: DEFAULT_ROLE },
+			'[auth] could not resolve role bindings; defaulting to a safe role'
+		);
 		return DEFAULT_ROLE;
 	}
 }

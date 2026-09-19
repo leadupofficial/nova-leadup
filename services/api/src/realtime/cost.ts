@@ -279,6 +279,6 @@ export function buildTurnCost(input: TurnCostInput): VoiceTurnCost {
  */
 export function logTurnCost(input: TurnCostInput): VoiceTurnCost {
 	const record = buildTurnCost(input);
-	logger.info(JSON.stringify(record), 'Realtime voice turn cost');
+	logger.info(record, 'Realtime voice turn cost');
 	return record;
 }
