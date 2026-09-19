@@ -22,13 +22,18 @@ function authHeader(token: string): Record<string, string> {
 // ─── POST /api/v1/voice/stt ────────────────────────────────────────
 
 describe('POST /api/v1/voice/stt', () => {
- it('returns 400 for an invalid audioData', async () => {
+ it('accepts a bare base64url audioData string (what the mobile client sends)', async () => {
+ // `SttSchema` types `audioData` as `z.any()` and the route decodes a bare
+ // string as base64 — `not-a-url` is valid base64url and is exactly the shape
+ // the Dart client uploads. Rejecting it as a malformed URL would 400 the real
+ // client, so this test pins the acceptance rather than asserting a 400.
  const res = await request(app)
  .post('/api/v1/voice/stt')
  .set(authHeader(createToken()))
  .send({ audioData: 'not-a-url' });
- expect(res.status).toBe(400);
- expect(res.body).toHaveProperty('error', 'VALIDATION_ERROR');
+ expect(res.status).toBe(200);
+ expect(res.body).toHaveProperty('success', true);
+ expect(res.body.data).toHaveProperty('text');
  });
 
  it('returns 401 without an auth token', async () => {

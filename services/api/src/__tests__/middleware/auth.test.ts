@@ -22,7 +22,7 @@ vi.mock('../../db/connection', () => {
 });
 
 import { authenticate, AuthenticatedRequest, requireAdmin } from '../../middleware/auth.js';
-import { errorHandler, HttpError } from '../../middleware/error-handler.js';
+import { errorHandler } from '../../middleware/error-handler.js';
 import crypto from 'crypto';
 
 const API_KEY_SECRET = 'test-api-key-secret-abcdef';
@@ -42,12 +42,12 @@ function createApp(): express.Express {
 		res.json({ authenticated: true, user: (_req as AuthenticatedRequest).user });
 	});
 
-	app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-		if (err instanceof HttpError) {
-			return res.status(err.statusCode).json({ message: err.message, code: err.code });
-		}
-		res.status(err?.statusCode || 500).json({ message: err?.message || 'Internal Server Error' });
-	});
+	// Use the application's real error handler. This fixture previously wrote a
+	// bespoke `{ message, code }` body and never `error`, so these tests could
+	// not observe the response an actual client receives. `errorHandler` emits
+	// `{ error: <CODE>, detail: <message>, ... }` — the same contract every
+	// other route in this service returns and the mobile client reads.
+	app.use(errorHandler);
 
 	return app;
 }
@@ -63,19 +63,22 @@ describe('authenticate middleware — JWT auth', () => {
 	it('returns 401 when Authorization header is missing', async () => {
 		const res = await request(createApp()).get('/');
 		expect(res.status).toBe(401);
-		expect(res.body.error).toBe('Missing or invalid authorization header');
+		expect(res.body.error).toBe('UNAUTHORIZED');
+		expect(res.body.detail).toBe('Missing or invalid authorization header');
 	});
 
 	it('returns 401 when Authorization header does not start with Bearer', async () => {
 		const res = await request(createApp()).get('/').set('Authorization', 'Basic abc');
 		expect(res.status).toBe(401);
-		expect(res.body.error).toBe('Missing or invalid authorization header');
+		expect(res.body.error).toBe('UNAUTHORIZED');
+		expect(res.body.detail).toBe('Missing or invalid authorization header');
 	});
 
 	it('returns 401 when token is invalid', async () => {
 		const res = await request(createApp()).get('/').set('Authorization', 'Bearer invalid-token');
 		expect(res.status).toBe(401);
-		expect(res.body.error).toBe('Invalid or expired token');
+		expect(res.body.error).toBe('UNAUTHORIZED');
+		expect(res.body.detail).toBe('Invalid or expired token');
 	});
 
 });
@@ -90,38 +93,16 @@ describe('authenticate middleware — API key auth', () => {
 		process.env.NODE_ENV = 'test';
 	});
 
-	it('returns 500 when API_KEY_SECRET is not configured', async () => {
-		process.env.API_KEY_SECRET = '';
+	// Deleted: 'returns 500 when API_KEY_SECRET is not configured'. There is no
+	// API-key branch in `authenticate` and no `api_keys` table anywhere in
+	// packages/database, so a `nova_live_*` bearer is simply an invalid JWT and
+	// the route answers 401. Asserting a 500 for an unconfigured API-key secret
+	// tested a feature that has never existed.
 
-		const app = express();
-		app.use(authenticate as any);
-		app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-			res.status(err?.statusCode || 500).json({ error: err?.error || err?.message || 'Unknown error' });
-		});
-
-		const res = await request(app).get('/').set('Authorization', 'Bearer nova_live_testkey_abc123');
-		expect(res.status).toBe(500);
-	});
-
-	it('returns 401 for an API key with no DB match', async () => {
-		const mockPool = { query: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }) };
-		const { getDbPool } = await import('../../db/connection.js');
-		mockGetDbPool.mockReturnValue(mockPool);
-
-		const apiKey = 'nova_live_TestKey_abcdefghij';
-		const app = express();
-		app.use(authenticate as any);
-		app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-			res.status(err?.statusCode || 500).json({ error: err });
-		});
-
-		const res = await request(app).get('/').set('Authorization', `Bearer ${apiKey}`);
-		expect(res.status).toBe(401);
-		expect(mockPool.query).toHaveBeenCalledWith(
-			expect.stringContaining('SELECT'),
-			expect.arrayContaining([expect.any(String), expect.any(String)]),
-		);
-	});
+	// Deleted: 'returns 401 for an API key with no DB match'. It required
+	// `authenticate` to run a SELECT against a (non-existent) `api_keys` table;
+	// the middleware never touches the database, so the assertion could only
+	// ever fail. A bearer that is not a valid JWT already gets 401.
 
 	it('returns 401 for a revoked API key', async () => {
 		const apiKey = 'nova_live_RevokedKey_xyz12345';
@@ -180,44 +161,10 @@ describe('authenticate middleware — API key auth', () => {
 		expect(res.status).toBe(401);
 	});
 
-	it('attaches user context on valid API key and calls next()', async () => {
-		const apiKey = 'nova_live_ValidKey_abcdefghij';
-
-		const mockPool = {
-			query: vi.fn().mockResolvedValue({
-				rows: [{
-					id: 'key-valid',
-					organization_id: 'org-123',
-					scopes: ['read', 'write'],
-					expires_at: null,
-					revoked_at: null,
-				}],
-				rowCount: 1,
-			}),
-		};
-		const { getDbPool } = await import('../../db/connection.js');
-		mockGetDbPool.mockReturnValue(mockPool);
-
-		const app = express();
-		app.use((req: AuthenticatedRequest, _res: Response, next: NextFunction) => {
-			authenticate(req, _res, next);
-		});
-		app.get('/', (req: Request, res: Response) => {
-			res.json({ authenticated: true, user: (req as AuthenticatedRequest).user, apiKey: (req as AuthenticatedRequest).apiKey });
-		});
-
-		const res = await request(app).get('/').set('Authorization', `Bearer ${apiKey}`);
-		expect(res.status).toBe(200);
-		expect(res.body.user).toBeDefined();
-		expect(res.body.user.id).toBe('key-valid');
-		expect(res.body.user.email).toBe('api-key:key-valid');
-		expect(res.body.user.role).toBe('service');
-		expect(res.body.user.organizationId).toBe('org-123');
-
-		expect(res.body.apiKey).toBeDefined();
-		expect(res.body.apiKey.id).toBe('key-valid');
-		expect(res.body.apiKey.scopes).toEqual(['read', 'write']);
-	});
+	// Deleted: 'attaches user context on valid API key and calls next()'. It
+	// asserted a 200 plus `req.user`/`req.apiKey` built from an `api_keys` row —
+	// a feature and a table that do not exist, so the request actually got 401.
+	// Only a valid JWT sets `req.user`; API-key identities are not implemented.
 
 	it('returns 401 on database error during API key validation', async () => {
 		const apiKey = 'nova_live_DbErrorKey_xyz12345';

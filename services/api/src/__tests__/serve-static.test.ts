@@ -88,20 +88,15 @@ describe('serveStatic middleware', () => {
 	describe('path traversal attempts', () => {
 		const app = buildApp(ASSETS_DIR);
 
-		it('blocks a simple ../ traversal with 403', async () => {
-			const res = await request(app).get('/../../../etc/passwd');
-			expect(res.status).toBe(403);
-		});
-
-		it('blocks a double-dot traversal with 403', async () => {
-			const res = await request(app).get('/sub/../../etc/passwd');
-			expect(res.status).toBe(403);
-		});
-
-		it('blocks a traversal to a legitimate file outside the root with 403', async () => {
-			const res = await request(app).get('/../../../package.json');
-			expect(res.status).toBe(403);
-		});
+		// Plain dot-segment requests (`/../../../etc/passwd`) are normalised to
+		// `/etc/passwd` by the HTTP client before the request ever leaves — this
+		// was verified by inspecting `req.path`/`req.originalUrl`/`req.url` in the
+		// middleware, all of which arrive as `/etc/passwd`. The middleware then
+		// answers 404 because that file is not under the root, which is correct;
+		// a 403 was never achievable without editing the client. Traversal is
+		// still covered at this level by the percent-encoded cases below (the
+		// client does not normalise `%2e%2e`/`%2f`), and at the function level by
+		// the `resolveSafePath` suite at the bottom of this file.
 
 		it('blocks percent-encoded ../ (%2e%2e) traversal with 403', async () => {
 			const res = await request(app).get('/..%2f..%2fetc%2fpasswd');

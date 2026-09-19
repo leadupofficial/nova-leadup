@@ -171,7 +171,11 @@ vi.mock('../db/connection', () => {
 		delete: () => db,
 	} as any;
 	return {
-		getDb: () => db,
+		// Wrapped in `vi.fn` so an individual test can replace a single lookup
+		// with `vi.mocked(getDb).mockReturnValueOnce(...)` — this in-memory
+		// builder ignores `where`, so a test that needs an empty result (e.g. an
+		// ownership-mismatch 404) cannot express it otherwise.
+		getDb: vi.fn(() => db),
 		getDbPool: () => ({ query: async () => ({ rows: [], rowCount: 0 }) }),
 		getDbClient: () => ({ query: async (_sql: string) => ({ rows: [] }) }),
 		getQueryBuilder: () => qb,
