@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/theme/nova_theme.dart';
 import '../core/voice/wake_word_controller.dart';
+import '../features/reminders/reminder_sync.dart';
 import '../services/analytics_service.dart';
 import 'providers.dart';
 import 'router.dart';
@@ -25,6 +28,11 @@ class _NovaAppState extends ConsumerState<NovaApp> {
       onResume: _onResume,
       onDetach: _onDetach,
     );
+    // Reading the provider here builds it for the whole app lifetime. Its
+    // `build` watches the auth state, so the first authenticated frame fetches
+    // the server's reminders and reconciles the OS notifications — a reinstall
+    // or a stale token no longer means "no reminders ever fire".
+    ref.read(reminderSyncProvider.notifier);
   }
 
   @override
@@ -40,6 +48,9 @@ class _NovaAppState extends ConsumerState<NovaApp> {
   /// `microphone`-type foreground service from a `BOOT_COMPLETED` receiver.
   void _onResume() {
     ref.read(wakeWordStateProvider.notifier).arm();
+    // Reminders may have changed on another device, and the OS may have dropped
+    // alarms while the process was dead. Re-reconciling here is cheap.
+    unawaited(ref.read(reminderSyncProvider.notifier).sync());
   }
 
   void _onDetach() {

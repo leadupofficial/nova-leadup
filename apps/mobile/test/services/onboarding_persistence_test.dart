@@ -122,6 +122,48 @@ void main() {
     });
   });
 
+  group('language policy', () {
+    test('round-trips the chosen speech style', () async {
+      final service = await serviceWith();
+
+      expect(service.getLanguagePolicy(), 'auto');
+      await service.saveLanguagePolicy('ta');
+
+      expect(service.getLanguagePolicy(), 'ta');
+    });
+
+    test('falls back to the pending companion persona', () async {
+      // The policy also lives on `NovaPersona.languagePolicy`, and a run that
+      // stored only the companion must still greet in the chosen language.
+      final service = await serviceWith();
+      await service.savePendingPersona(<String, dynamic>{
+        'name': 'Nova',
+        'languagePolicy': 'tanglish',
+      });
+
+      expect(service.getLanguagePolicy(), 'tanglish');
+    });
+
+    test('an explicitly saved policy wins over the persona', () async {
+      final service = await serviceWith();
+      await service.savePendingPersona(<String, dynamic>{
+        'languagePolicy': 'ta',
+      });
+      await service.saveLanguagePolicy('en');
+
+      expect(service.getLanguagePolicy(), 'en');
+    });
+
+    test('clear removes the stored policy', () async {
+      final service = await serviceWith();
+      await service.saveLanguagePolicy('ta');
+
+      await service.clear();
+
+      expect(service.getLanguagePolicy(), 'auto');
+    });
+  });
+
   group('clear', () {
     test('removes every onboarding key', () async {
       final service = await serviceWith();

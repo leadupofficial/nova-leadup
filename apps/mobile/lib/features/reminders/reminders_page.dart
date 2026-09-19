@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,6 +8,7 @@ import '../../core/api/nova_api.dart' show NovaApiException, novaApiProvider;
 import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
 import '../tasks/reminder_composer.dart';
+import 'reminder_sync.dart';
 
 /// Reminders — port of `reminders/reminders.html`: sticky top bar, "Up next" hero
 /// card, `reminder-card` rows, plus the section and empty-state vocabulary shared
@@ -345,10 +348,14 @@ Future<void> _run(BuildContext context, WidgetRef ref, Future<void> Function() a
   }
 }
 
-/// Keeps this screen, the Tasks tab and the Home overview counts in step.
+/// Keeps this screen, the Tasks tab and the Home overview counts in step, and
+/// brings the OS's scheduled notifications back in line with the server's list.
+/// Every create, edit, snooze, dismiss and delete ends up here, which is why the
+/// reconciliation lives on this path rather than only at reminder creation.
 void _refresh(WidgetRef ref) {
   ref.invalidate(remindersProvider);
   ref.invalidate(homeOverviewProvider);
+  unawaited(ref.read(reminderSyncProvider.notifier).sync());
 }
 
 String _message(Object error) => error is NovaApiException

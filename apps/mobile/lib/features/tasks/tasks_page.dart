@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -5,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/api/models.dart';
 import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
+import '../reminders/reminder_sync.dart';
 import 'reminder_composer.dart';
 
 /// Tasks & reminders. Port of `tasks/tasks.html` and `tasks/empty.html`.
@@ -58,6 +61,9 @@ class _TasksPageState extends ConsumerState<TasksPage> {
       refresh: () async {
         ref.invalidate(tasksProvider);
         ref.invalidate(remindersProvider);
+        // Loading reminders here also has to re-arm the OS alarms, otherwise a
+        // reminder changed on another device stays stale on this one.
+        unawaited(ref.read(reminderSyncProvider.notifier).sync());
       },
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -221,6 +227,7 @@ class _TasksPageState extends ConsumerState<TasksPage> {
     if (created == true && mounted) {
       ref.invalidate(remindersProvider);
       ref.invalidate(homeOverviewProvider);
+      unawaited(ref.read(reminderSyncProvider.notifier).sync());
     }
   }
 
@@ -384,7 +391,18 @@ class _ReminderTile extends ConsumerWidget {
             IconButton(
               icon: Icon(Icons.delete_outline_rounded, color: c.muted, size: 20),
               tooltip: 'Delete',
-              onPressed: () => mutations.deleteReminder(reminder.id),
+              onPressed: () {
+                // This screen sits outside the reminders page, so the delete has
+                // to re-run the reconciliation itself or the OS would keep an
+                // alarm for a reminder that no longer exists.
+                unawaited(
+                  mutations.deleteReminder(reminder.id).then((_) {
+                    if (context.mounted) {
+                      unawaited(ref.read(reminderSyncProvider.notifier).sync());
+                    }
+                  }),
+                );
+              },
             ),
           ],
         ),

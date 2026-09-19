@@ -222,6 +222,13 @@ class OnboardingService {
   /// exists to save it to.
   static const _personaKey = 'nova_onboarding_persona';
 
+  /// The speech style the user picked on the companion step.
+  ///
+  /// Kept separately from [_personaKey] because the persona JSON is cleared once
+  /// the companion step is left, and the completion greeting still needs to know
+  /// which language to speak.
+  static const _languagePolicyKey = 'nova_onboarding_language_policy';
+
   final SharedPreferences _prefs;
 
   OnboardingService(this._prefs);
@@ -311,6 +318,28 @@ class OnboardingService {
     await _prefs.remove(_personaKey);
   }
 
+  /// Persists the speech style chosen on the companion step.
+  Future<void> saveLanguagePolicy(String policy) async {
+    final trimmed = policy.trim();
+    if (trimmed.isEmpty) return;
+    await _prefs.setString(_languagePolicyKey, trimmed);
+  }
+
+  /// The user's speech style (`auto` | `en` | `ta` | `tanglish`).
+  ///
+  /// Falls back to the pending companion's `languagePolicy` — the same field on
+  /// [NovaPersona] — so a run that stored only the persona still greets in the
+  /// chosen language. `auto` is the answer when nothing was chosen.
+  String getLanguagePolicy() {
+    final stored = _prefs.getString(_languagePolicyKey);
+    if (stored != null && stored.trim().isNotEmpty) return stored.trim();
+    final fromPersona = getPendingPersona()?['languagePolicy'];
+    if (fromPersona is String && fromPersona.trim().isNotEmpty) {
+      return fromPersona.trim();
+    }
+    return 'auto';
+  }
+
   Future<void> clear() async {
     await _prefs.remove(_statusKey);
     await _prefs.remove(_stepKey);
@@ -318,6 +347,7 @@ class OnboardingService {
     await _prefs.remove(_healthKey);
     await _prefs.remove(_permissionsKey);
     await _prefs.remove(_personaKey);
+    await _prefs.remove(_languagePolicyKey);
   }
 
   T? _decode<T>(String key, T Function(Map<String, dynamic>) fromJson) {

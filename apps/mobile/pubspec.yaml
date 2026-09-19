@@ -36,6 +36,11 @@ dependencies:
  sensors_plus: ^6.1.0
  local_auth: ^3.0.2
  flutter_local_notifications: ^22.3.0
+ # `zonedSchedule` takes a TZDateTime, so the app must initialise the timezone
+ # database itself. `timezone` was already pulled in transitively by
+ # flutter_local_notifications; declaring it makes the import first-class instead
+ # of one that can silently disappear on a plugin update.
+ timezone: ^0.11.1
  uuid: ^4.6.0
  intl: ^0.20.3
  equatable: ^2.1.0

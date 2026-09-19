@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -5,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/providers.dart';
 import '../../core/theme/nova_theme.dart';
 import '../../services/analytics_service.dart';
+import 'onboarding_greeting.dart';
 import 'onboarding_service.dart';
 
 /// Final onboarding step: activity goal, notification and voice preferences.
@@ -62,6 +65,25 @@ class _HealthPageState extends ConsumerState<HealthPage> {
           );
 
       if (!mounted) return;
+
+      // Speak the welcome in the language the user chose. This is
+      // fire-and-forget on purpose: the device engine is app-wide and keeps
+      // talking across the navigation to /login, so the screen does not wait for
+      // an utterance to finish. The messenger is captured first because the
+      // result arrives after this route is gone.
+      final messenger = ScaffoldMessenger.of(context);
+      final deviceLanguage = WidgetsBinding.instance.platformDispatcher.locale.languageCode;
+      unawaited(
+        ref
+            .read(onboardingGreetingProvider)
+            .speakOnce(deviceLanguageCode: deviceLanguage)
+            .then((result) {
+              final notice = result.notice;
+              if (notice == null) return;
+              messenger.showSnackBar(SnackBar(content: Text(notice)));
+            }),
+      );
+
       context.go('/login');
     } catch (error) {
       if (!mounted) return;

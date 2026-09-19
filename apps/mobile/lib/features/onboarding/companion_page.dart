@@ -53,7 +53,13 @@ class _CompanionPageState extends ConsumerState<CompanionPage> {
   void initState() {
     super.initState();
     // Prefill from whatever is already stored so re-running onboarding does not
-    // silently reset the user's companion.
+    // silently reset the user's companion. The locally stored speech style is
+    // read synchronously first: `/settings/persona` needs a session, so on a
+    // fresh install its fetch always fails and would otherwise leave the
+    // default in place.
+    _languagePolicy = ref
+        .read(onboardingServiceProvider)
+        .getLanguagePolicy();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
         final persona = await ref.read(personaProvider.future);
@@ -258,9 +264,11 @@ class _CompanionPageState extends ConsumerState<CompanionPage> {
     WidgetRef ref, {
     required bool save,
   }) async {
-    await ref
-        .read(onboardingServiceProvider)
-        .setCurrentStep(OnboardingStep.healthSetup);
+    final onboarding = ref.read(onboardingServiceProvider);
+    // Covers both "Create companion" and "Skip for now": the completion greeting
+    // needs the speech style that is actually selected on screen.
+    await onboarding.saveLanguagePolicy(_languagePolicy);
+    await onboarding.setCurrentStep(OnboardingStep.healthSetup);
     if (context.mounted) context.go(OnboardingStep.healthSetup.routeName);
   }
 }

@@ -14,11 +14,14 @@ import 'package:nova_mobile/core/voice/wake_word_service.dart';
 import 'package:nova_mobile/features/auth/auth_api.dart';
 import 'package:nova_mobile/features/auth/auth_repository.dart';
 import 'package:nova_mobile/features/onboarding/onboarding_service.dart';
+import 'package:nova_mobile/features/reminders/reminder_notifications.dart';
 import 'package:nova_mobile/services/analytics_service.dart';
 import 'package:nova_mobile/services/crash_reporting_service.dart';
 import 'package:nova_mobile/services/health_service.dart';
 import 'package:nova_mobile/services/network_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'fake_reminder_notifications.dart';
 
 /// In-memory stand-in for the platform secure store.
 class FakeSecureStorage extends Fake implements FlutterSecureStorage {
@@ -205,8 +208,7 @@ class RecordingAnalyticsBackend implements AnalyticsBackend {
 }
 
 /// Records crash reports instead of printing them.
-class RecordingCrashBackend implements CrashReporterBackend {
-  final List<Object> errors = <Object>[];
+class RecordingCrashBackend implements CrashReporterBackend {  final List<Object> errors = <Object>[];
   final List<String?> reasons = <String?>[];
   final List<bool> fatals = <bool>[];
   final List<String> breadcrumbs = <String>[];
@@ -261,6 +263,7 @@ class TestDependencies {
     required this.analyticsBackend,
     required this.networkInfo,
     required this.healthService,
+    required this.reminderNotifications,
   });
 
   final SharedPreferences preferences;
@@ -273,10 +276,12 @@ class TestDependencies {
   final RecordingAnalyticsBackend analyticsBackend;
   final FakeNetworkInfoService networkInfo;
   final FakeHealthService healthService;
+  final FakeReminderNotifications reminderNotifications;
 
   Future<void> dispose() async {
     await wakeWordPlatform.dispose();
     await networkInfo.dispose();
+    reminderNotifications.cancelAll();
   }
 }
 
@@ -314,6 +319,7 @@ Future<TestDependencies> createTestDependencies({
     analyticsBackend: analyticsBackend,
     networkInfo: FakeNetworkInfoService(),
     healthService: healthService ?? FakeHealthService(),
+    reminderNotifications: FakeReminderNotifications(),
   );
 }
 
@@ -332,6 +338,7 @@ Widget testApp(TestDependencies deps, Widget home) {
       analyticsServiceProvider.overrideWithValue(deps.analytics),
       networkInfoServiceProvider.overrideWithValue(deps.networkInfo),
       healthServiceProvider.overrideWithValue(deps.healthService),
+      reminderNotificationsProvider.overrideWithValue(deps.reminderNotifications),
     ],
     child: MaterialApp(
       theme: NovaTheme.darkTheme,
@@ -356,6 +363,7 @@ Widget testScope(
       analyticsServiceProvider.overrideWithValue(deps.analytics),
       networkInfoServiceProvider.overrideWithValue(deps.networkInfo),
       healthServiceProvider.overrideWithValue(deps.healthService),
+      reminderNotificationsProvider.overrideWithValue(deps.reminderNotifications),
       // The dashboard and the feature screens fetch over this provider. Without
       // an override they escape to the real network and the widget test hangs.
       if (networkService != null)
@@ -480,6 +488,7 @@ ProviderContainer createTestContainer(
       analyticsServiceProvider.overrideWithValue(deps.analytics),
       networkInfoServiceProvider.overrideWithValue(deps.networkInfo),
       healthServiceProvider.overrideWithValue(deps.healthService),
+      reminderNotificationsProvider.overrideWithValue(deps.reminderNotifications),
       if (networkService != null)
         networkServiceProvider.overrideWithValue(networkService),
       // AuthApi is built on the auth-only Dio (so that refreshing a token cannot
