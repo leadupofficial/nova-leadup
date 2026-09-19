@@ -138,21 +138,31 @@ void main() {
       // Daily briefing (§9.4).
       '/me/briefing',
       // Call-recording summaries (requirement 6c), a Me setting reachable from
-      // the UI. Deliberately not device-control: that screen is being changed by
-      // another agent and its pulse animation does not settle under this test's
-      // `pumpAndSettle`, which is not this feature's regression to own.
+      // the UI.
       '/me/call-recordings',
+      // Device and system control (requirement 6a). This was previously left out
+      // because the route never settled under `pumpAndSettle` - the avatar's
+      // breathing animation is an infinite `repeat()`, so nothing on a screen that
+      // renders it ever settles. That was the test being wrong, not the screen: the
+      // assertion below only asks whether the route resolved, which does not require
+      // waiting for an animation that is designed never to finish.
+      '/me/device-control',
       '/admin',
       '/translate',
       '/wakeword',
     ]) {
-      // NovaApp sits ABOVE the router it creates, so GoRouter.of() cannot find
+      // NovaApp sits ABOVE the router it created, so GoRouter.of() cannot find
       // it from that context; read it from the provider container instead.
       final container = ProviderScope.containerOf(
         tester.element(find.byType(NovaApp)),
       );
       container.read(routerProvider).go(route);
-      await tester.pumpAndSettle();
+      // `pump` with a duration, not `pumpAndSettle`. The avatar breathes forever by
+      // design, so a settle would block until timeout on any screen that shows it -
+      // which is most of them. Pumping a few frames is enough for the router to
+      // resolve and build, which is all this test asserts.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       expect(
         find.textContaining('No screen matches'),
         findsNothing,
