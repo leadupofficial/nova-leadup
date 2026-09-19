@@ -83,6 +83,10 @@ class AnalyticsService {
   static const String eventOnboardingStep = 'onboarding_step';
   static const String eventWakeWordEnabled = 'wake_word_enabled';
   static const String eventWakeWordDetected = 'wake_word_detected';
+
+  /// Which installed classifier the user chose. Only meaningful on a build with
+  /// more than one; today's ships a single model, so it never fires in practice.
+  static const String eventWakeWordSelected = 'wake_word_selected';
   static const String eventVoiceSessionStart = 'voice_session_start';
   static const String eventApiError = 'api_error';
 

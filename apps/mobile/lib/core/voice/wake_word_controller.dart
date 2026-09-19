@@ -36,6 +36,33 @@ class WakeWordState {
 
   bool get isSupported => availability?.available ?? false;
 
+  /// The classifiers the native service found in the app bundle.
+  List<String> get installedModels => availability?.models ?? const <String>[];
+
+  /// The classifier the service will actually listen for — the user's stored
+  /// choice, or (when nothing is stored) the one installed classifier. Null when
+  /// no classifier is installed at all.
+  String? get selectedModel => availability?.selected;
+
+  /// True only when there is a real choice to make. Today's build ships one
+  /// classifier (`hey_jarvis`), so this is false and the UI says so instead of
+  /// drawing a picker with a single, inert row.
+  bool get hasChoice => availability?.hasChoice ?? false;
+
+  /// The phrase NOVA will actually listen for, humanised (`Hey Jarvis`), or null
+  /// when no classifier is installed.
+  ///
+  /// There is deliberately no invented fallback. This used to answer `'Hey
+  /// Nova'`, which no build can honour: openWakeWord ships no "hey nova"
+  /// classifier and this repo contains none, so every screen that showed it was
+  /// naming a phrase the microphone could not hear.
+  String? get phrase {
+    final selected = availability?.selectedPhrase;
+    if (selected != null) return selected;
+    if (installedModels.isEmpty) return null;
+    return installedModels.map(humanizeWakeWordName).join(' or ');
+  }
+
   WakeWordState copyWith({
     bool? enabled,
     bool? listening,
@@ -111,6 +138,82 @@ class WakeWordController extends Notifier<WakeWordState> {
       );
       await ref.read(sharedPreferencesProvider).setBool(enabledPreferenceKey, false);
     }
+  }
+
+  /// Re-reads availability from the native service.
+  ///
+  /// Used by the settings screen's "Re-check" action: the set of installed
+  /// classifiers is fixed at build time, but the probe also reports whether the
+  /// platform is supported at all, and that can change (e.g. the plugin is only
+  /// registered on Android).
+  Future<void> refreshAvailability() async {
+    final platform = ref.read(wakeWordPlatformProvider);
+    final availability = await platform.availability();
+    if (_disposed) return;
+    state = state.copyWith(availability: availability);
+  }
+
+  /// Chooses which installed classifier the service listens for.
+  ///
+  /// Nothing is written unless the native service accepts the name: it is the
+  /// only party that can see which `.onnx` assets are actually installed, so a
+  /// phrase that is not installed is refused here rather than shown as selected.
+  ///
+  /// The selection is applied immediately when the service is currently
+  /// listening (the engine is already built around the old classifier). A
+  /// paused service picks the new choice up on its next start — this never
+  /// starts the microphone behind the user's back.
+  Future<bool> setModel(String name) async {
+    if (state.busy) return false;
+
+    if (name == state.selectedModel) return true;
+
+    final platform = ref.read(wakeWordPlatformProvider);
+    final availability = state.availability ?? await platform.availability();
+    if (_disposed) return false;
+
+    if (!availability.models.contains(name)) {
+      // Refuse before reaching the platform: the UI can only offer installed
+      // classifiers, so this is a programming error or a stale screen, and
+      // either way there is nothing to persist.
+      state = state.copyWith(
+        availability: availability,
+        error: 'No installed wake word is named "$name".',
+      );
+      return false;
+    }
+
+    final accepted = await platform.selectModel(name);
+    if (_disposed) return false;
+    if (!accepted) {
+      // The platform is the authority on what is installed. Re-read rather than
+      // keeping a stale list, so the screen stops offering a classifier the
+      // service does not have.
+      final refreshed = await platform.availability();
+      if (_disposed) return false;
+      state = state.copyWith(
+        availability: refreshed,
+        error: 'This device refused the wake word "$name".',
+      );
+      return false;
+    }
+
+    // Re-read availability instead of assuming: `selected` is then the
+    // service's own answer, not what the screen hoped for.
+    final refreshed = await platform.availability();
+    if (_disposed) return false;
+    state = state.copyWith(availability: refreshed, clearError: true);
+
+    await ref.read(analyticsServiceProvider).logEvent(
+          AnalyticsService.eventWakeWordSelected,
+          parameters: <String, Object?>{'wake_word': name},
+        );
+
+    if (state.listening) {
+      await stop();
+      await start();
+    }
+    return true;
   }
 
   /// Turns listening on or off and persists the choice.

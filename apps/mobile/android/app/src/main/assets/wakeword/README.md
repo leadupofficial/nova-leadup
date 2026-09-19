@@ -65,6 +65,32 @@ access key** — see
 fires. Raising it reduces false activations; lowering it makes detection more
 sensitive. 0.5 is the upstream default.
 
+## What adding a second classifier changes in the app
+
+Nothing needs editing, but two behaviours follow from the manifest:
+
+* **The picker appears.** With **one** entry installed — today's build — the wake
+  word screen (`Me → Wake word`, route `/me/wake-word`) says *"Only one wake word
+  is installed"* and shows no picker, because a one-option list would be a control
+  that does nothing. As soon as a **second** entry is installed,
+  `WakeWordAvailability.models` has more than one name and the same screen renders
+  a real single-choice list.
+* **The service listens for the selected classifier only.** `WakeWordService`
+  filters `models.json` down to
+  `WakeWordModelSelection.resolve(stored, installed)` and hands that one model to
+  the engine, so a build with several classifiers fires on the phrase the user
+  picked rather than on all of them. The choice is persisted by the native
+  `selectModel` method under `flutter.nova_wake_word_model` in
+  `FlutterSharedPreferences` (the same store `BootReceiver` reads), and a stored
+  name whose asset is gone falls back to the first installed classifier instead of
+  silencing the microphone.
+
+The account-level record at `PATCH /api/v1/device/wake-word/config` (§13.10, see
+`services/api/src/routes/device.ts`) is **a preference record, not a control**:
+the server stores which phrase the client reported choosing, validated against the
+phrases that client reported as installed. It cannot change what any microphone
+listens for — only the assets in this directory can do that.
+
 ## Refreshing the models
 
 ```bash

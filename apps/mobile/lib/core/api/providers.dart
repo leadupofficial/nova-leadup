@@ -153,6 +153,18 @@ final personaProvider = FutureProvider.autoDispose<NovaPersona>((ref) async {
   return api.getPersona();
 });
 
+/// §13.10 — the wake word recorded against the user's account, as a raw map.
+///
+/// This is the *server's* record of a choice the device enforces. The screen
+/// that shows it must not present it as what the microphone listens for; see
+/// `features/settings/wake_word_settings_page.dart`.
+final wakeWordConfigProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
+  ref,
+) async {
+  final api = ref.watch(novaApiProvider);
+  return api.getWakeWordConfig();
+});
+
 /// The saved avatar appearance, or a default when none has been stored yet.
 /// The route upserts, so the default here is a legitimate blank slate rather
 /// than a fabricated saved value.

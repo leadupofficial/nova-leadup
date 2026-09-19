@@ -20,7 +20,7 @@ final backendHealthProvider = FutureProvider<HealthCheckResult>(
 ///   `.top-bar` (menu / notification bell with badge / settings)
 ///   `.greeting` + `.name` + `.date`
 ///   `.avatar-container` with the `.avatar-status` pill
-///   `.cta-primary`  "Tap to talk"  +  `or say "Hey Nova"`
+///   `.cta-primary`  "Tap to talk"  +  `or say "<installed wake word>"`
 ///   `.overview` with three `.stat-card`s
 ///
 /// The previous version was a plain `ListView` of "Hi {name}", a gradient circle
@@ -101,9 +101,10 @@ class HomePage extends ConsumerWidget {
           const SizedBox(height: 14),
           Center(
             child: Text(
-              wakeWord.enabled && wakeWord.listening
-                  ? 'Listening for "Hey Nova"'
-                  : 'or say "Hey Nova"',
+              // The phrase comes from the installed classifier the native
+              // service reports, never from a hardcoded product name: this
+              // build listens for `hey_jarvis`.
+              _wakeWordLine(wakeWord),
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
@@ -212,6 +213,19 @@ class HomePage extends ConsumerWidget {
       AsyncError() => NovaAvatarFaceState.warning,
       _ => NovaAvatarFaceState.idle,
     };
+  }
+
+  /// The line under "Tap to talk".
+  ///
+  /// When the native service reports no installed classifier there is no phrase
+  /// to name, so this says listening is off rather than advertising one.
+  String _wakeWordLine(WakeWordState wakeWord) {
+    final phrase = wakeWord.phrase;
+    if (phrase == null) return 'Wake word is off';
+    if (wakeWord.enabled && wakeWord.listening) {
+      return 'Listening for "$phrase"';
+    }
+    return 'or say "$phrase"';
   }
 
   String _statusLabel(AsyncValue<AvatarState> avatar, WakeWordState wakeWord) {    if (wakeWord.listening) return NovaAvatarState.listening.label;

@@ -19,6 +19,7 @@ import { consentRoutes } from './routes/consent.js';
 import { notificationsRoutes } from './routes/notifications.js';
 import { briefingRoutes } from './routes/briefing.js';
 import { settingsRouter as settingsRoutes } from './routes/settings.js';
+import { deviceRouter as deviceRoutes } from './routes/device.js';
 import { streamingRoutes } from './routes/streaming.js';
 import { voiceRoutes } from './routes/voice.js';
 import { healthRoutes } from './routes/health.js';
@@ -73,6 +74,10 @@ apiV1.use('/notifications', notificationsRoutes);
 // asked, and returns speakable text plus the list of sources it actually had.
 apiV1.use('/briefing', briefingRoutes);
 apiV1.use('/settings', settingsRoutes);
+// Device-scoped config (§13.10). `GET|PATCH /device/wake-word/config` records
+// the user's chosen wake word. The phrase itself is enforced on the device by
+// the installed classifiers — see routes/device.ts.
+apiV1.use('/device', deviceRoutes);
 apiV1.use('/streaming', streamingRoutes);
 apiV1.use('/voice', voiceRoutes);
 apiV1.use('/biometric', biometricRoutes);

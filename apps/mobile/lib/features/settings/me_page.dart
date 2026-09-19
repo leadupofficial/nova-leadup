@@ -141,8 +141,12 @@ class MePage extends ConsumerWidget {
                 ),
                 Divider(height: 1, color: c.border),
                 NovaListRow(
-                  title: 'Wake word',
-                  subtitle: 'Say "Hey Nova" to start listening',
+                  title: 'Wake word listening',
+                  // Not "Say \"Hey Nova\"": no build ships a "hey nova"
+                  // classifier, so naming that phrase here would advertise a
+                  // wake word the microphone cannot hear. The exact installed
+                  // phrase is on the wake-word screen.
+                  subtitle: 'On-device listening, and the last phrase heard',
                   icon: Icons.hearing_rounded,
                   onTap: () => context.push('/wakeword'),
                 ),
@@ -184,6 +188,17 @@ class MePage extends ConsumerWidget {
                   subtitle: 'Spoken summary of your day — off by default',
                   icon: Icons.wb_sunny_outlined,
                   onTap: () => context.push('/me/briefing'),
+                ),
+                Divider(height: 1, color: c.border),
+                // Wake word (requirement 2, §5.16). The phrase is enforced by
+                // the classifiers installed in the app bundle, so this row leads
+                // to the screen that names the one that is actually installed —
+                // today a single model, which that screen states plainly.
+                NovaListRow(
+                  title: 'Wake word',
+                  subtitle: 'Which installed phrase NOVA listens for',
+                  icon: Icons.record_voice_over_outlined,
+                  onTap: () => context.push('/me/wake-word'),
                 ),
                 Divider(height: 1, color: c.border),
                 NovaListRow(

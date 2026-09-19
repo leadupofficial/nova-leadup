@@ -11,6 +11,7 @@ class WakeWordAvailability {
     required this.reason,
     this.detail,
     this.models = const <String>[],
+    this.selected,
   });
 
   final bool available;
@@ -24,6 +25,20 @@ class WakeWordAvailability {
   /// Names of the installed wake words, e.g. `['hey_jarvis']`.
   final List<String> models;
 
+  /// The installed wake word the service will actually listen for — the user's
+  /// saved choice, or the first installed classifier when nothing is saved.
+  /// Null only when no classifier is installed at all.
+  final String? selected;
+
+  /// True when there is more than one installed classifier, i.e. when the user
+  /// genuinely has a choice. Today's build ships exactly one (`hey_jarvis`), so
+  /// this is false and the UI must say so rather than offer a dead picker.
+  bool get hasChoice => models.length > 1;
+
+  /// The phrase the service listens for, in the app's own wording.
+  String? get selectedPhrase =>
+      selected == null ? null : humanizeWakeWordName(selected!);
+
   static const WakeWordAvailability unsupportedPlatform = WakeWordAvailability(
     available: false,
     reason: 'unsupported_platform',
@@ -32,6 +47,7 @@ class WakeWordAvailability {
 
   factory WakeWordAvailability.fromMap(Map<dynamic, dynamic> map) {
     final rawModels = map['models'];
+    final selected = map['selected']?.toString();
     return WakeWordAvailability(
       available: map['available'] == true,
       reason: (map['reason'] ?? 'unknown').toString(),
@@ -39,13 +55,18 @@ class WakeWordAvailability {
       models: rawModels is List
           ? rawModels.map((dynamic value) => value.toString()).toList(growable: false)
           : const <String>[],
+      selected: selected == null || selected.isEmpty ? null : selected,
     );
   }
 
   /// A message suitable for display to the user.
+  ///
+  /// Uses the raw classifier names the service reports (not a humanised form),
+  /// so it always names the exact `models.json` entry that is loaded.
   String get userMessage {
     switch (reason) {
       case 'ok':
+        if (selected != null) return 'Listening for $selected.';
         return models.isEmpty
             ? 'Wake word is available.'
             : 'Listening for ${models.join(" or ")}.';
@@ -62,6 +83,17 @@ class WakeWordAvailability {
     }
   }
 }
+
+/// `hey_jarvis` -> `Hey Jarvis`.
+///
+/// Lives here rather than in a screen because the phrase is now rendered from
+/// the availability the native service reports (the settings screen, the home
+/// dashboard and the overlay all show it).
+String humanizeWakeWordName(String raw) => raw
+    .split(RegExp(r'[_\-\s]+'))
+    .where((part) => part.isNotEmpty)
+    .map((part) => part[0].toUpperCase() + part.substring(1))
+    .join(' ');
 
 /// Events pushed from the native wake word service.
 sealed class WakeWordEvent {
@@ -104,6 +136,13 @@ abstract interface class WakeWordPlatform {
   Future<bool> stop();
 
   Future<bool> isRunning();
+
+  /// Persists [name] as the classifier to listen for.
+  ///
+  /// Returns false when the service does not have an installed classifier with
+  /// that name. The native layer validates against the assets it can actually
+  /// load, so a phrase that is not installed is refused rather than saved.
+  Future<bool> selectModel(String name);
 
   Stream<WakeWordEvent> get events;
 }
@@ -180,6 +219,20 @@ class MethodChannelWakeWordPlatform implements WakeWordPlatform {
     }
   }
 
+  @override
+  Future<bool> selectModel(String name) async {
+    try {
+      return await _methodChannel.invokeMethod<bool>('selectModel', {'name': name}) ?? false;
+    } on PlatformException catch (error) {
+      // `unknown_model` is the expected refusal for a phrase whose asset is not
+      // installed. It is a false return, not a crash.
+      debugPrint('[WakeWord] selectModel($name) refused: ${error.message}');
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
   WakeWordEvent? _decode(dynamic raw) {
     if (raw is! Map) return null;
     final map = Map<String, dynamic>.from(raw);
@@ -229,6 +282,9 @@ class UnsupportedWakeWordPlatform implements WakeWordPlatform {
 
   @override
   Future<bool> isRunning() async => false;
+
+  @override
+  Future<bool> selectModel(String name) async => false;
 
   @override
   Stream<WakeWordEvent> get events => const Stream<WakeWordEvent>.empty();

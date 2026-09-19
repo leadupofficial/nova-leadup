@@ -33,6 +33,7 @@ import '../features/onboarding/splash_page.dart';
 import '../features/onboarding/welcome_page.dart';
 import '../features/settings/integrations_page.dart';
 import '../features/settings/me_page.dart';
+import '../features/settings/wake_word_settings_page.dart';
 import '../features/tasks/tasks_page.dart';
 import 'providers.dart';
 import 'shell.dart';
@@ -312,6 +313,15 @@ final routerProvider = Provider<GoRouter>((ref) {
                     path: 'call-recordings',
                     name: 'call-recordings',
                     builder: (context, state) => const CallRecordingPage(),
+                  ),
+                  // Wake word (requirement 2, §5.16/§13.10). Device-local: the
+                  // phrase is enforced by the classifiers installed in the app
+                  // bundle, and the screen says so. Sits beside the other Me
+                  // companion settings.
+                  GoRoute(
+                    path: 'wake-word',
+                    name: 'wake-word-settings',
+                    builder: (context, state) => const WakeWordSettingsPage(),
                   ),
                 ],
               ),

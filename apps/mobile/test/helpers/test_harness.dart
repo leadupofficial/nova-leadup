@@ -113,6 +113,7 @@ class FakeWakeWordPlatform implements WakeWordPlatform {
       available: true,
       reason: 'ok',
       models: <String>['hey_jarvis'],
+      selected: 'hey_jarvis',
     ),
   });
 
@@ -121,6 +122,9 @@ class FakeWakeWordPlatform implements WakeWordPlatform {
   int startCalls = 0;
   int stopCalls = 0;
   bool running = false;
+
+  /// Names passed to [selectModel], in order, including the refusals.
+  final List<String> selectModelCalls = <String>[];
 
   final StreamController<WakeWordEvent> _controller =
       StreamController<WakeWordEvent>.broadcast();
@@ -132,7 +136,9 @@ class FakeWakeWordPlatform implements WakeWordPlatform {
   Future<bool> start() async {
     startCalls++;
     running = true;
-    _controller.add(const WakeWordListening(models: <String>['hey_jarvis']));
+    _controller.add(
+      WakeWordListening(models: availabilityResult.models),
+    );
     return true;
   }
 
@@ -146,6 +152,22 @@ class FakeWakeWordPlatform implements WakeWordPlatform {
 
   @override
   Future<bool> isRunning() async => running;
+
+  /// Accepts only the classifiers this fake reports as installed, mirroring the
+  /// native service's `unknown_model` refusal for a phrase with no asset.
+  @override
+  Future<bool> selectModel(String name) async {
+    selectModelCalls.add(name);
+    if (!availabilityResult.models.contains(name)) return false;
+    availabilityResult = WakeWordAvailability(
+      available: availabilityResult.available,
+      reason: availabilityResult.reason,
+      detail: availabilityResult.detail,
+      models: availabilityResult.models,
+      selected: name,
+    );
+    return true;
+  }
 
   @override
   Stream<WakeWordEvent> get events => _controller.stream;
@@ -293,6 +315,10 @@ Future<TestDependencies> createTestDependencies({
     available: true,
     reason: 'ok',
     models: <String>['hey_jarvis'],
+    // The native service always reports the effective classifier once a model is
+    // installed, falling back to the first one. Fakes mirror that so the UI sees
+    // the same shape on a test device as on a phone.
+    selected: 'hey_jarvis',
   ),
   FakeHealthService? healthService,
 }) async {
@@ -418,6 +444,22 @@ NetworkService emptyApiNetworkService() {
             'id': 'user-1',
             'email': 'alex@example.com',
             'name': 'Alex',
+          },
+        });
+      }
+      if (path.contains('/device/wake-word/config')) {
+        // The §13.10 record when the account has never saved one. Deliberately
+        // `wakeWord: null` — the server does not know which classifiers the
+        // device has, so it must not answer with a phrase.
+        return jsonResponse(<String, dynamic>{
+          'success': true,
+          'data': <String, dynamic>{
+            'wakeWord': null,
+            'available': <dynamic>[],
+            'updatedAt': null,
+            'enforcedOnDevice': true,
+            'control': 'preference_record',
+            'note': 'The device enforces the wake word.',
           },
         });
       }

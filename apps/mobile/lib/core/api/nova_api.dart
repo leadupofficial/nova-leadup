@@ -476,6 +476,35 @@ class NovaApi {
     return _asMap(data);
   }
 
+  /// §13.10 — the wake word recorded against the user's account.
+  ///
+  /// Read-only with respect to the microphone: the phrase NOVA listens for comes
+  /// from the classifiers installed in the app bundle (see
+  /// `WakeWordService.kt`). The response says so itself
+  /// (`enforcedOnDevice: true`, `control: 'preference_record'`).
+  ///
+  /// Returns the raw map because the payload carries explanatory fields the
+  /// screen renders verbatim.
+  Future<Map<String, dynamic>> getWakeWordConfig() async {
+    final data = await _get(ApiConfig.deviceWakeWordConfig);
+    return _asMap(data);
+  }
+
+  /// Records the phrase the user chose, validated server-side against the
+  /// phrases the device reported. [available] is required: the server has no way
+  /// to know which classifiers a build ships, so without it the call is a 400
+  /// rather than a silent acceptance of a phrase no device can hear.
+  Future<Map<String, dynamic>> updateWakeWordConfig({
+    required String wakeWord,
+    required List<String> available,
+  }) async {
+    final data = await _patch(ApiConfig.deviceWakeWordConfig, {
+      'wakeWord': wakeWord,
+      'available': available,
+    });
+    return _asMap(data);
+  }
+
   // ─── Activity centre (audit_logs) ─────────────────────────────────────────
 
   Future<List<NovaActivityItem>> listActivity({

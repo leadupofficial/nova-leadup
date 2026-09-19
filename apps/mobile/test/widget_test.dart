@@ -147,6 +147,9 @@ void main() {
       // assertion below only asks whether the route resolved, which does not require
       // waiting for an animation that is designed never to finish.
       '/me/device-control',
+      // Wake word (requirement 2, §5.16/§13.10), a Me setting beside the others.
+      // The screen names the classifier actually installed in the build.
+      '/me/wake-word',
       '/admin',
       '/translate',
       '/wakeword',

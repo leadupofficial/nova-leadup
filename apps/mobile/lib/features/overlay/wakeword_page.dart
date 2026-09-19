@@ -6,7 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/design/widgets/index.dart';
 import '../../core/permissions/permission_provider.dart';
 import '../../core/voice/wake_word_controller.dart';
-import 'floating_overlay.dart' show humanizeWakeWord, wakePhrase;
+import '../../core/voice/wake_word_service.dart' show humanizeWakeWordName;
+import 'floating_overlay.dart' show wakePhrase;
 
 /// Wake word — port of `overlay/wakeword.html`, wired to the real
 /// [WakeWordController] (`core/voice/wake_word_controller.dart`).
@@ -20,10 +21,15 @@ import 'floating_overlay.dart' show humanizeWakeWord, wakePhrase;
 /// `permissionProvider.requestMicrophone()` / `openAppSettings()` when the failure
 /// really is a permission failure.
 ///
-/// What the controller does NOT expose: a sensitivity/threshold setting or a
-/// custom-phrase setter: [WakeWordController]/[WakeWordPlatform] only offer
-/// `availability/start/stop/isRunning/events` and `wakeword.html` shows no such
-/// control, so none is rendered rather than faking a slider that writes nowhere.
+/// What the controller does NOT expose: a sensitivity/threshold setting, or a
+/// free-text phrase. [WakeWordController]/[WakeWordPlatform] only offer
+/// `availability/selectModel/start/stop/isRunning/events`, and a wake word can
+/// only be a classifier that is actually installed — the picker for that lives
+/// at `/me/wake-word` (`features/settings/wake_word_settings_page.dart`).
+/// Nothing here invents a phrase or a slider that writes nowhere.
+///
+/// The wake-word path opens the conversation; it cannot dispatch a device
+/// action. That limitation is unchanged and is stated on the settings screen.
 ///
 /// Not ported: `.theme-toggle` (the preview's theme switch) — OpenDesign chrome.
 /// The export's centered `.bg-aura` is rendered with the app's existing
@@ -56,7 +62,6 @@ class _WakeWordPageState extends ConsumerState<WakeWordPage> {
     final supported = wake.availability?.available ?? false;
     final phrase = wakePhrase(wake);
     final detection = wake.lastDetection;
-
     return Scaffold(
       backgroundColor: c.bg,
       body: Stack(
@@ -86,6 +91,11 @@ class _WakeWordPageState extends ConsumerState<WakeWordPage> {
                       // `.phrase` — `linear-gradient(180deg, --fg, oklch(.70 .01
                       // 260))` clipped to the text. That grey has no token; it
                       // sits between `--fg` and `--muted`, so it is interpolated.
+                      //
+                      // With no classifier installed there is no phrase to quote,
+                      // so the block says that instead of naming one. Reaching
+                      // here with `phrase == null` and a supported build is not
+                      // possible: `available` requires at least one model.
                       ShaderMask(
                         shaderCallback: (bounds) => LinearGradient(
                           begin: Alignment.topCenter,
@@ -93,9 +103,13 @@ class _WakeWordPageState extends ConsumerState<WakeWordPage> {
                           colors: [c.fg, Color.lerp(c.fg, c.muted, 0.65)!],
                         ).createShader(bounds),
                         child: Text(
-                          '"$phrase"', textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.displayLarge!
-                              .copyWith(color: c.onAccent),
+                          phrase == null ? 'No wake word installed' : '"$phrase"',
+                          textAlign: TextAlign.center,
+                          style: phrase == null
+                              ? Theme.of(context).textTheme.titleMedium!
+                                  .copyWith(color: c.onAccent)
+                              : Theme.of(context).textTheme.displayLarge!
+                                  .copyWith(color: c.onAccent),
                         ),
                       ),
                       const SizedBox(height: NovaSpace.xs),
@@ -118,7 +132,7 @@ class _WakeWordPageState extends ConsumerState<WakeWordPage> {
                               Flexible(
                                 child: Text(
                                   'Last heard '
-                                  '"${humanizeWakeWord(detection.name)}" · '
+                                  '"${humanizeWakeWordName(detection.name)}" · '
                                   '${(detection.score * 100).round()}% · '
                                   '${_timeOfDay(detection.at)}',
                                   textAlign: TextAlign.center,
@@ -162,11 +176,15 @@ class _WakeWordPageState extends ConsumerState<WakeWordPage> {
     return 'Wake word is off';
   }
 
-  static String _notifTitle(WakeWordState wake, bool supported, String phrase) {
+  static String _notifTitle(WakeWordState wake, bool supported, String? phrase) {
     if (wake.availability != null && !supported) return 'Wake word is unavailable on this build';
-    if (wake.listening) return 'NOVA is ready for "$phrase"';
+    // `phrase` is null only when no classifier is installed; the branches below
+    // still have to read sensibly, so they fall back to "the wake word" rather
+    // than to a product name that is not installed.
+    final name = phrase ?? 'the wake word';
+    if (wake.listening) return 'NOVA is ready for "$name"';
     if (wake.enabled) return 'NOVA is paused';
-    return 'NOVA is not listening for "$phrase"';
+    return 'NOVA is not listening for "$name"';
   }
 
   static String _notifDetail(WakeWordState wake, bool supported) {

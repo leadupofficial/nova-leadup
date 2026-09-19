@@ -73,6 +73,17 @@ class WakeWordService : Service() {
         /** Registry of installed wake-word classifiers. */
         private const val MODEL_MANIFEST_ASSET = "wakeword/models.json"
 
+        /**
+         * The user's chosen classifier, stored in the same
+         * `FlutterSharedPreferences` file Flutter's `shared_preferences` writes
+         * (hence the `flutter.` prefix), exactly like
+         * [BootReceiver.WAKE_WORD_ENABLED_KEY]. Dart reads and writes it through
+         * [com.leadup.nova.WakeWordService]'s `selectModel` method; keeping one
+         * store means the choice survives a restart and the boot receiver sees
+         * the same value the UI showed.
+         */
+        const val SELECTED_MODEL_PREF_KEY = "flutter.nova_wake_word_model"
+
         /** Minimum interval between two detections. */
         private const val DETECTION_COOLDOWN_MS = 2_000L
 
@@ -112,6 +123,26 @@ class WakeWordService : Service() {
                         // Lets Dart disable the wake-word toggle instead of silently
                         // enabling a feature that cannot work.
                         "availability" -> result.success(availability(appContext))
+
+                        // Persists the user's choice among the *installed*
+                        // classifiers. Validated here, not in Dart: this service
+                        // is the only party that can see which `.onnx` assets
+                        // actually exist, so a name that is not installed must be
+                        // refused rather than stored and later ignored.
+                        "selectModel" -> {
+                            val name = call.argument<String>("name")
+                            if (name.isNullOrBlank()) {
+                                result.error("invalid_argument", "name is required", null)
+                            } else if (selectModel(appContext, name)) {
+                                result.success(true)
+                            } else {
+                                result.error(
+                                    "unknown_model",
+                                    "No installed wake word classifier is named '$name'",
+                                    null,
+                                )
+                            }
+                        }
 
                         else -> result.notImplemented()
                     }
@@ -155,12 +186,46 @@ class WakeWordService : Service() {
                 )
             }
 
-            return mapOf(
+            // The phrase that will actually be listened for. Always one of
+            // `models`: a stored choice that is no longer installed falls back to
+            // the first classifier rather than silently listening for nothing.
+            val selected = selectedModelName(context, models)
+            val payload = mutableMapOf<String, Any>(
                 "available" to true,
                 "reason" to "ok",
                 "models" to models.map { it.name },
             )
+            // Added only when there is one, so the map stays `Map<String, Any>`
+            // for the channel. Dart treats an absent key as "no classifier".
+            if (selected != null) payload["selected"] = selected
+            return payload
         }
+
+        /**
+         * The effective classifier: the user's stored choice when it is still
+         * installed, otherwise the first installed classifier.
+         */
+        fun selectedModelName(context: Context, models: List<WakeWordModel>): String? {
+            val stored = sharedPreferences(context).getString(SELECTED_MODEL_PREF_KEY, null)
+            return WakeWordModelSelection.resolve(stored, models.map { it.name })
+        }
+
+        /**
+         * Persists [name] as the chosen classifier.
+         *
+         * Returns false — storing nothing — when no installed classifier has
+         * that name. Dart is told, so the UI can say the phrase was refused
+         * instead of showing a selection the service will ignore on next start.
+         */
+        fun selectModel(context: Context, name: String): Boolean {
+            val match = loadModels(context).firstOrNull { it.name == name } ?: return false
+            sharedPreferences(context).edit().putString(SELECTED_MODEL_PREF_KEY, match.name).apply()
+            Log.i(TAG, "Selected wake word '${match.name}'")
+            return true
+        }
+
+        private fun sharedPreferences(context: Context) =
+            context.getSharedPreferences(BootReceiver.SHARED_PREFS_NAME, Context.MODE_PRIVATE)
 
         fun start(context: Context) {
             // Never request a microphone-typed foreground service without the runtime
@@ -319,8 +384,8 @@ class WakeWordService : Service() {
     }
 
     private fun beginListening() {
-        val models = loadModels(this)
-        if (models.isEmpty()) {
+        val installed = loadModels(this)
+        if (installed.isEmpty()) {
             Log.e(TAG, "No wake word model installed - refusing to start")
             emit(
                 mapOf(
@@ -332,6 +397,13 @@ class WakeWordService : Service() {
             stopSelf()
             return
         }
+
+        // Honour the user's stored choice. Only the selected classifier is fed
+        // to the engine, so with several installed the microphone fires on the
+        // phrase the user picked rather than on all of them. `ifEmpty` keeps a
+        // stale selection from silencing the service.
+        val selected = selectedModelName(this, installed)
+        val models = installed.filter { it.name == selected }.ifEmpty { installed }
 
         // startForegroundCompat runs on every path that keeps this service alive. When a
         // service is started via startForegroundService(), the platform requires a

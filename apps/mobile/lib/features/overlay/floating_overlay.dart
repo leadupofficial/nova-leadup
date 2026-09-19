@@ -193,8 +193,12 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
     final passive =
         state == null || state == VoiceState.ready || state == VoiceState.inactive;
     if (wake.listening && passive) {
+      // `phrase` is null only before availability has been probed or when the
+      // build has no classifier; neither case may be filled in with a phrase
+      // the app cannot hear.
+      final phrase = wake.phrase;
       return (
-        headline: '🎙 Listening for "${wakePhrase(wake)}"',
+        headline: phrase == null ? '🎙 Listening' : '🎙 Listening for "$phrase"',
         detail: 'Say the wake word, or tap "Ask NOVA".',
       );
     }
@@ -506,24 +510,17 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
   }
 }
 
-/// The installed wake word name, humanised (`hey_jarvis` -> `Hey Jarvis`), or the
-/// product's wake word from the export when the native layer reports
-/// availability without model names.
+/// The wake word NOVA will actually listen for, humanised (`hey_jarvis` ->
+/// `Hey Jarvis`), or null when no classifier is installed in this build.
 ///
-/// Public because `wakeword_page.dart` shows it too and the task permits only
-/// these three files, so there is no shared helper file to hold it.
-String wakePhrase(WakeWordState wake) {
-  final models = wake.availability?.models ?? const <String>[];
-  if (models.isEmpty) return 'Hey Nova';
-  return models.map(humanizeWakeWord).join(' or ');
-}
-
-/// `hey_jarvis` -> `Hey Jarvis`.
-String humanizeWakeWord(String raw) => raw
-    .split(RegExp(r'[_\-\s]+'))
-    .where((part) => part.isNotEmpty)
-    .map((part) => part[0].toUpperCase() + part.substring(1))
-    .join(' ');
+/// There is deliberately no invented fallback. An earlier version returned the
+/// string `'Hey Nova'` here, which no build can honour: openWakeWord ships no
+/// "hey nova" classifier and the repo contains none, so the app was naming a
+/// phrase it could not hear. Callers now have to say something honest when this
+/// returns null.
+///
+/// Public because `wakeword_page.dart` shows it too.
+String? wakePhrase(WakeWordState wake) => wake.phrase;
 
 // The export pins exact families/weights, so these build them from the bundled
 // NovaFonts/NovaType tokens rather than falling back to framework defaults.

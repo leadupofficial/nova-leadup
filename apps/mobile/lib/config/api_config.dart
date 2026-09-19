@@ -179,6 +179,13 @@ class ApiConfig {
   static String get settingsAvatars => '$baseUrl/api/v1/settings/avatars';
   static String get settingsCompanion => '$baseUrl/api/v1/settings/companion';
 
+  /// §13.10 — the user's chosen wake word, stored against their account.
+  ///
+  /// A *preference record* only. The phrase NOVA listens for is decided on the
+  /// device by the installed wake-word classifiers; the server cannot change it.
+  static String get deviceWakeWordConfig =>
+      '$baseUrl/api/v1/device/wake-word/config';
+
   // ── Path builders ─────────────────────────────────────────────────────────
   /// Conversations: `/conversations/:id`
   static String conversation(String id) => '$conversations/$id';

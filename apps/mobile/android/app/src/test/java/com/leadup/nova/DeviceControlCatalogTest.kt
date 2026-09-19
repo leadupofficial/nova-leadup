@@ -118,7 +118,14 @@ class DeviceControlCatalogTest {
             catalog.panelCapability(DeviceControlCatalog.SettingsPanel.DND_ACCESS),
         )
         for (action in DeviceControlCatalog.Action.entries) {
-            assertEquals(DeviceControlCatalog.Capability.FUNCTIONAL, catalog.capabilityOf(action))
+            val expected = when (action) {
+                // Performed by the Flutter recorder, not by an Android intent.
+                DeviceControlCatalog.Action.START_RECORDING,
+                DeviceControlCatalog.Action.STOP_RECORDING,
+                -> DeviceControlCatalog.Capability.DART_EXECUTED
+                else -> DeviceControlCatalog.Capability.FUNCTIONAL
+            }
+            assertEquals(expected, catalog.capabilityOf(action))
         }
     }
 
@@ -303,6 +310,10 @@ class DeviceControlCatalogTest {
                 "media_pause",
                 "media_next",
                 "media_previous",
+                // Executed in Dart by the recorder; ids shared for the voice
+                // matcher and the level registry.
+                "start_recording",
+                "stop_recording",
             ),
             DeviceControlCatalog.Action.entries.map { it.wireName }.toSet(),
         )
