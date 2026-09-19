@@ -8,6 +8,7 @@ import 'dotenv/config';
 
 import { vi, expect } from 'vitest';
 import { z } from 'zod';
+import { getTableName } from 'drizzle-orm';
 
 const envSchema = z.object({
 	NODE_ENV: z.enum(['development','test','production']).default('development'),
@@ -53,31 +54,126 @@ const defaultSelectResults: Record<string, any[]> = {
 	organizations: [{ id: 'org-1' }],
 };
 
-type QueryUpdate = {
-	table?: any;
-	set: (set: any) => { where: (where: any) => { returning: (cols: string[]) => Promise<any[]> } };
-};
-type QueryDelete = {
-	where: (where: any) => { returning: (cols: string[]) => Promise<any[]> };
-};
+/**
+ * Drizzle-shaped in-memory query builder.
+ *
+ * The routes call `getDb()` and then use the real Drizzle API:
+ *
+ *   db.select({ count: sql`count(*)` }).from(tasks).where(where)
+ *   db.select().from(conversations).where(...).orderBy(...).limit(1)
+ *   db.insert(conversations).values({...}).returning()
+ *   db.update(conversations).set({...}).where(...)
+ *   db.delete(conversations).where(...)
+ *
+ * The previous mock returned a plain array from `select()`, so the very first
+ * `.from(...)` on it was a TypeError and every DB-backed route answered 500.
+ * These builders are thenable (Drizzle queries are awaited directly) and every
+ * chain method returns itself, so a route can call any subset in any order.
+ */
+function tableNameOf(table: unknown): string {
+	try {
+		return getTableName(table as never);
+	} catch {
+		return '';
+	}
+}
+
+function rowsFor(table: unknown): any[] {
+	return defaultSelectResults[tableNameOf(table)] ?? [];
+}
+
+interface ChainState {
+	rows: any[];
+	selection?: Record<string, unknown>;
+}
+
+function chainOf(state: ChainState): any {
+	const resolve = (): any[] => {
+		// A `select({ count: sql`count(*)` })` projection resolves to a single
+		// aggregate row, which is how the routes read pagination totals.
+		if (state.selection && Object.prototype.hasOwnProperty.call(state.selection, 'count')) {
+			return [{ count: state.rows.length }];
+		}
+		return state.rows;
+	};
+
+	const q: any = {};
+	const passthrough = [
+		'from', 'where', 'orderBy', 'limit', 'offset', 'groupBy', 'having',
+		'leftJoin', 'innerJoin', 'rightJoin', 'fullJoin', 'for', 'with',
+	];
+	for (const method of passthrough) {
+		q[method] = (table?: unknown) => {
+			if (method === 'from' && table) state.rows = rowsFor(table);
+			return q;
+		};
+	}
+	q.then = (onFulfilled?: any, onRejected?: any) => Promise.resolve(resolve()).then(onFulfilled, onRejected);
+	q.catch = (onRejected?: any) => Promise.resolve(resolve()).catch(onRejected);
+	q.finally = (onFinally?: any) => Promise.resolve(resolve()).finally(onFinally);
+	return q;
+}
+
+function insertChain(): any {
+	let values: any = {};
+	const q: any = {
+		values: (v: any) => {
+			values = Array.isArray(v) ? { ...v[0] } : { ...v };
+			return q;
+		},
+		onConflictDoUpdate: () => q,
+		onConflictDoNothing: () => q,
+		returning: () => Promise.resolve([{ id: 'new-1', ...values }]),
+	};
+	q.then = (onFulfilled?: any, onRejected?: any) =>
+		Promise.resolve([{ id: 'new-1', ...values }]).then(onFulfilled, onRejected);
+	q.catch = (onRejected?: any) =>
+		Promise.resolve([{ id: 'new-1', ...values }]).catch(onRejected);
+	return q;
+}
+
+function updateChain(): any {
+	let patch: any = {};
+	const result = () => [{ id: 'updated-1', ...patch }];
+	const q: any = {
+		set: (v: any) => {
+			patch = { ...v };
+			return q;
+		},
+		where: () => q,
+		returning: () => Promise.resolve(result()),
+	};
+	q.then = (onFulfilled?: any, onRejected?: any) => Promise.resolve(result()).then(onFulfilled, onRejected);
+	q.catch = (onRejected?: any) => Promise.resolve(result()).catch(onRejected);
+	return q;
+}
+
+function deleteChain(): any {
+	const done = () => [] as any[];
+	const q: any = { where: () => q, returning: () => Promise.resolve(done()) };
+	q.then = (onFulfilled?: any, onRejected?: any) => Promise.resolve(done()).then(onFulfilled, onRejected);
+	q.catch = (onRejected?: any) => Promise.resolve(done()).catch(onRejected);
+	return q;
+}
 
 vi.mock('../db/connection', () => {
-	const mockDb = () => ({
-		select: vi.fn(async (_table?: string, _opts?: any) => defaultSelectResults[_table || ''] ?? []),
-		insert: vi.fn(async () => [{ id: 'new-1' }]),
-		update: vi.fn(async () => []),
-		delete: vi.fn(async () => []),
-	});
-	const db = mockDb();
+	const db = {
+		select: (selection?: Record<string, unknown>) => chainOf({ rows: [], selection }),
+		insert: (_table?: unknown) => insertChain(),
+		update: (_table?: unknown) => updateChain(),
+		delete: (_table?: unknown) => deleteChain(),
+		execute: async (_query: unknown) => ({ rows: [] }),
+	};
 	const qb = {
-		select() { return db; },
-		insert() { return db; },
-		update: () => ({}),
-		delete: () => ({}),
+		select: () => db,
+		insert: () => db,
+		update: () => db,
+		delete: () => db,
 	} as any;
 	return {
 		getDb: () => db,
-		getDbClient: () => ({ query: vi.fn(async (sql: string) => ({ rows: [] })) }),
+		getDbPool: () => ({ query: async () => ({ rows: [], rowCount: 0 }) }),
+		getDbClient: () => ({ query: async (_sql: string) => ({ rows: [] }) }),
 		getQueryBuilder: () => qb,
 	};
 });
@@ -94,6 +190,43 @@ vi.mock('../redis', () => ({
 		quit: vi.fn().mockResolvedValue('OK'),
 	}),
 }));
+
+/**
+ * AI provider calls are stubbed at the provider boundary.
+ *
+ * These are network calls to Anthropic / Deepgram / ElevenLabs / Sarvam, none of
+ * which a unit test should make: with the placeholder keys from `.env.test` they
+ * do not merely fail, they hang until the test times out. Every route degrades
+ * gracefully *around* a provider failure, so a deterministic stub is what lets
+ * the route's own logic — persistence, fallbacks, response shaping — be tested.
+ */
+vi.mock('../services/ai.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../services/ai.js')>();
+	const stubAudio = (contentType: string) => async () => ({
+		audioBuffer: Buffer.from('mock-audio'),
+		contentType,
+	});
+	const stubTranscript = (language: string) => async () => ({
+		transcript: 'mock transcript',
+		confidence: 0.99,
+		language,
+	});
+	return {
+		...actual,
+		chatCompletion: vi.fn(async () => ({
+			content: 'mock assistant reply',
+			model: 'mock-model',
+			usage: { input_tokens: 1, output_tokens: 1 },
+		})),
+		transcribeAudio: vi.fn(stubTranscript('en')),
+		transcribeAudioSarvam: vi.fn(stubTranscript('ta')),
+		transcribeAudioGoogle: vi.fn(stubTranscript('hi')),
+		synthesizeSpeech: vi.fn(stubAudio('audio/mpeg')),
+		synthesizeSpeechSarvam: vi.fn(stubAudio('audio/wav')),
+		synthesizeSpeechGoogle: vi.fn(stubAudio('audio/mp3')),
+		synthesizeSpeechDeepgram: vi.fn(stubAudio('audio/mpeg')),
+	};
+});
 
 vi.mock('../config', () => ({
 	config: {

@@ -10,6 +10,8 @@
  * - Uses an in-memory sliding window; the Map is bounded and auto-cleaned.
  * - For distributed deployments, replace `SlidingWindowStore` with Redis.
  */
+import type { NextFunction, Request, Response } from 'express';
+import { HttpError } from './error-handler.js';
 
 interface RateLimitConfig {
 	windowMs: number;
@@ -186,6 +188,76 @@ export function rateLimitMiddleware(config: RateLimitConfig = DEFAULT_RATE_LIMIT
 export function resetRateLimit(key: string): void {
 	authStore.reset(key);
 	defaultStore.reset(key);
+}
+
+// ─── Fixed-window limiter (express-rate-limit-compatible options) ─────────────
+//
+// `rateLimitMiddleware` above is the sliding-window limiter the server mounts on
+// `/api/v1`. This is the smaller, fixed-window counterpart with the option names
+// the rest of the ecosystem uses (`windowMs` / `max` / `keyGenerator`); it
+// reports exhaustion through `next(HttpError)` so the shared error handler owns
+// the response, rather than writing 429 itself.
+
+export interface RateLimitOptions {
+	/** Window length in milliseconds. Defaults to 60s. */
+	windowMs?: number;
+	/** Maximum requests allowed per key per window. Defaults to 100. */
+	max?: number;
+	/** Derives the limiting key from the request. Defaults to the peer IP. */
+	keyGenerator?: (req: Request) => string;
+}
+
+interface FixedWindowBucket {
+	count: number;
+	resetAt: number;
+}
+
+/**
+ * Live bucket state. Exported so callers (and tests) can reset it wholesale —
+ * `buckets.clear()` — without reaching into the module's internals.
+ */
+export const buckets = new Map<string, FixedWindowBucket>();
+
+function defaultKeyGenerator(req: Request): string {
+	return req.ip || req.socket?.remoteAddress || 'unknown';
+}
+
+/**
+ * Build a fixed-window rate limiter.
+ *
+ * Over the limit the request is rejected with a 429 `HttpError`, so the response
+ * body is the standard problem-details document produced by `errorHandler`.
+ */
+export function rateLimit(options: RateLimitOptions = {}) {
+	const windowMs = options.windowMs ?? 60_000;
+	const max = options.max ?? 100;
+	const keyGenerator = options.keyGenerator ?? defaultKeyGenerator;
+
+	return (req: Request, res: Response, next: NextFunction): void => {
+		const now = Date.now();
+		const key = String(keyGenerator(req));
+
+		let bucket = buckets.get(key);
+		if (!bucket || now >= bucket.resetAt) {
+			bucket = { count: 0, resetAt: now + windowMs };
+			buckets.set(key, bucket);
+		}
+		bucket.count += 1;
+
+		const remaining = Math.max(0, max - bucket.count);
+		res.setHeader('X-RateLimit-Limit', String(max));
+		res.setHeader('X-RateLimit-Remaining', String(remaining));
+		res.setHeader('X-RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)));
+
+		if (bucket.count > max) {
+			const retryAfterMs = Math.max(0, bucket.resetAt - now);
+			res.setHeader('Retry-After', String(Math.max(1, Math.ceil(retryAfterMs / 1000))));
+			next(new HttpError(429, 'Too Many Requests', 'RATE_LIMITED'));
+			return;
+		}
+
+		next();
+	};
 }
 
 export { SlidingWindowStore, AUTH_RATE_LIMIT, DEFAULT_RATE_LIMIT };

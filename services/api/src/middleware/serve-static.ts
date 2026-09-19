@@ -42,7 +42,19 @@ export function resolveSafePath(root: string, urlPath: string): string | null {
 
 	let decoded: string;
 	try {
-		decoded = decodeURIComponent(pathOnly);
+		// Decode repeatedly. A single pass leaves `..%252f..%252fetc` as the
+		// literal `..%2f..%2fetc`, which `resolve()` treats as one harmless
+		// filename segment and answers 404 — but a proxy or a second decoder
+		// downstream would turn it back into `../../etc`. Decoding to a fixed
+		// point makes the containment check operate on what the path can
+		// actually become, and the loop is bounded so a crafted
+		// `%25`-expansion cannot spin.
+		decoded = pathOnly;
+		for (let pass = 0; pass < 4; pass += 1) {
+			const next = decodeURIComponent(decoded);
+			if (next === decoded) break;
+			decoded = next;
+		}
 	} catch {
 		return null;
 	}

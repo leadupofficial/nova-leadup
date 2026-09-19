@@ -293,6 +293,7 @@ router.post('/tts', authenticate, validate(TtsSchema), async (req: Authenticated
 					url: null,
 					contentType,
 					voice: body.voiceId || 'default',
+					voiceId: body.voiceId || 'default',
 					durationMs: Math.round((audioBuffer.length / 16000) * 1000),
 					provider,
 					language,
@@ -320,6 +321,9 @@ router.post('/tts', authenticate, validate(TtsSchema), async (req: Authenticated
 							url: null,
 							contentType: fallback.contentType,
 							voice: body.voiceId || 'default',
+						// `voiceId` echoes the request field name; `voice` is the
+						// original key and is kept for existing clients.
+						voiceId: body.voiceId || 'default',
 							durationMs: Math.round((fallback.audioBuffer.length / 16000) * 1000),
 							provider: 'deepgram',
 							language,
@@ -350,6 +354,9 @@ router.post('/tts', authenticate, validate(TtsSchema), async (req: Authenticated
 							url: null,
 							contentType: fallback.contentType,
 							voice: body.voiceId || 'default',
+						// `voiceId` echoes the request field name; `voice` is the
+						// original key and is kept for existing clients.
+						voiceId: body.voiceId || 'default',
 							durationMs: Math.round((fallback.audioBuffer.length / 16000) * 1000),
 							provider: 'sarvam-fallback',
 							language,
@@ -382,6 +389,9 @@ router.post('/tts', authenticate, validate(TtsSchema), async (req: Authenticated
 							url: null,
 							contentType: fallback.contentType,
 							voice: body.voiceId || 'default',
+						// `voiceId` echoes the request field name; `voice` is the
+						// original key and is kept for existing clients.
+						voiceId: body.voiceId || 'default',
 							durationMs: Math.round((fallback.audioBuffer.length / 16000) * 1000),
 							provider: 'elevenlabs-fallback',
 							language,
@@ -403,6 +413,7 @@ router.post('/tts', authenticate, validate(TtsSchema), async (req: Authenticated
 					url: null,
 					contentType: 'audio/mpeg',
 					voice: body.voiceId || 'default',
+					voiceId: body.voiceId || 'default',
 					provider: 'fallback',
 					error: `TTS provider '${voiceProvider}' unavailable`,
 					language,

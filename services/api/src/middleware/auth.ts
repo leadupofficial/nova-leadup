@@ -105,3 +105,12 @@ export function requireRole(...roles: string[]) {
 		}
 	};
 }
+
+/**
+ * Admin gate as a ready-to-mount middleware.
+ *
+ * `routes/admin.ts` applies the same `owner | admin` check inline via a private
+ * helper; this is the shared, exported form so other routers (and tests) can
+ * mount the gate directly instead of re-deriving the role list.
+ */
+export const requireAdmin = requireRole('owner', 'admin');

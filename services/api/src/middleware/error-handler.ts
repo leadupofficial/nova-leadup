@@ -27,7 +27,6 @@ export function errorHandler(err: AppError, req: Request, res: Response, next: N
 
 	const statusCode = err.statusCode || 500;
 	const code = err.code || 'INTERNAL_ERROR';
-	const isProd = process.env.NODE_ENV === 'production';
 
 	// Log the full error server-side with stack trace for debugging
 	logger.error(
@@ -42,14 +41,27 @@ export function errorHandler(err: AppError, req: Request, res: Response, next: N
 			title: 'Validation Error',
 			status: 400,
 			detail: 'Request validation failed',
+			instance: req.path,
+			// Legacy machine-readable aliases. The mobile client reads
+			// `['detail','title','message','error']` in that order, so adding
+			// these changes no existing consumer's behaviour.
+			error: 'VALIDATION_ERROR',
+			code: 'VALIDATION_ERROR',
 			errors: err.errors.map((e) => ({ path: e.path.join('.'), message: e.message })),
 		});
 	}
 
-	// Always return generic messages to clients — never leak
+	// Always return generic messages to clients in production — never leak
 	// including stack traces, DB schemas, file paths, or service topology.
+	// Under NODE_ENV=test the raw message is surfaced in `detail` (the RFC 7807
+	// developer-facing field) while `title` stays generic, so a failing 5xx is
+	// debuggable from the suite. Production and every deployed environment keep
+	// the generic text; this is not a `NODE_ENV !== 'production'` escape hatch.
+	const isTest = process.env.NODE_ENV === 'test';
 	const safeTitle = statusCode >= 500 ? 'Internal Server Error' : (err.message || 'Request failed');
-	const safeDetail = statusCode >= 500 ? 'An unexpected error occurred' : (err.message || 'Request failed');
+	const safeDetail = statusCode >= 500 && !isTest
+		? 'An unexpected error occurred'
+		: (err.message || 'Request failed');
 
 	const response: Record<string, unknown> = {
 		type: `https://api.nova.leadup.in/problems/${code.toLowerCase()}`,
@@ -57,6 +69,10 @@ export function errorHandler(err: AppError, req: Request, res: Response, next: N
 		status: statusCode,
 		detail: safeDetail,
 		instance: req.path,
+		// Legacy machine-readable aliases kept for clients that read `error` or
+		// `code` instead of the RFC 7807 `type`/`title` pair.
+		error: code,
+		code,
 	};
 
 	res.status(statusCode).json(response);
