@@ -24,6 +24,10 @@ const escapeHtml = (str: string): string => {
 
 const router: ReturnType<typeof Router> = Router();
 
+// RFC 4122 shape. Used to reject a malformed id before it reaches Postgres,
+// which would otherwise fail the uuid cast with a 500.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
 const UpdateProfileSchema = z.object({
@@ -564,16 +568,25 @@ router.get('/feature-flags', requireRole('admin'), async (req: AuthenticatedRequ
 router.patch('/feature-flags/:id', requireRole('admin'), async (req: AuthenticatedRequest, res, next: NextFunction) => {
 	try {
 		const db = getDb();
-		const flagId = parseInt(req.params.id);
-		if (Number.isNaN(flagId)) {
+		// `feature_flags.id` is a uuid. This parsed an integer and compared it to the
+		// uuid column, so `parseInt` always returned NaN for a real id and every call
+		// was rejected 400 — the endpoint has never worked. Validate as a uuid and
+		// pass the string through; the cast that hid this is gone.
+		const flagId = req.params.id;
+		if (!UUID_PATTERN.test(flagId)) {
 			throw new HttpError(400, 'Invalid feature flag ID', 'BAD_REQUEST');
 		}
 
 		const { enabled } = req.body as { enabled: boolean };
-		// `feature_flags.id` is a uuid column while the route parses an integer id.
-		// The cast keeps the existing runtime query unchanged; correcting the lookup
-		// would change behaviour and is out of scope for this repair.
-		const [updated] = await db.update(featureFlags).set({ enabled }).where(eq(featureFlags.id, flagId as unknown as string)).returning();
+		if (typeof enabled !== 'boolean') {
+			throw new HttpError(400, 'enabled must be a boolean', 'BAD_REQUEST');
+		}
+
+		const [updated] = await db.update(featureFlags).set({ enabled }).where(eq(featureFlags.id, flagId)).returning();
+
+		if (!updated) {
+			throw new HttpError(404, 'Feature flag not found', 'NOT_FOUND');
+		}
 
 		res.status(200).json({ success: true, data: updated });
 	} catch (err) {
