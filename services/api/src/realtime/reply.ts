@@ -154,6 +154,7 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 
 	const languageInfo = getLanguageByCode(options.language);
 	const systemPrompt = composeSystemPrompt({
+		spoken: true,
 		basePrompt: buildSystemPromptForLanguage(options.language),
 		context: context.text,
 		capabilities: ASSISTANT_TOOLS_PROMPT,

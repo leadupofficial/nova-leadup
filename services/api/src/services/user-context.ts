@@ -235,6 +235,16 @@ export function composeSystemPrompt(options: {
 	language?: string;
 	languageName?: string;
 	languageNative?: string;
+	/**
+	 * Set when the reply will be spoken rather than read.
+	 *
+	 * Speech synthesis mangles colon clock times — measured against ElevenLabs
+	 * Flash, "5:00" came back as a nonsense word in Tamil and "7:30" was read as
+	 * "seven hundred and thirty" (and, in a Tamil sentence, in English). Digits
+	 * are right for a screen and wrong for a voice, so the two are asked for
+	 * differently rather than sharing one instruction.
+	 */
+	spoken?: boolean;
 }): string {
 	const parts = [options.basePrompt];
 
@@ -255,6 +265,19 @@ export function composeSystemPrompt(options: {
 
 	if (options.context) {
 		parts.push(options.context);
+	}
+
+	// Overrides the "keep numbers as-is" line above, so it has to come after it.
+	if (options.spoken) {
+		parts.push(
+			'Your reply is going to be read aloud, so write clock times and dates as ' +
+				'words rather than digits: say "tomorrow at half past seven in the ' +
+				'evening", not "tomorrow 7:30 pm". The speech model reads colon times ' +
+				'wrongly even when the rest of the sentence is correct — it turns ' +
+				'"7:30" into "seven hundred and thirty" and, in Tamil, "5:00" into a ' +
+				'word that means nothing. Ordinary counts and quantities are fine as ' +
+				'digits.'
+		);
 	}
 
 	// Last, so the "you can create these" instruction is the model's most

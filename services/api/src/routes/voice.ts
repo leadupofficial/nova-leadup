@@ -173,6 +173,7 @@ router.post('/chat', authenticate, validate(ChatSchema), async (req: Authenticat
 		// works when spoken, not just when typed.
 		const context = await buildUserContext(req.user!.id);
 		const systemPrompt = composeSystemPrompt({
+		spoken: true,
 			basePrompt: buildSystemPromptForLanguage(language),
 			context: context.text,
 			capabilities: ASSISTANT_TOOLS_PROMPT,
