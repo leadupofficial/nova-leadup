@@ -1770,3 +1770,58 @@ The dictation said "midflight" and the sheet read **"mid-fly"** — Deepgram hea
 that way. It changed nothing here (the title is echoed back to the user before the
 write, which is exactly what the approval sheet is for), but it is a reminder that
 the sheet is the last point at which a misheard word can be caught.
+
+---
+
+## 40. Addendum — a reminder due while the phone is offline (§14) (2026-09-23)
+
+§14 lists *network interruption*. The question is whether a reminder needs
+connectivity at the moment it is due — if it does, a reminder set before a flight
+or in a basement is worthless.
+
+### What was done
+
+A reminder titled **"Offline fire check"** was set for **03:40:55 IST** and the app
+was backgrounded and resumed twice so the reconciler armed it (`dumpsys alarm`
+showed **30** entries for the package). Then connectivity was removed and confirmed
+gone **before** the fire time:
+
+```
+adb shell cmd connectivity airplane-mode enable
+settings get global airplane_mode_on  ->  1
+ping -c 2 8.8.8.8                     ->  connect: Network is unreachable
+```
+
+### Result
+
+| Time | Observation |
+|---|---|
+| 03:40:55 | the target time |
+| 03:41:51 | no notification — **56 s late** |
+| **03:43:55** | notification present, text **"Offline fire check"**, with the network unreachable the whole time |
+
+**The reminder fires with no network at all.** That is the correct architecture —
+the alarm belongs to `AlarmManager` and the notification is scheduled on the
+device, so nothing about delivery depends on the API being reachable. This is the
+behaviour §15's "a push alone is not a reminder" implies: the platform mechanism
+carries it.
+
+### The delay, and why I waited before writing this down
+
+Delivery landed somewhere in the **56–180 s** window after the target. That is
+wider than the ~84 s `windowLength` measured online in §13, which is plausible —
+airplane mode is a strong hint to Doze that nothing needs waking for — but it is
+one sample and I am not claiming a rate.
+
+I nearly recorded this as a failure: at 03:41:51 the notification count was **0**.
+The ~84 s window made 56 s late inconclusive rather than negative, so I waited, and
+it arrived. That is the same mistake §33 documents in the other direction — reading
+a single early sample as a conclusion. This time the wait was the difference
+between a false FAIL and the correct answer.
+
+### The device is left as found
+
+Airplane mode is off, Wi-Fi is on, and connectivity is confirmed (2/2 ping, 0%
+packet loss) — the first check after disabling airplane mode still showed *"Network
+is unreachable"* because the route had not come up yet, which is why it was checked
+again rather than assumed.
