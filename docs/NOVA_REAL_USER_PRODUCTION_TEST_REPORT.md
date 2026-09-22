@@ -540,3 +540,53 @@ freshness window so an old detection cannot ambush a later, unrelated visit.
   starts the wake session. The session still started and the UI was correct, so it
   is not blocking — but it is unexplained and is recorded as such rather than
   waved away (P2).
+
+---
+
+## 16. Addendum — a reminder that actually fires (2026-09-23)
+
+§15 of the mandate is explicit that *"a push notification alone is NOT a
+successful reminder"* and that a reminder the user does not notice is not a
+reminder. This round tested the reminder from a fresh install all the way to the
+shade.
+
+### Fixed first: the notifications were silent
+
+Every reminder arrived silent — `sound=null`, filed under Android's "Silent"
+group. The channel was created with `Importance.high` but no sound.
+
+The subtlety that mattered: **Android never updates an existing channel.** Setting
+`playSound` on the id already installed would have been silently ignored forever,
+for every existing user, so the fix is a new id — `nova_reminders_v2` — carried in
+both the app and the FCM payload (Android drops a notification whose channel does
+not exist).
+
+### Verified on a fresh install
+
+| Step | Evidence |
+|---|---|
+| Fresh install (uninstall/reinstall, because channels survive an update) | auth-first entry screen, as in §3 |
+| Sign in, complete onboarding | permissions/consent restored from the server; Home reached |
+| The new channel exists **with sound** | `NotificationChannel{mId='nova_reminders_v2', mImportance=4, mSound=content://settings/system/notification_sound, mVibrationEnabled=true, mShowBanner=true}` |
+| A reminder created two minutes out is armed | `dumpsys alarm`: `RTC_WAKEUP … ScheduledNotificationReceiver`, `origWhen` matching the exact instant requested |
+| It fired | notification posted on `channel=nova_reminders_v2`, importance 4 |
+| The user sees it | shade: **"NOVA reminder — Check the oven"**, in the *alerting* section, **not** under "Silent" (`reminder_fired.png`) |
+
+### Two findings from the same run
+
+1. **Reminders are inexact** — the armed alarm carries `windowLength 83734` (≈84 s)
+   and the reminder set for 01:21:36 posted at 01:23:39. "Remind me at 6:00" can
+   therefore arrive at 6:01:24. The cause is the exact-alarm permission not being
+   held (P2, recorded as 4f).
+2. **The OS notification prompt fires before onboarding explains it.** On a fresh
+   install the "Allow NOVA to send you notifications?" dialog appeared over the
+   *Get started* screen — before the app's own Permissions screen, which describes
+   what each permission is for. The permission is requested by the push-token
+   registration that runs at first sign-in (P3).
+
+### Still not tested
+
+The reminder's **conversational response loop** — saying "Done", "remind me again
+in 30 minutes", or "cancel it" after the nudge and having the state and history
+update. The notification fired and was dismissed; the reply was never spoken. That
+is the remaining half of §15 and it is recorded as **P1 OPEN**, not as passing.

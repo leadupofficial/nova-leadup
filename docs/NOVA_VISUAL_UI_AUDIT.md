@@ -61,7 +61,9 @@ Severity: **P0** blocks a core flow · **P1** major · **P2** important · **P3*
 |---|---|---|---|---|---|---|
 | Shade, app backgrounded | `push_shade2.png` | — | — | — | **NOVA — Call Arun — "You have a reminder to call Arun. Would you like to do it now?"** | Verified |
 | Shade, app foregrounded | `push_shade.png` | The push was accepted by FCM and **nothing appeared** | **P1** | Android posts a system notification only when the app is backgrounded; with NOVA open the message went to `onMessage` and nobody drew it | `PushForegroundHandler` draws it through the existing channel | `fg_push_shade.png` — visible; `dumpsys` shows `id=900001`, `importance=4` |
-| Shade | `fg_push_shade.png` | The notification is posted **silently** (`sound=null`, grouped under the silent indicator). The same is true of `nova_wake_word` and `nova_wake_word_detection` — all three channels. | **P2** | Channels created with `Importance.high` but no sound | OPEN | — |
+| Shade | `fg_push_shade.png` | The notification was posted **silently** (`sound=null`, grouped under the silent indicator) | **P2** | Channel created with `Importance.high` but no sound, and Android never updates an existing channel — so the id moved to `nova_reminders_v2` | Explicit sound, vibration, banner | `reminder_fired.png` — lands in the *alerting* group, not "Silent" |
+| First sign-in | `fresh_perm.png` | The OS **"Allow NOVA to send you notifications?"** prompt appears over the *Get started* screen, before the app's own Permissions screen explains what it is for | **P3** | Push-token registration requests permission at first sign-in | OPEN | — |
+| Reminder fired | `reminder_fired.png` | — | — | — | **"NOVA reminder — Check the oven"**, alerting group | Verified |
 | Wake word screen | `wakeword_page.png` | **"WAKE WORD IS OFF"** with a *Turn on* button that reads as disabled (low-contrast outline, bottom bar) though it works | **P3** | Button styling | OPEN | — |
 | Wake word notification | `wake_notification.png` | **"NOVA — Heard \"Hey Nova\" — tap to talk"** | — | — | Tapping only launched the app; now it opens Converse already listening | `tap_converse.png` — **LISTENING** |
 | Home bell (before) | `bell_badge.png` | The bell had **no badge at all** — and before this round a hardcoded `0`. The server held a real unread count of **4**. | **P2** | The client read `data['data']` while `_get` had already unwrapped the envelope, so the count was always 0 | `parseUnreadCount` handles both shapes and is total | `bell_badge2.png` — **4** |
@@ -73,7 +75,7 @@ Severity: **P0** blocks a core flow · **P1** major · **P2** important · **P3*
 These were not opened on the handset, so nothing is claimed about them:
 Converse, Tasks, Memory, reminder detail, history, the menu, the admin console,
 translate, wake-word settings, avatar & appearance, privacy controls, daily
-briefing, and every error/empty state other than the two above. The light theme was not exercised — the app is dark-only in this build.
+briefing, the reminders list, and every error/empty state other than those noted. The light theme was not exercised — the app is dark-only in this build.
 
 ## 7. Standing visual risks
 
