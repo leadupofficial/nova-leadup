@@ -80,6 +80,8 @@ root cause, and what remains. Status legend: **FIXED** (code changed + re-verifi
 
 | 27 | Reminder with the screen locked (§14) | A reminder fires on a locked, screen-off phone and is visible | **VERIFIED 2026-09-23.** A reminder set two minutes out for 02:51:21 IST, the app backgrounded and resumed twice to arm it, then the screen turned off and locked (`mScreenOn=false`). It fired anyway: `dumpsys notification` shows `id=185948139 channel=nova_reminders_v2 importance=4` with the screen still off, and the **lock screen** shows *"NOVA · now · NOVA reminder · Locked screen check"* in the alerting group. | — | — | **PASS** | Still untested: app killed, device restart, network interruption at the fire time | Reminders work when the phone is in a pocket |
 
+| 28 | Reminder with the app process killed (§17) | The reminder still fires | **VERIFIED 2026-09-23.** Reminder set for 02:57:06 IST, app backgrounded and resumed to arm it, then `am kill` at 02:54:36 — `pidof` returned nothing. It fired anyway: notification `id=570763834 channel=nova_reminders_v2 importance=4`, text *"Killed app check"*, and **`pidof` returned 16750** afterwards, so Android restarted the app to deliver it. `dumpsys alarm` had shown 12 `ScheduledNotificationReceiver` entries while the process was dead. | — | — | **PASS** | **`force-stop` is a separate case and cannot work**: it puts the app in a stopped state and cancels its alarms, by platform rule. Stated in the report rather than left implied. | Reminders survive the system reclaiming the process |
+
 ---
 
 ## Blocked — exact action required
