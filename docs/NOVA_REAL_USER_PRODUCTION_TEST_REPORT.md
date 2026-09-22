@@ -2010,3 +2010,67 @@ Below the Dart layer: `flutter_local_notifications` 22.3.1 chooses between
 question is whether the Dart enum being sent for `exactAllowWhileIdle` maps to the
 value that Java branch expects — a mismatch there would explain both symptoms: no
 exception, and a windowed alarm.
+
+---
+
+## 44. Addendum — reminders are exact now, and the mode was the reason (2026-09-23)
+
+Rounds 38–40 narrowed a real defect without fixing it: reminders on this handset
+were armed with windows of 22–40 minutes. This round found the cause and fixed it.
+
+### The instrumented measurement
+
+A temporary `debugPrint` of the mode the app actually sends settled the open
+question in one run:
+
+```
+[ModeProbe] requesting exactAllowWhileIdle (probe said exact=true)
+[ModeProbe] exact request returned without throwing
+```
+
+So: **the permission probe was telling the truth**, the app asked for the exact
+mode, and the plugin accepted it without raising anything — and the alarm still
+came out windowed (matched to its own reminder by `origWhen`, `windowLength
+1839803`). Three earlier attempts had blamed the probe; the instrumentation
+disproved that in one line.
+
+### The fix
+
+`AndroidScheduleMode.alarmClock`, measured the same way on the same device:
+
+| Mode requested | Alarm window for a specific reminder |
+|---|---|
+| `exactAllowWhileIdle` | `windowLength 1839803` — ~31 minutes |
+| **`alarmClock`** | **`windowLength 0`** — exact |
+
+`setAlarmClock` is honoured where this OEM batches the `exact*` modes. It also
+skips the permission check entirely — the plugin only runs
+`canScheduleExactAlarms()` on the `exact*` modes — so the reminder is punctual
+whether or not the user grants *Alarms & reminders*.
+
+Applied to the one-shot path, the repeating path and the daily briefing. The
+one-shot path keeps a windowed fallback, so a platform that refuses the
+alarm-clock call still schedules something rather than nothing.
+
+### Verified after the final build
+
+| Check | Evidence |
+|---|---|
+| The specific reminder's alarm | `origWhen 1790119299000` → **`windowLength 0`** |
+| Across the app | **11** NOVA alarms with `windowLength 0`, where before the fix there were **none** |
+
+### Why this took four rounds, honestly
+
+Three attempts were written, built, measured and reverted — two of them on the
+hypothesis that `permission_handler`'s probe was lying. Each revert was correct at
+the time (the evidence did not support the change), and the instrumentation is what
+finally separated "the app asks for the wrong thing" from "the platform ignores
+what the app asks for". The lesson worth keeping is in the method: matching an
+alarm to its reminder by `origWhen` turned a vague list of windows into a
+one-reminder-one-alarm measurement.
+
+### Follow-up this creates
+
+The Reminders screen still tells the user that exact delivery *requires* the
+*Alarms & reminders* grant. With `alarmClock` it no longer does. That notice is now
+asking for something the app does not need, and should be revisited.
