@@ -59,11 +59,11 @@ for that language, not that it passed.
 | Manipuri `mni` | — | correct | Bengali script | provider audio | — | — | — | **B** | **PARTIAL** |
 | Benglish `benglish` | — | correct | Bengali + Latin | provider audio | — | — | — | **B** | **PARTIAL** |
 | Gujlish `gujlish` | — | correct | Gujarati + Latin | provider audio | — | — | — | **B** | **PARTIAL** |
-| Urdu `ur` | — | correct | Urdu script | **English voice** | — | — | — | **C** | **FAIL (voice)** |
-| Nepali `ne` | — | correct | Devanagari | **English voice** | — | — | — | **C** | **FAIL (voice)** |
-| Kashmiri `ks` | — | correct | Devanagari | **English voice** | — | — | — | **C** | **FAIL (voice)** |
-| Bhojpuri `bho` | — | correct | Devanagari | **English voice** | — | — | — | **C** | **FAIL (voice)** |
-| Awadhi `awa` | — | correct | Devanagari | **English voice** | — | — | — | **C** | **FAIL (voice)** |
+| Urdu `ur` | — | correct | Urdu script | **English voice** (`elevenlabs-fallback`) | — | — | — | **C** | **FAIL (voice)** — flagged in the picker |
+| Nepali `ne` | — | correct | Devanagari | **English voice** (`elevenlabs-fallback`) | — | — | — | **C** | **FAIL (voice)** — flagged in the picker |
+| Kashmiri `ks` | — | correct | Devanagari | Sarvam fallback (Indic) | — | — | — | **C** | **PARTIAL** — degraded route, right language |
+| Bhojpuri `bho` | — | correct | Devanagari | **English voice** (`elevenlabs-fallback`) | — | — | — | **C** | **FAIL (voice)** — flagged in the picker |
+| Awadhi `awa` | — | correct | Devanagari | **English voice** (`elevenlabs-fallback`) | — | — | — | **C** | **FAIL (voice)** — flagged in the picker |
 | English `en` | correct | correct | English | ElevenLabs | — | created | — | **A** | **PASS** |
 
 ## 3. Same-language response validation
@@ -130,7 +130,7 @@ been.
 
 | Failure | Detail | Severity | Status |
 |---|---|---|---|
-| Wrong voice for five languages | `ur`, `ne`, `ks`, `bho`, `awa` produce a correct in-script reply that is then spoken by an **English** voice (`elevenlabs-fallback`) | **P1** | OPEN — needs an Indic voice for these codes, or the picker must mark them partial. The catalogue currently **claims** `ur`/`ne`/`bho`/`awa` are Sarvam-routed, so the mapping and the observed behaviour disagree and must be reconciled |
+| Wrong voice for four languages | `ur`, `ne`, `bho`, `awa` produce a correct in-script reply that is then spoken by an **English** voice. Measured 2026-09-23 by reading the `provider` field of `/voice/tts` — not inferred from the catalogue. | **P1** | **PARTIALLY FIXED** — the claim is now honest: `voiceFallback` marks the four codes, the picker reads *"Urdu (basic voice)"*, and both suites pin the exact set. A real Indic voice for them is still missing, so they remain unspoken languages rather than supported ones. `ks` was re-measured and **removed** from this list: Google fails for it but the Sarvam fallback does serve it with an Indic voice |
 | Reliability of the `askedUserBack` path | In the production multilingual run, 5 of 7 languages created the reminder and 2 (Bengali, Tanglish) asked a clarifying question instead. Same input, different outcome across runs | **P2** | OPEN — model non-determinism, not a language gap |
 
 ## 6. What was NOT tested
