@@ -277,3 +277,50 @@ which matches the documented rule for a day with no time.
 
 Nine tasks were created by the sweep and **all were deleted afterwards** (verified:
 0 remaining), so the account is not carrying test rows into later rounds.
+
+## 11. The sweep repeated, and a method error of mine (2026-09-23)
+
+§10 reported 13/13 same-language replies and 9/13 languages acting on the same
+request. This round tried to improve the acting rate and mostly learned that the
+measurement was not sound.
+
+### Same-language replies: now confirmed three times
+
+13/13 in §10, 13/13 on a repeat with the prompt strengthened, and 13/13 again
+afterwards. Three independent runs on different builds agree, so that result stands
+firmly: **every required language answers in its own script.**
+
+### The acting rate could not be compared
+
+| Run | Prompt | Acted |
+|---|---|---|
+| §10 | as shipped | 9/13 |
+| first repeat | strengthened | 10/13 |
+| second repeat | strengthened | 9/13 |
+
+Three numbers, no comparable pair. The reason is a **method error I made**: the
+sweep creates a task per language, and the app **de-duplicates**. So whether a
+later language "acted" depended on what the earlier languages had already filed —
+Punjabi's *"you already have three tasks"* was de-duplication working, not a
+failure. My first repeat even inherited the first run's leftovers, and my
+"isolated" second attempt cleaned up *during* the run rather than before it.
+
+The prompt change was therefore **reverted**: it was built on a comparison that does
+not hold, and an unproven change to the assistant's instructions does not belong in
+the tree. The clean method, recorded for the next attempt, is: clear the relevant
+tasks, send **one** language, and read its reply against the task count — no sweep.
+
+### One observation I could not confirm
+
+In the many-duplicates state, one Hindi reply appeared to claim a task had been
+created while no new row appeared in the count. Two direct tests in clean isolation
+say otherwise: with no duplicate the task was created and the reply said so, and
+with one duplicate a **second** task was created and the reply said so. I could not
+reproduce a claim-without-action, so it is recorded here as an unreproduced
+observation rather than as a defect — and it is recorded at all rather than dropped,
+because a confirmation for an action that did not happen is the one failure worth
+chasing.
+
+### Test data
+
+Every task created by these sweeps has been deleted — verified: **0** remaining.
