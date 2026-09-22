@@ -22,6 +22,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import { validateEnv } from './utils/env.js';
+import { logger } from './utils/logger.js';
+import { voiceProviderGapWarnings } from './services/voice-provider-readiness.js';
 import { config } from './config.js';
 import { authRoutes } from './routes/auth.js';
 import { aiRoutes } from './routes/ai.js';
@@ -263,7 +265,15 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 if (process.env.NODE_ENV !== 'test') {
- server.listen(PORT, () => console.log(`[API] Listening on :${PORT}`));
+ server.listen(PORT, () => {
+	console.log(`[API] Listening on :${PORT}`);
+	// A voice provider the catalogue routes to but that has no credential is
+	// otherwise invisible: the TTS chain quietly serves a different voice. See
+	// `services/voice-provider-readiness.ts` for what was measured.
+	for (const warning of voiceProviderGapWarnings()) {
+		logger.warn(warning);
+	}
+});
 }
 
 export { server };
