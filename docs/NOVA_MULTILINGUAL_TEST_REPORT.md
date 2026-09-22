@@ -748,3 +748,44 @@ Verified through the app's own `transcribeAudioForLanguage`:
 
 Both languages are now transcribed correctly on both paths, each verified with real
 audio and real provider calls rather than inferred from configuration.
+
+## 20. The acoustic loop, in Hindi (2026-09-23)
+
+The MacBook-as-human loop was run once before, in English (§21 of the production
+report). It had never been run in an Indian language, and the pieces of the Hindi
+path had only been verified separately. This is the whole loop, on the physical
+phone, with the MacBook on both ends.
+
+### The rig
+
+MacBook speakers → **OnePlus 9R microphone** → Sarvam streaming STT → the model →
+Sarvam TTS → **phone speaker** → MacBook microphone, recorded with `rec` at 16 kHz.
+The MacBook spoke with macOS's Hindi voice, **Lekha**.
+
+### What was said, and what came back
+
+| | |
+|---|---|
+| MacBook said | *"आज मेरे पास क्या-क्या काम है?"* — "what work do I have today?" |
+| Phone's transcript | **"आज मेरे पास क्या क्या काम है?"** — exact |
+| NOVA replied | **"आज तुम्हारे पास कोई खुला काम नहीं है — सब काम कल और परसों के लिए हैं। कल यानी गुरुवार को तुम्हें ये काम करने हैं: क्लायंट को कॉल करना — सुबह नौ बजे, फार्मसी का ऑर्डर लेना — शाम पाँच बजे, बैंक को कॉल करना — शाम पाँच बजे, दंत चिकित्सक को कॉल करना — शाम पाँच बजे…"** |
+| Avatar | **SPEAKING**, mouth open |
+
+Three things are true of that reply at once: it is **in Hindi**, it is **in
+Devanagari rather than transliterated**, and it is **grounded** — the client call at
+nine, the pharmacy order, the bank and the dentist are the reminders this account
+actually holds, from the lifecycle rounds. It is not a sample sentence.
+
+### The return path, measured
+
+The MacBook's recording, per-quarter-second RMS:
+
+```
+quiet floor  ~ 124
+peak         ~ 2116   at 10.5 s      (17x the floor)
+speech burst   10.0 s → 25.5 s       (~15 s of speech)
+```
+
+The burst begins *after* the MacBook stopped speaking, so it is the phone. Direction
+one is proven by the transcript, direction two by the level, and neither is inferred
+from the code.
