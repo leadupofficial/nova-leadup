@@ -540,3 +540,62 @@ Found while checking this, and recorded rather than silently left:
 - **`voiceProvider: 'sarvam'` for `ur` and `ne` is aspirational.** It would be right
   if the operator obtains the beta access from §14; today the call fails every time
   before ElevenLabs serves it.
+
+## 16. Urdu voice input was transcribing to nothing (2026-09-23)
+
+Checking §15's note that the catalogue claims Sarvam STT for Urdu turned up
+something worse than a wasted call.
+
+### The defect
+
+`transcribeAudio` takes a `language` argument and **never used it**. The request URL
+was built without any language parameter:
+
+```
+https://api.deepgram.com/v1/listen?punctuate=true&smart_format=true
+```
+
+so every Deepgram request ran the English default regardless of what the caller
+asked for. Measured on one Urdu clip through the app's own
+`transcribeAudioForLanguage`:
+
+| Request | Transcript |
+|---|---|
+| as shipped | **`''`** — empty |
+| with `detect_language=true` | *"कल सौ दस बजे client को call करें."* |
+
+Urdu reaches Deepgram on **every** request, because Sarvam's STT model refuses the
+language outright:
+
+```
+400  "Language 'ur-IN' is not supported by saarika:v2.5 model."
+```
+
+So the fallback was the only path Urdu had, and it returned an empty string. A user
+could speak Urdu and NOVA heard **silence** — not a degraded transcript, nothing at
+all. That is the difference between a language being supported and being listed.
+
+### The fix
+
+Non-English languages now ask Deepgram to detect; English keeps the plain URL, which
+is already correct for it. Verified through the same path: Urdu goes from empty to a
+real transcript.
+
+### Nepali is *not* fixed by this
+
+The same path now returns text for Nepali — but the text is nonsense:
+
+```
+ne: provider=deepgram  transcript="Bully das bei Dir Ha gleich ho."
+```
+
+Deepgram's language detection has no Nepali to find, and Sarvam refuses `ne-IN` as
+well. Nepali voice **input** therefore remains unusable, and now measurably so:
+previously an empty string, now Latin-script gibberish. It is recorded as its own
+finding rather than counted as fixed.
+
+### What this changes about the language matrix
+
+Urdu's row moves from *listed but unhearable* to **working input**, and Nepali's
+from *silent* to *demonstrably wrong*. Both are improvements in what is known; only
+one is an improvement in what a user gets.
