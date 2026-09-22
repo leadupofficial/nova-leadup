@@ -746,3 +746,56 @@ The task lifecycle (§13) and the MacBook's capture of NOVA's spoken reply were 
 planned work and were **not** completed: every attempt runs through a voice turn
 that ends at the approval sheet, which is where the app becomes unusable. They
 remain untested and are not claimed.
+
+---
+
+## 20. Addendum — the black screen: three hypotheses ruled out (2026-09-23)
+
+Round 10 narrowed the black screen; this round ran experiments against it. It is
+**still not fixed**, but the cause is now bounded and three plausible explanations
+are eliminated.
+
+### Measured
+
+The frame is **pure `#000000`** at every sample point, while the app's real
+background is a dark blue-grey (`(12,24,42)`). So it is not a scrim over the UI —
+it is the window's own black showing through where a Flutter frame should be.
+`dumpsys SurfaceFlinger` lists a **`Background for SurfaceView[com.leadup.nova/.MainActivity]`** layer alongside the Flutter `SurfaceView`, and `logcat` shows
+`VRI[nova]: updateBlastSurfaceIfNeeded … lastSurfaceSize:Point(0, 0)` and
+`handleResized abandoned!` around the same time. No Flutter frame is produced and
+no exception is logged.
+
+### It is intermittent
+
+Four approvals on the same build and the same flow: **three black, one fine**.
+That alone invalidates any claim that it is deterministic, and it means a single
+green run proves nothing.
+
+### Ruled out
+
+| Hypothesis | Experiment | Result |
+|---|---|---|
+| Impeller / Vulkan is losing the surface | Disabled Impeller via `io.flutter.embedding.android.EnableImpeller=false`, rebuilt, repeated the flow | **Black persisted.** The opt-out was reverted — leaving a non-fix in the manifest would have been worse than nothing. |
+| The confirm sheet fills the screen | Sampled its background: `c.surface`, and it renders a header and two buttons | Not the source |
+| `decideApproval` hangs so the sheet never pops | Read it: `void`, not a `Future`; the async wrapper returns immediately | Cannot block the pop |
+| A widget threw | `ErrorBoundary` would have drawn a message | Nothing caught |
+
+### The one discriminate that survived
+
+**Approving triggers it; dismissing does not.** Tapping the scrim on the same
+sheet (which the previous round made possible) left the app rendering normally.
+So the trigger is on the *approve* path — where the server runs the tool and
+continues the turn — and not the sheet, not the socket in general, and not the
+modal.
+
+That is where the next attempt should start: the post-approval continuation
+(tool result → model reply → speech) is the only thing that differs from the
+dismiss path.
+
+### Still open, and what it costs
+
+The task lifecycle (§13) and the MacBook's capture of NOVA's spoken reply remain
+untested — every route to them passes through an approval, which is where the app
+can become unusable. They are not claimed. The escape hatch added in round 10
+(the sheet is now dismissible) is in the build but was **not** exercised on the
+device as a recovery path, only as the dismiss control in this experiment.
