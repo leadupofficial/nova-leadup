@@ -646,3 +646,62 @@ than a guessed message format.
   REST/upload STT path discarded Urdu, and the live path's quality is unmeasured".
 - Nepali's measured gibberish stands for the upload path; the live path accepts
   `ne-IN` and its quality is likewise unmeasured.
+
+## 18. Live Urdu and Nepali work — measured, and my §16 scope was wrong again (2026-09-23)
+
+§17 narrowed §16's claim to the upload path but left the live path's *quality*
+unmeasured, because my first socket probe returned nothing (it looked for a message
+shape the provider does not send). Reading `sarvam.ts` gave the real protocol —
+`{"event":"audio_input"}`, answered with `transcript.partial` / `transcript.final` —
+and one run settled it.
+
+### The measurement
+
+Real Urdu audio (16 kHz linear16) fed through the **same streaming endpoint the app
+uses**, language set to the code the app sends:
+
+| Language | Input | Transcript |
+|---|---|---|
+| Urdu `ur-IN` | کل صبح دس بجے کلائنٹ کو کال کریں | **`کل صبح دس بجے کلائنٹ کو کال`** |
+| Nepali `ne-IN` | (Nepali clip) | **`कल सोभा दस बजे क्लाइन्टको कल`** |
+
+Urdu comes back **in Urdu script, word for word**, missing only the final verb — the
+transcript is a partial, and the partial is correct. Nepali comes back as
+recognisable Nepali, with the spelling variance expected from a recogniser.
+
+**So the path a real user talks through handles both languages well.** The empty
+transcript in §16 and the gibberish in §17 are properties of the **REST/upload**
+path (`transcribeAudio`, Sarvam `saarika:v2.5`), which is used for uploaded audio
+and the meeting pipeline — not for conversation.
+
+### A fix recommendation of mine that would have caused a regression
+
+Row 42 recommended changing `sttProvider` from `sarvam` to `deepgram` for `ur` and
+`ne` because Sarvam's *REST* model refuses them. **That recommendation is
+withdrawn.** One catalogue field feeds **both** paths:
+
+```
+realtime/stt/types.ts:  resolveSttProvider()  ->  getSttProviderForLanguage()  (sarvam for ur)
+transcribeAudioForLanguage()                  ->  getSttProviderForLanguage()  (sarvam for ur)
+```
+
+Sarvam streaming **works** for Urdu and Nepali — just measured — while Deepgram
+streaming with `language=ur` merely *opens* (tested) and its quality is unverified.
+Writing `deepgram` into the catalogue would have moved a verified-good language onto
+an unverified model to save one failed REST call. The field is not wrong; it is
+being asked to describe two different things.
+
+### What is actually needed
+
+A REST-specific decision, not a catalogue change: the REST path already falls back
+to Deepgram for these languages, so the only loss is one refused upstream call. If
+that latency matters, the fix belongs in `transcribeAudioForLanguage` — try the
+provider the REST model actually supports first — and not in a field that also
+routes the streaming path.
+
+### Standing state of the two languages
+
+| Path | Urdu | Nepali |
+|---|---|---|
+| Live conversation (streaming) | **works — verified** | **works — verified** |
+| Uploaded audio (REST) | fixed in §16, verified | **gibberish — open** |
