@@ -965,3 +965,68 @@ database rather than taken from the reply.
   `in_minutes` for reminders) and **recurring reminders** — recorded as row 19c.
 - **History**: the `audit_logs` rows for these transitions were added in round 8
   and were not re-checked on this run.
+
+---
+
+## 24. Addendum — the reminder lifecycle and the morning briefing (2026-09-23)
+
+Both were listed as untested. Both pass, each step read back from the database
+rather than taken from the reply.
+
+### The reminder lifecycle (§14)
+
+| Turn | Reply | Stored state |
+|---|---|---|
+| "Remind me to call Arun tomorrow at 6 PM" | *"Reminder set for tomorrow at six in the evening to call Arun."* | `Thu 24 Sep 18:00 IST` |
+| "Actually make that 7 PM" | *"now set for tomorrow at seven in the evening"* | `Thu 24 Sep 19:00 IST` |
+| "Snooze it by 30 minutes" | *"Snoozed by thirty minutes … half past two in the morning."* | now + 30 min |
+| "Make it repeat every day" | *"now set to repeat every day at half past two in the morning"* | `repeatRule = FREQ=DAILY` |
+| "Cancel it, I will not need it" | *"Cancelled. Your reminder to call Arun won't notify you anymore."* | `dismissed = true` |
+
+Timezone handling is correct throughout — every stored instant is the IST time
+that was asked for — and the relative move names the resulting time plainly
+enough for the user to notice it is now early morning.
+
+**Missing reminders.** *"Do I have anything overdue right now?"* → *"You have two
+overdue reminders that are still pending: Water filter — overdue since Tuesday at
+eleven oh seven in the evening; Check the oven — overdue since early this
+morning at one twenty-one."* An overdue reminder is exactly what a proactive
+assistant exists to surface, and it did.
+
+**One observation, not a defect.** Snoozing a reminder that was due *tomorrow* by
+thirty minutes moved it to *now + 30 minutes*, because `in_minutes` is documented
+as measured from the current time. That is the stated contract, and the reply said
+so ("half past two in the morning"), so it is not misleading — but a user who says
+"snooze" about a future reminder most likely means "thirty minutes later than
+scheduled". Recorded as a product question (row 19e), not a bug.
+
+### The morning briefing (§16)
+
+`GET /briefing` returned:
+
+```
+source: grounded
+text:   "Good morning. Your next reminder is Buy milk at six in the evening. You have
+         two more reminders after that. Also worth flagging: two reminders went of…"
+counts: overdue 0 · dueToday 0 · later 9 · upcomingReminders 3 · missedReminders 2
+capabilities: calendar false · weather false · eveningRecap false · tasks true ·
+              reminders true · memories true
+guardRejection: ungrounded-quantity:one
+```
+
+Three things are worth noting. The summary is **grounded** in real rows. The
+capability block is **honest** — it does not claim weather or calendar it does not
+have. And the anti-fabrication guard had **already fired** on the model's own draft
+(`ungrounded-quantity:one`), so the text the user receives is the grounded
+fallback rather than a sentence with an invented number in it. That is the honesty
+machinery the product needs, working on its own output.
+
+### Still untested
+
+- **Background and restart cases** for reminders: screen locked, device restart,
+  network interruption, app killed. The reminder firing with the app *backgrounded*
+  was verified in §16 of the earlier report; the rest need a reboot and are not
+  claimed.
+- **Snooze as a post-fire response** ("remind me again in 30 minutes" to a nudge
+  that has already fired) — the relative move above was applied to a reminder that
+  had not fired.
