@@ -79,18 +79,24 @@ final routerProvider = Provider<GoRouter>((ref) {
         return null;
       }
 
-      // Gate 1: onboarding must be finished first.
-      if (status != OnboardingStatus.complete) {
-        return inOnboarding ? null : onboarding.resumeStep().routeName;
+      // Gate 1: authentication comes first. The product requires phone auth to be
+      // the very first screen a new user sees, so no onboarding step — and none of
+      // the app proper — is reachable until there is a session.
+      final onAuthRoute = location == '/login' || location == '/register';
+      final onOtpRoute = location == '/onboarding/otp';
+      if (!auth.isAuthenticated) {
+        return (onAuthRoute || onOtpRoute) ? null : '/login';
       }
 
-      // Gate 2: authentication.
-      final onAuthRoute = location == '/login' || location == '/register';
-      if (inOnboarding) {
-        return auth.isAuthenticated ? '/' : '/login';
+      // Gate 2: customization/onboarding runs only once authenticated. The OTP step
+      // redirects on to the flow: the session it just established is what unlocks it.
+      if (onOtpRoute) {
+        return status == OnboardingStatus.complete
+            ? '/'
+            : onboarding.resumeStep().routeName;
       }
-      if (!auth.isAuthenticated) {
-        return onAuthRoute ? null : '/login';
+      if (status != OnboardingStatus.complete) {
+        return inOnboarding ? null : onboarding.resumeStep().routeName;
       }
       return onAuthRoute ? '/' : null;
     },
@@ -370,10 +376,15 @@ final routerProvider = Provider<GoRouter>((ref) {
 });
 
 String _entryLocation(OnboardingService onboarding, AuthState auth) {
+  // Authentication is the first screen of a fresh install. Onboarding, and with it
+  // the whole customization flow, opens up only after the session exists.
+  if (!auth.isAuthenticated) {
+    return '/login';
+  }
   if (onboarding.getStatus() != OnboardingStatus.complete) {
     return onboarding.resumeStep().routeName;
   }
-  return auth.isAuthenticated ? '/' : '/login';
+  return '/';
 }
 
 class _RouteNotFoundScreen extends StatelessWidget {

@@ -33,9 +33,15 @@ class PhoneAuthFailure implements Exception {
 /// that had already succeeded. [sendCode] therefore completes on whichever arrives first
 /// and [signIn] prefers the auto credential when there is one.
 class FirebasePhoneAuth {
-  FirebasePhoneAuth({FirebaseAuth? auth}) : _auth = auth ?? FirebaseAuth.instance;
+  FirebasePhoneAuth({FirebaseAuth? auth}) : _injected = auth;
 
-  final FirebaseAuth _auth;
+  final FirebaseAuth? _injected;
+
+  /// Resolved lazily on purpose: constructing this class must never touch Firebase.
+  /// The sign-in screen is built before a Firebase app is guaranteed to exist (and in
+  /// widget tests none does), so resolving it in the constructor threw `[core/no-app]`
+  /// while `build` was running.
+  FirebaseAuth get _auth => _injected ?? FirebaseAuth.instance;
 
   String? _verificationId;
   int? _resendToken;
@@ -49,16 +55,28 @@ class FirebasePhoneAuth {
   ///
   /// Completes when the code has been sent **or** the platform has already verified the
   /// number by itself. Throws [PhoneAuthFailure] if the request is refused.
+  ///
+  /// [deadline] bounds the *request*, which [timeout] does not: Firebase's own
+  /// `timeout` only governs how long it keeps trying to read the SMS automatically.
+  /// If the app-verification step (Play Integrity / reCAPTCHA) cannot produce an
+  /// attestation, none of the callbacks ever fire and the caller would otherwise
+  /// spin forever — reproduced on a OnePlus 9R with the reCAPTCHA Enterprise API
+  /// disabled in the project. A deadline turns that into an explained, retryable
+  /// failure.
   Future<void> sendCode(
     String phoneNumber, {
     Duration timeout = const Duration(seconds: 60),
+    Duration deadline = const Duration(seconds: 45),
   }) {
     final completer = Completer<void>();
     _autoCredential = null;
     _pendingPhone = phoneNumber;
 
+    Timer? timer;
+
     void finish([Object? error]) {
       if (completer.isCompleted) return;
+      timer?.cancel();
       if (error != null) {
         completer.completeError(error);
       } else {
@@ -66,7 +84,28 @@ class FirebasePhoneAuth {
       }
     }
 
-    _auth
+    final FirebaseAuth auth;
+    try {
+      auth = _auth;
+    } catch (error) {
+      // Firebase is not configured in this build: report it as a normal failure so
+      // the screen can explain itself instead of crashing during a build.
+      return Future<Never>.error(
+        PhoneAuthFailure('Phone sign-in is unavailable in this build. $error'),
+      );
+    }
+
+    timer = Timer(deadline, () {
+      finish(
+        const PhoneAuthFailure(
+          'We could not reach the verification service. Check your connection and '
+          'try again.',
+          code: 'verification-timeout',
+        ),
+      );
+    });
+
+    auth
         .verifyPhoneNumber(
           phoneNumber: phoneNumber,
           timeout: timeout,

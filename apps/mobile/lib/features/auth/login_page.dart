@@ -48,6 +48,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   String? _emailError;
   String? _passwordError;
   String? _phoneError;
+  /// Email + password is the secondary path; phone OTP is what a new user sees.
+  bool _showEmailForm = false;
   bool _phoneBusy = false;
 
   /// Firebase Phone Authentication. Firebase verifies the number and returns an ID
@@ -93,7 +95,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
     return NovaScaffold(
       gutter: 0,
-      topBar: _TopBar(enabled: !auth.isSubmitting, onBack: _back),
+      topBar: _TopBar(
+        enabled: !auth.isSubmitting,
+        onBack: _back,
+        // Reachable when the flow pushed here (e.g. from the OTP step or a deep
+        // link); on the fresh-install entry screen there is nothing to go back to.
+        showBack: ref.read(routerProvider).canPop(),
+      ),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
@@ -119,7 +127,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 ),
                 const SizedBox(height: NovaSpace.sm),
                 Text(
-                  'Sign in with your email and password to continue to NOVA.',
+                  _showEmailForm
+                      ? 'Sign in with your email and password to continue to NOVA.'
+                      : 'Sign in with your phone number to continue to NOVA.',
                   style: Theme.of(context).textTheme.bodyLarge!.copyWith(
                     color: c.muted,
                   ),
@@ -129,9 +139,32 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   _AuthErrorBanner(message: auth.error!),
                 ],
                 const SizedBox(height: NovaSpace.xl),
-                _emailPasswordForm(context, auth),
-                const SizedBox(height: NovaSpace.lg),
-                _phoneSection(context),
+                // Phone OTP is the product's primary and first authentication path.
+                // Email + password stays available for existing accounts, but behind
+                // an explicit switch so a new user is not offered two methods at once.
+                if (_showEmailForm)
+                  _emailPasswordForm(context, auth)
+                else
+                  _phoneSection(context),
+                const SizedBox(height: NovaSpace.md),
+                Center(
+                  child: TextButton(
+                    onPressed: () => setState(() {
+                      _showEmailForm = !_showEmailForm;
+                      _emailError = null;
+                      _passwordError = null;
+                      _phoneError = null;
+                    }),
+                    child: Text(
+                      _showEmailForm
+                          ? 'Use phone number instead'
+                          : 'Use email and password instead',
+                      style: Theme.of(context).textTheme.bodySmall!.copyWith(
+                        color: c.accent,
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -381,29 +414,41 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 /// [NovaIconButton] keeps the design's 36x36 glass tile and expands the touch
 /// target to the 44px brand-spec minimum.
 ///
-/// The title slot is deliberately left empty on this screen. `widget_test.dart`
-/// asserts that both "Welcome back" and "Sign in" appear exactly once, and those
-/// are the `.heading` and the CTA; a `.top-bar h1` carrying either string would
-/// be found twice. The bar keeps the export's geometry so the screen still reads
-/// as the same layout language as [RegisterPage], whose title names the screen
-/// rather than either string.
+/// The title slot is deliberately left empty on this screen. The heading
+/// ("Welcome back") and the CTA are the two pieces of text the page is identified
+/// by, so a `.top-bar h1` carrying either string would render it twice. The bar
+/// keeps the export's geometry so the screen still reads as the same layout
+/// language as [RegisterPage], whose title names the screen rather than either
+/// string.
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.enabled, required this.onBack});
+  const _TopBar({
+    required this.enabled,
+    required this.onBack,
+    this.showBack = true,
+  });
 
   final bool enabled;
   final VoidCallback onBack;
+
+  /// Login is the entry screen of a fresh install, where there is nothing behind it.
+  /// The tile keeps its slot so the heading below does not shift, but the dead arrow
+  /// is not drawn.
+  final bool showBack;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        NovaIconButton(
-          icon: Icons.chevron_left_rounded,
-          size: 36,
-          color: context.nova.muted,
-          tooltip: 'Back',
-          onTap: enabled ? onBack : null,
-        ),
+        if (showBack)
+          NovaIconButton(
+            icon: Icons.chevron_left_rounded,
+            size: 36,
+            color: context.nova.muted,
+            tooltip: 'Back',
+            onTap: enabled ? onBack : null,
+          )
+        else
+          const SizedBox(width: NovaMotion.minTouchTarget),
         const Spacer(),
         const SizedBox(width: NovaMotion.minTouchTarget),
       ],

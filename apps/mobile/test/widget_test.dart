@@ -15,7 +15,8 @@ import 'helpers/test_harness.dart';
 /// which is exactly the stub `main.dart` used to be. It passed while the app had no
 /// routing, no auth wiring and no reachable services.
 void main() {
-  testWidgets('fresh install boots into onboarding, not a placeholder', (tester) async {
+  testWidgets('fresh install boots into phone authentication, not onboarding',
+      (tester) async {
     useTallSurface(tester);
     final deps = await createTestDependencies();
     addTearDown(deps.dispose);
@@ -23,21 +24,44 @@ void main() {
     await tester.pumpWidget(testScope(deps, const NovaApp()));
     await tester.pumpAndSettle();
 
-    expect(find.text('Meet NOVA'), findsOneWidget);
-    expect(find.text('Get started'), findsOneWidget);
+    // The product requires authentication first: phone, then OTP, then customization.
+    // No onboarding step and no dashboard may be reachable before a session exists.
+    expect(find.text('Welcome back'), findsOneWidget);
+    expect(find.text('Continue with OTP'), findsOneWidget);
+    expect(find.text('Meet NOVA'), findsNothing);
+    expect(find.text('Get started'), findsNothing);
+    // A new user must not be offered two authentication methods at once.
+    expect(find.text('Password'), findsNothing);
   });
 
   testWidgets('abandoned onboarding resumes at the saved step', (tester) async {
     useTallSurface(tester);
+    // Onboarding runs behind the auth gate, so a stored session has to exist for the
+    // saved step to be reachable at all.
     final deps = await createTestDependencies(
       preferences: <String, Object>{
         'nova_onboarding_status': 'inProgress',
         'nova_onboarding_step': OnboardingStep.profileSetup.stepIndex,
       },
+      secureStorage: <String, String>{
+        'auth_token': jsonEncode(<String, dynamic>{
+          'access_token': 'access-token',
+          'refresh_token': 'refresh-token',
+          'expires_at':
+              DateTime.now().add(const Duration(hours: 1)).toIso8601String(),
+        }),
+        'auth_user': jsonEncode(<String, dynamic>{
+          'id': 'user-1',
+          'email': 'alex@example.com',
+          'name': 'Alex',
+        }),
+      },
     );
     addTearDown(deps.dispose);
 
-    await tester.pumpWidget(testScope(deps, const NovaApp()));
+    await tester.pumpWidget(
+      testScope(deps, const NovaApp(), networkService: emptyApiNetworkService()),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('About you'), findsOneWidget);
@@ -54,7 +78,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Welcome back'), findsOneWidget);
-    expect(find.text('Sign in'), findsOneWidget);
+    expect(find.text('Continue with OTP'), findsOneWidget);
   });
 
   testWidgets('completed onboarding with a stored session routes to home', (tester) async {

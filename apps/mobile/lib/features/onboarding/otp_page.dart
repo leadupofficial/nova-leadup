@@ -507,11 +507,17 @@ class _OtpBoxesState extends State<_OtpBoxes> {
   }
 }
 
-/// The export's `+91 XXXXX XXXXX` shape: country code, then masked fives.
+/// The export's `+91 XXXXX …` shape, with the last four digits left readable.
+///
+/// Masking every digit (as the export draws it) leaves the user unable to check
+/// which number the code actually went to, which is the one thing this line exists
+/// to answer — so the tail is kept, as banks and carriers do.
 String _maskPhone(String? phone) {
   final digits = (phone ?? '').replaceAll(RegExp(r'\D'), '');
-  if (digits.length < 6) return '+91 XXXXX XXXXX';
-  final rest = digits.length - 2;
-  final groups = List.filled((rest / 5).ceil(), 'XXXXX').join(' ');
-  return '+${digits.substring(0, 2)} $groups';
+  if (digits.length < 8) return '+91 XXXXX XXXXX';
+  final national = digits.substring(digits.length - 10);
+  final country = digits.substring(0, digits.length - 10);
+  final masked = 'X' * (national.length - 4);
+  return '+${country.isEmpty ? '91' : country} $masked '
+      '${national.substring(national.length - 4)}';
 }

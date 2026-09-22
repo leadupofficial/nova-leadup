@@ -116,10 +116,21 @@ final splashReadinessProvider = FutureProvider<SplashReadiness>((ref) async {
 
   final done = onboarding.getStatus() == OnboardingStatus.complete;
   final step = onboarding.resumeStep();
-  final destination = done
-      ? (authenticated ? SplashDestination.home : SplashDestination.login)
-      : SplashDestination.onboarding;
-  final location = done ? (authenticated ? '/' : '/login') : step.routeName;
+  // Authentication gates everything: the splash sends a signed-out user to the phone
+  // login screen rather than into onboarding, matching the launch order the product
+  // requires (phone → OTP → authenticated → onboarding).
+  final SplashDestination destination;
+  final String location;
+  if (!authenticated) {
+    destination = SplashDestination.login;
+    location = '/login';
+  } else if (done) {
+    destination = SplashDestination.home;
+    location = '/';
+  } else {
+    destination = SplashDestination.onboarding;
+    location = step.routeName;
+  }
 
   return SplashReadiness(
     destination: destination,

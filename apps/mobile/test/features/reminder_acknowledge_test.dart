@@ -121,7 +121,10 @@ void main() {
         NovaReminder(
           id: 'rem-abc',
           title: 'Call bank',
-          remindAt: DateTime(2026, 9, 22, 9),
+          // Relative, not a fixed calendar date: the reconciler deliberately skips a
+          // reminder whose time has already passed, so a hardcoded date turns this
+          // test into a time bomb that starts failing the day after it was written.
+          remindAt: DateTime.now().add(const Duration(hours: 3)),
         ),
       ], complete: true);
 
@@ -143,7 +146,7 @@ void main() {
         NovaReminder(
           id: 'rem-daily',
           title: 'Take pills',
-          remindAt: DateTime(2026, 9, 22, 9),
+          remindAt: DateTime.now().subtract(const Duration(hours: 1)),
           repeatRule: NovaRepeatRule.tryParse('FREQ=DAILY'),
         ),
       ], complete: true);

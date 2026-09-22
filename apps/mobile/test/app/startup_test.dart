@@ -234,7 +234,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('NOVA could not start'), findsNothing);
-    expect(find.text('Meet NOVA'), findsOneWidget);
+    // Authentication is the first screen a signed-out user sees, so the login
+    // screen — not the onboarding welcome — is the proof the real app was reached.
+    expect(find.text('Welcome back'), findsOneWidget);
   });
 
   testWidgets('a successful bootstrap still reaches the app, with the stores wired',
@@ -256,6 +258,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(probe.completed, isTrue);
-    expect(find.text('Meet NOVA'), findsOneWidget);
+    expect(find.text('Welcome back'), findsOneWidget);
   });
 }
