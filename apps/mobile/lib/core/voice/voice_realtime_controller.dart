@@ -25,6 +25,13 @@ export 'voice_tool_approval.dart';
 /// render; provisional text stays until `final`/`done` replaces it.
 ///
 /// Speech has two engines: the cloud one streams MP3 over the socket, and a
+/// How long a single connect attempt may take before it is reported as offline.
+///
+/// One value for both halves — opening the socket and waiting for the server's
+/// `connected` status — so the user's deadline does not depend on which of the
+/// two is slow.
+const Duration _connectDeadline = Duration(seconds: 10);
+
 /// failure (`TTS_ERROR`) falls back to the platform via [VoiceDeviceFallback].
 class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
   static const _decoder = VoiceProtocolDecoder();
@@ -607,12 +614,20 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
       }
     });
 
+    // The deadline covers the *call* as well as the wait for a status.
+    //
+    // Only `completer.future` used to be bounded, so a `connect()` that never
+    // returned — a socket opened against a port with nothing listening — hung
+    // here for ever and the timeout below was never reached. Measured on the
+    // handset with the API stopped: the app sat on "Thinking…" for over forty
+    // seconds with an empty reply bubble and nothing in `logcat`, and the
+    // `offline` failure it has a message for was never raised.
     try {
-      await _service.connect();
-      return await completer.future.timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => false,
-      );
+      await _service.connect().timeout(_connectDeadline);
+      return await completer.future.timeout(_connectDeadline, onTimeout: () => false);
+    } on TimeoutException {
+      debugPrint('[VoiceRealtime] connect timed out after $_connectDeadline');
+      return false;
     } catch (error) {
       debugPrint('[VoiceRealtime] connect failed: $error');
       return false;
