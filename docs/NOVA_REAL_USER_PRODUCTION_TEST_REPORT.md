@@ -1152,3 +1152,50 @@ sheets and sockets got nowhere, and one trace settled it.
 Approvals are the gate on every write the assistant proposes by voice. Tasks,
 reminders and history can now be exercised end to end on the handset through the
 spoken path, without the flow that made the app unusable.
+
+---
+
+## 27. Addendum — the device path through an approval, working (2026-09-23)
+
+The black-screen fix removes the only thing that made the app unusable at an
+approval, so the spoken path can now be exercised on the handset. One full
+cycle, spoken by the MacBook and verified in the database:
+
+| Step | Evidence |
+|---|---|
+| Said | *"Create a task to send the quarterly report tomorrow"* — through the MacBook's speakers |
+| Heard | the phone transcribed it and the model proposed `create_task` |
+| Approved | the sheet closed; the trace shows one pop and no `matches=0` |
+| Persisted | `tasks`: **"Send a quarterly report"**, `status=pending` |
+| Recorded | `audit_logs`: **`task.create \| agent \| task \| success`** |
+| Said | NOVA: *"Added \"Send a quarterly report\" for tomorrow at midnight."* |
+| The claim matches the record | API `dueAt` = `2026-09-23T18:30:00Z` = **Thu 24 Sep 00:00 IST** — midnight, as stated |
+
+Before this round that flow ended on a black screen with the task created and the
+app dead. Both the persistence and the history row were impossible to observe
+through the voice path.
+
+### Also worth recording
+
+**NOVA refused to act on a truncated utterance.** On a later attempt the
+microphone produced only *"Remind me to"*, and NOVA answered: *"Your message keeps
+cutting off at \"Remind me to…\" — try sending it again; what's the reminder, and
+for when?"* No tool was called. That is the right behaviour for an incomplete
+command: it asked rather than guessing at a reminder that was never stated.
+
+### A correction about my own method
+
+I twice reported that "a second turn produced no tool call", and investigated it
+as a possible defect. It was **my** error: the app was on **Converse**, and the
+coordinate I tapped is the "Tap to talk" button on **Home**. On Converse that
+point is the message list, so no turn started at all — the screenshot after the
+"second turn" is byte-for-byte the same screen as before it. Nothing about the
+product was demonstrated there, in either direction, and it is not counted as a
+finding.
+
+### Still untested
+
+The multi-turn spoken lifecycle on the handset — modify, complete, reopen by
+voice — was verified at the API level (§23) but only the **create** step has been
+driven through speech on the device. The remaining steps need the Converse mic
+control rather than the Home CTA.
