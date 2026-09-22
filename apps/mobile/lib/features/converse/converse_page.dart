@@ -225,7 +225,11 @@ class _ConversePageState extends ConsumerState<ConversePage> {
         final existing = await api.listConversations(limit: 1);
         conversation = existing.isNotEmpty
             ? existing.first
-            : await api.createConversation(title: 'New conversation');
+            // No title: the server's single default is the one every other
+            // path uses. Passing 'New conversation' here produced rows reading
+            // "New conversation" beside the server's "New Conversation", and the
+            // two were visible together in the Conversations list.
+            : await api.createConversation();
       }
       if (!mounted) return;
       ref.read(activeConversationProvider.notifier).set(conversation.id);
@@ -321,7 +325,8 @@ class _ConversePageState extends ConsumerState<ConversePage> {
       try {
         final created = await ref
             .read(novaMutationsProvider)
-            .startConversation(title: 'New conversation');
+            // No title, for the same reason as above.
+            .startConversation();
         ref.read(activeConversationProvider.notifier).set(created.id);
         conversationId = created.id;
       } catch (e) {

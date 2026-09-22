@@ -82,8 +82,8 @@ observations recorded rather than the image alone. Screenshots: `r59_*.png`.
 | **Conversations** | Two identical default rows read **"New Conversation"** and **"New conversation"** — the same string capitalised differently, which reads as sloppiness. **P3.** Each row carries a bare trash icon with no visible confirmation step; not exercised, so nothing is claimed about whether deletion is guarded. |
 | **Activity Centre** | The orb **covered the tail of a row's text** — a mid-list row read *"…via Pyth"* with the rest hidden. **Fixed** this round; see §11. The filter chip row also clips its last chip at the screen edge, which is horizontal scrolling without a fade or other affordance. **P3.** |
 
-Captured but not yet analysed, so nothing is claimed about them: the **offline**
-screen and the **admin console**.
+| **Admin console** | Correct and unusually candid: *"The admin console is limited to the owner and admin roles. This session is signed in as \"user\", and every /api/v1/admin route would answer 403."* One layout defect: the app-bar title is **truncated to "Admin C…"** because the `v1.0.0` pill competes for the same row. **P3.** |
+| **Offline** | Reached by turning connectivity off — `adb shell cmd connectivity airplane-mode enable`, confirmed with a failed ping; the `/offline` deep link cannot reach it while online, and correctly rendered Home instead. Clean centred layout, no orb (right for a state where voice cannot work), and specific copy. One wording problem: the headline says *"Your saved reminders still work"* while the table directly beneath reads **"Reminders — Not cached"**. Both can be true — the alarm is armed locally while the list is not cached — but read together they look like a contradiction. **P3.** |
 
 ## 6b. Still not audited
 
@@ -153,3 +153,9 @@ screen, which is what Play's policy requires.
 Other long lists carry the same overlap. It is the conventional floating-button
 trade-off — a row can always be scrolled out from under the orb — and each screen
 that needs it should get the same clearance rather than a global pad.
+
+## 12. Conversations — two default titles, fixed (2026-09-23)
+
+| Screen | Screenshot | Issue | Sev | Root cause | Fix | Verification |
+|---|---|---|---|---|---|---|
+| Conversations | `r59_conversations.png` | Two identical rows read **"New Conversation"** and **"New conversation"** — the same string capitalised differently. | **P3** | Two sources of the same default: `converse_page.dart` passed an explicit `'New conversation'` at two call sites, while the server defaults to `'New Conversation'` when no title is sent. A row's title therefore depended on which path created it. | The client no longer sends a title at either call site, so the server's single default applies. `createConversation(title:)` and `startConversation(title:)` already treat it as optional. | Verified against the API: the conversation the app created after the rebuild reads **`'New Conversation'`**; the row created before it still reads `'New conversation'` — history is not rewritten |
