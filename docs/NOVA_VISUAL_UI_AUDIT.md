@@ -108,3 +108,24 @@ opposite.
 The step keeps a full-screen layout with the CTA pinned to the bottom, which
 leaves a large empty middle. That is consistent with the other onboarding steps
 and was left alone.
+
+## 10. Reminders — the exact-alarm notice, and the orb on top of it (2026-09-23)
+
+| Screen | Screenshot | Issue | Sev | Root cause | Fix | Verification |
+|---|---|---|---|---|---|---|
+| Reminders | `r30_rem3.png` | The floating summon orb sat on the notice **"Let reminders arrive on time"** and covered the tail of three lines — `deliver a reminde…`, `fire them at the…`, `Android's…`. The explanation of why reminders arrive late was itself unreadable. | **P2** | The orb was positioned `top: 112` to clear the top bar's controls, which put it on the first card of every screen instead. No page reserves space for it, and no test pinned the position. | Moved above the bottom navigation — the conventional slot, which belongs to chrome rather than content. Converse is excluded because its microphone is in that corner. | `r30_fixed.png` — the notice reads in full. `r30_converse.png` — no orb over the message list, mic unobstructed. |
+| Reminders | `r30_fixed.png` | The orb now overlaps the right edge of a list card's **background** (not its text), as a Material FAB does. | **P3** | Accepted consequence of a floating control over a list | None — deliberate | Visible in `r30_fixed.png` |
+
+### What the notice itself confirms
+
+The screen carries an honest prompt for the exact-alarm access, and its copy is
+accurate:
+
+> **Let reminders arrive on time** — *"By default Android may deliver a reminder a
+> few minutes late to save battery. To fire them at the exact time you set, NOVA
+> needs Android's special "Alarms & reminders" access."* … *"Reminders keep working
+> either way — without it they are just approximate."*
+
+That matches the measurement in §33 exactly (87–294 s late after a reboot). The
+app explains the delay and offers the fix; the access is a user choice on a system
+screen, which is what Play's policy requires.
