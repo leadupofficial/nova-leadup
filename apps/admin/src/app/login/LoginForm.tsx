@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { adminLogin, MfaInvalidError, MfaRequiredError, writeTokens } from '../../lib/api';
 
 type FormState = 'idle' | 'loading' | 'error' | 'success';
@@ -14,6 +14,16 @@ export default function LoginForm() {
  const [mfaRequired, setMfaRequired] = useState(false);
  const [state, setState] = useState<FormState>('idle');
  const [error, setError] = useState<string | null>(null);
+
+ // Hydration guard. Until React attaches, this is a plain HTML form and the browser owns the
+ // submit — and an HTML form with no `method` submits as **GET**, putting every field in the
+ // query string. That is not theoretical: driving this form against the deployed console filled
+ // the address bar with
+ //   /login?email=admin%40nova.leadup.in&password=<the actual password>
+ // and nginx wrote it to its access log. The `method="post"` below stops the URL leak, and this
+ // flag stops the submit happening at all before the handler that calls `preventDefault` exists.
+ const [hydrated, setHydrated] = useState(false);
+ useEffect(() => setHydrated(true), []);
 
  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
  e.preventDefault();
@@ -62,6 +72,8 @@ export default function LoginForm() {
  return (
  <form
  onSubmit={handleSubmit}
+ // POST, never the default GET: an unhydrated submit must not put a password in the URL.
+ method="post"
  aria-label="Admin login form"
  style={{
  width: '100%',
@@ -237,7 +249,8 @@ export default function LoginForm() {
 
  <button
  type="submit"
- disabled={state === 'loading'}
+ disabled={state === 'loading' || !hydrated}
+ title={hydrated ? undefined : 'Preparing the sign-in form…'}
  aria-label="Sign in to admin console"
  style={{
  width: '100%',

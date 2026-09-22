@@ -267,6 +267,40 @@ test.describe('Admin Control Center — critical paths', () => {
 		expect(/refused with 503|No LLM call is attempted|Typed chat still works|Text only/i.test(html)).toBe(true);
 	});
 
+	/**
+	 * The sign-in form submitted as a **GET** before React hydrated, and put the password in the URL.
+	 *
+	 * This was found by driving the deployed console's login form rather than by seeding a token
+	 * into the cookie, which is all the rest of this suite does. The form has an `onSubmit` that
+	 * calls `preventDefault`, and no `method` — so with no JavaScript, with JavaScript still
+	 * loading, or after a hydration failure, the browser owns the submit and serialises every
+	 * field into the query string. The address bar read
+	 * `/login?email=…&password=<the real password>` and nginx logged it.
+	 *
+	 * JavaScript is disabled here on purpose: that is precisely the state in which the
+	 * `onSubmit` handler does not exist, so assertion on the server's own HTML is the only
+	 * check that covers the failure. A hydrated form is exercised by
+	 * `tests/admin-live-login.spec.ts`.
+	 */
+	test('the sign-in form cannot leak credentials before React hydrates', async ({ browser }) => {
+		const context = await browser.newContext({ javaScriptEnabled: false });
+		const page = await context.newPage();
+		try {
+			await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+			const form = page.locator('form[aria-label="Admin login form"]');
+			await expect(form).toBeVisible();
+
+			// POST, not the default GET: an unhydrated submit must not put a password in the URL.
+			await expect(form).toHaveAttribute('method', 'post');
+
+			// And the submit is inert until hydration anyway, so the operator cannot fire a
+			// submit whose handler does not exist yet.
+			await expect(form.locator('button[type="submit"]')).toBeDisabled();
+		} finally {
+			await context.close();
+		}
+	});
+
 	test('the audit log states its append-only guarantee', async ({ page }) => {
 		const html = await loadHtml(page, '/security/audit-log');
 		expect(html).toContain('Admin Audit Log');
