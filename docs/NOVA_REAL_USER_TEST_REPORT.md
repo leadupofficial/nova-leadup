@@ -86,6 +86,26 @@ Tanglish   நாளைக்கு மார்னிங் 8 ஓ கிளா�
 
 Each reply also came back in the speaker's own language and script.
 
+**The same test against production** (`https://api.nova.leadup.in`, deployed at commit
+`16cac24`, `nova-api` healthy) created reminders in **5 of 7** languages:
+
+```
+Tamil      1 → 1  CREATED   'நாளைக்கு காலை எட்டு மணிக்கு ரிமைண்டர் வைத்துட்டேன்.'
+Hindi      1 → 2  CREATED   'कल सुबह आठ बजे का रिमाइंडर लगा दिया।'
+Telugu     2 → 3  CREATED   'సరే, రిమైండర్ రేడీ. రేపు ఉదయం ఎనిమిది గంటకు …'
+Kannada    3 → 4  CREATED   'ಸರಿ, ನಾಳೆ ಬೆಳಿಗ್ಗೆ 8 ಗಂಟೆಗೆ ರಿಮೈಂಡರ್ ಸೆಟ್ ಮಾಡಿದೆ.'
+Hinglish   3 → 4  CREATED   'Bilkul! Kal subah 8 baje ka reminder set ho gaya.'
+Bengali    3 → 3  asked back 'আগামীকাল সকাল আটটায় রিমাইন্ডার সেট করতে হবে কি?'
+Tanglish   4 → 4  asked back 'நாளைக்கு மார்னிங் 8 ஓ கிளாக்கு ரிமைண்டர் செட் பண்ணணுமா?'
+```
+
+The hard failure is gone — nothing was refused as an invented time, and no turn ended on
+the English fallback sentence. What remains is **variance, not language support**: on two
+of seven turns the model asked a confirming question rather than acting, so the user needs
+a second turn ("yes"). That is the same behaviour the local run did not show on the same
+inputs, i.e. it is model non-determinism in the `askedUserBack` path, and it should be
+treated as a reliability item (P2) separate from the fixed P0.
+
 ### 2.2 Hinglish was sent to an English-only recogniser
 
 **Symptom.** "Kal subah aath baje ka reminder laga do yaar" was heard as **"Reminder lag"**.
