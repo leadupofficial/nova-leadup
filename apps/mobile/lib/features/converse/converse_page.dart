@@ -64,6 +64,23 @@ class _ConversePageState extends ConsumerState<ConversePage> {
   /// per request rather than on every rebuild while it waits for an answer.
   String? _showingVoiceApproval;
 
+  /// True while a decision the user made is being applied.
+  ///
+  /// Approving *clears* `pendingApproval`, which is the same signal as "the
+  /// request went away" — so the branch below fired on the normal approve path
+  /// and popped the page on top of the sheet's own pop. Measured with a route
+  /// trace, two pops three milliseconds apart:
+  ///
+  ///   POP ModalBottomSheetRoute of bool, prev=converse
+  ///   POP converse prev=-
+  ///   delegate matches=0 uri=
+  ///
+  /// An empty match list is go_router's `SizedBox.shrink()`, which over the
+  /// window's own background is a **black screen** with no chrome and no way out
+  /// but a force-stop. This flag lets the normal path stand down while keeping
+  /// the original intent for a request that really does vanish.
+  bool _decidingApproval = false;
+
   @override
   void initState() {
     super.initState();
@@ -137,8 +154,10 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     final pending = voice.pendingApproval;
     if (pending == null) {
       // A request that went away while its sheet was up (cancelled turn, timeout
-      // on the server) takes the sheet with it.
-      if (_showingVoiceApproval != null && mounted) {
+      // on the server) takes the sheet with it — but not while the user's own
+      // decision is being applied, because that clears `pendingApproval` too and
+      // the sheet is already closing itself.
+      if (_showingVoiceApproval != null && mounted && !_decidingApproval) {
         _showingVoiceApproval = null;
         Navigator.of(context).maybePop();
       }
@@ -158,7 +177,16 @@ class _ConversePageState extends ConsumerState<ConversePage> {
           expiresAt: pending.expiresAt,
         ),
         // Answered over the socket, not the approvals route: there is no row.
-        onDecide: (approve) async => _realtime.decideApproval(approve: approve),
+        // The flag brackets the state change, which is what notifies the
+        // listener above.
+        onDecide: (approve) async {
+          _decidingApproval = true;
+          try {
+            _realtime.decideApproval(approve: approve);
+          } finally {
+            _decidingApproval = false;
+          }
+        },
         title: _approvalTitle(pending),
         consequence: pending.consequence,
         confirmLabel: pending.isExternal ? 'Approve and send' : 'Approve and run',

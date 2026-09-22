@@ -66,6 +66,11 @@ final routerProvider = Provider<GoRouter>((ref) {
     initialLocation: _entryLocation(onboarding, ref.read(authStateProvider)),
     refreshListenable: refresh,
     debugLogDiagnostics: kDebugMode,
+    // A debug-only route trace. It is kept because it is what named the cause of
+    // the black screen: go_router's match list emptied and `SizedBox.shrink()` is
+    // what it renders for that. Costs nothing in release.
+    observers: kDebugMode ? <NavigatorObserver>[_RouteTrace()] : const [],
+    routerNeglect: false,
     redirect: (context, state) {
       final auth = ref.read(authStateProvider);
       final status = onboarding.getStatus();
@@ -428,5 +433,40 @@ class _RouteNotFoundScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// A debug-only trace of every route push, pop, remove and replace.
+///
+/// go_router returns `SizedBox.shrink()` when its match list is empty, which is
+/// the black screen; the routed tree disappears entirely (measured with the Dart
+/// VM service: 2044 widget lines healthy, 87 black — no shell, no top bar, no
+/// bottom nav, and only a force-stop recovering it). This trace is what found the
+/// cause in one run, after three rounds of elimination had not: two pops three
+/// milliseconds apart, the sheet's and then the page's. Kept because a routing
+/// fault is otherwise invisible, and gated on [kDebugMode] so release pays
+/// nothing.
+class _RouteTrace extends NavigatorObserver {
+  String _name(Route<dynamic>? route) =>
+      route == null ? '-' : '${route.settings.name ?? route.runtimeType}';
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    debugPrint('[RouteTrace] PUSH ${_name(route)} prev=${_name(previousRoute)}');
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    debugPrint('[RouteTrace] POP ${_name(route)} prev=${_name(previousRoute)}');
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    debugPrint('[RouteTrace] REMOVE ${_name(route)} prev=${_name(previousRoute)}');
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    debugPrint('[RouteTrace] REPLACE ${_name(oldRoute)} -> ${_name(newRoute)}');
   }
 }

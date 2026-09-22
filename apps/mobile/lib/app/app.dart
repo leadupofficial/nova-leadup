@@ -1,6 +1,7 @@
 import 'dart:async';
 import '../features/briefing/briefing_controller.dart';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -60,6 +61,19 @@ class _NovaAppState extends ConsumerState<NovaApp> {
       onInactive: _onPause,
       onDetach: _onDetach,
     );
+
+    // Debug-only: log every router notification with its match count and
+    // location, so an empty match list is visible next to whatever caused it.
+    if (kDebugMode) {
+      final traced = ref.read(routerProvider);
+      traced.routerDelegate.addListener(() {
+        final config = traced.routerDelegate.currentConfiguration;
+        debugPrint(
+          '[RouteTrace] delegate matches=${config.matches.length} '
+          'uri=${config.uri}',
+        );
+      });
+    }
 
     // Fetch operator configuration once, after the first frame.
     //
