@@ -1299,3 +1299,52 @@ afterwards.
 
 Microphone denied, notification denied, expired OTP, app killed mid-turn, and
 language-switch mid-conversation.
+
+---
+
+## 30. Addendum — measured latency (§24) (2026-09-23)
+
+Measured rather than estimated, from the running system: the API logs a
+`Realtime turn timings` line per spoken turn, and the device reports its own cold
+start.
+
+### Cold launch
+
+```
+adb shell am start -W -n com.leadup.nova/.MainActivity
+TotalTime: 1781     WaitTime: 1791
+```
+
+**1.78 s** from tap to first frame, on a debug (JIT) build — a release build would
+be faster, so this is an upper bound rather than a production figure.
+
+### Per-turn, server side
+
+| Turn | context build | model | first token |
+|---|---|---|---|
+| "What is on my schedule today?" | 15 ms | 3864 ms | 2112 ms |
+| "How many reminders do I have right now?" | 11 ms | 2778 ms | 2302 ms |
+| **mean** | **13 ms** | **3321 ms** | **2207 ms** |
+
+Two conclusions worth acting on, and one that clears a suspicion:
+
+- **The model call is the bottleneck**: ~3.3 s, against ~2.2 s to the first token.
+  The user waits a little over two seconds before anything appears on screen.
+- **The context layer is not a bottleneck.** It reads tasks, reminders and
+  memories and formats them in **13 ms** — the three parallel reads in
+  `user-context.ts` cost nothing next to the model.
+- STT and TTS durations are **not** in these timings; the log stops at the model.
+  Measuring them would need the realtime session to report its own stages.
+
+### End to end, on the handset
+
+The acoustic recording from §21 gives the user-facing figure for one spoken
+exchange: the question finished at ~14 s into the recording and NOVA's reply began
+at ~18.5 s — **about 4.5 s** from the end of speech to the start of the reply.
+That is the same run whose audio was measured for the return path, so both
+numbers come from one recording rather than two.
+
+### Still unmeasured
+
+TTS time to first audio, STT time after speech ends, reminder trigger latency, and
+background wake-up — all named in §24 and none of them measured here.
