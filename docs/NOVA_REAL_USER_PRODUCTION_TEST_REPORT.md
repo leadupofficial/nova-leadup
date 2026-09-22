@@ -1249,3 +1249,53 @@ Last round I mistook the Home CTA's coordinates for the Converse mic and twice
 reported "a second turn produced no tool call". The mic control on Converse is at
 the bottom-right of the composer; used properly, every turn here started and
 completed. The earlier observation was my error and remains withdrawn.
+
+---
+
+## 29. Addendum — failure handling (§23) (2026-09-23)
+
+Four failure cases exercised against the real assistant and, where it applies,
+the handset.
+
+| Case | Result |
+|---|---|
+| **Duplicate command** — the same reminder asked twice in one conversation | **One** row, and NOVA said so: *"You already have a reminder to call the bank tomorrow at five o'clock in the evening."* No duplicate, and no silent skip either. |
+| **Conflicting reminders** — two different titles at the *same instant* | Both kept (`11:30Z` = 17:00 IST), and the second turn noticed the first already existed rather than duplicating it. |
+| **Nonsense input** — *"asdfgh qwerty zxcvbnm"* | *"That looks like keyboard mashing. Is everything okay…"* — graceful, no row created, no crash. |
+| **Network failure** — API stopped, device pointed at a dead port | **Was silent; now fixed.** See below. |
+
+### The network failure, and the fix
+
+With nothing listening, the app sat on **"Thinking…" for over forty seconds**:
+an empty reply bubble, nothing in `logcat`, and no explanation. A slow answer and
+a dead server were indistinguishable to the user.
+
+The cause was a partial deadline. `_ensureConnected` bounded only its wait for a
+status event:
+
+```dart
+await _service.connect();                     // not bounded
+return await completer.future.timeout(10s);   // bounded
+```
+
+A `connect()` that never returned hung the whole method, so the timeout was never
+reached and the `offline` failure the controller already had a message for was
+never raised. One shared `_connectDeadline` now covers both.
+
+Re-verified against the same dead port: the app reports it at once — status
+**ERROR**, banner *"The voice connection dropped. Reconnecting…"*, the avatar on
+"Something went wrong", and a composer that still works.
+
+### A note on my own method, again
+
+My first attempt at this test was invalid: I killed the API on `:3099` but the
+`adb reverse` rule had not taken effect, so the phone was still reaching the
+user's API on `:3001` and answered normally. I only noticed because the reply was
+grounded and contextual — impossible from a dead server. The test was redone
+against a port with nothing listening, and `adb reverse --list` was checked
+afterwards.
+
+### Still untested in §23
+
+Microphone denied, notification denied, expired OTP, app killed mid-turn, and
+language-switch mid-conversation.
