@@ -65,8 +65,16 @@ class ToolConfirmSheet extends ConsumerStatefulWidget {
     return showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      isDismissible: false,
-      enableDrag: false,
+      // Dismissible on purpose. These were both `false`, which made the sheet
+      // inescapable for the user: measured on the handset, approving an action
+      // could leave the app on a black screen with no in-app way out — Back
+      // exited to the launcher and reopening NOVA was still black, and only
+      // `am force-stop` recovered it. Whatever the underlying cause, a modal the
+      // user cannot close is never the right failure mode. `approved == null`
+      // already means "deny" on both call paths, so dismissing is safe and
+      // well-defined: the pending action is refused rather than left hanging.
+      isDismissible: true,
+      enableDrag: true,
       backgroundColor: Theme.of(context).bottomSheetTheme.backgroundColor,
       builder: (_) => ToolConfirmSheet(
         approval: approval,
