@@ -705,3 +705,46 @@ routes the streaming path.
 |---|---|---|
 | Live conversation (streaming) | **works — verified** | **works — verified** |
 | Uploaded audio (REST) | fixed in §16, verified | **gibberish — open** |
+
+## 19. The REST STT path now transcribes Nepali and Urdu correctly (2026-09-23)
+
+§16 stopped the upload path discarding the language and used `detect_language`.
+That was half a fix: it repaired Urdu and left Nepali producing gibberish. Both are
+now correct, and the reason is that **two** things were wrong.
+
+### The model mattered as much as the code
+
+| Language | Request | Transcript |
+|---|---|---|
+| Nepali | `detect_language` | *"Hana das Bagegra Hacklai Phone Gardnose."* — gibberish |
+| Nepali | **`nova-3` + `language=ne`** | **"भोलि बिहान १० बजे ग्राहकलाई फोन गर्नुहोस्"** — correct |
+| Urdu | **`nova-3` + `language=ur`** | **"کل صبح 10 بجے کلائنٹ کو کال کرے۔"** — correct |
+| Urdu | `nova-2` + `language=ur` | **HTTP 400** — no such model/language combination |
+
+`nova-2` carries no Indic language at all and `nova-3` does, and being *told* the
+language beats asking Deepgram to guess it: detection gave gibberish for Nepali and
+a partial for Urdu, while the explicit code transcribed both.
+
+### The fix
+
+Non-English asks for `nova-3` with the language. Deepgram **refuses** a code it does
+not carry rather than ignoring it, so an explicit attempt degrades to detection
+instead of failing the turn; English keeps `nova-2`, which is right for it.
+
+Verified through the app's own `transcribeAudioForLanguage`:
+
+| Language | Provider | Transcript |
+|---|---|---|
+| Nepali | deepgram | **"भोलि बिहान १० बजे ग्राहकलाई फोन गर्नुहोस्"** — was gibberish |
+| Urdu | deepgram | **"کل صبح 10 بجے کلائنٹ کو کال کرے۔"** — was empty two rounds ago |
+| Hindi | sarvam | *"कल सुबह दस बजे क्लाइंट को कॉल करें।"* — unchanged, primary still serves it |
+
+### Where the two languages stand now
+
+| Path | Urdu | Nepali |
+|---|---|---|
+| Live conversation (streaming, §18) | **works — verified** | **works — verified** |
+| Uploaded audio (REST) | **works — verified** | **works — verified** |
+
+Both languages are now transcribed correctly on both paths, each verified with real
+audio and real provider calls rather than inferred from configuration.
