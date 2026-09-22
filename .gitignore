@@ -58,3 +58,9 @@ packages/memory/src/*.d.ts.map
 # Byte-identical duplicate of packages/database/drizzle/0000_regular_colossus.sql.
 # `pnpm db:migrate` reads ./drizzle, so this copy is unused and misleading.
 packages/database/migrations/
+
+# Service-account private keys and downloaded Firebase config must never be committed.
+*firebase-adminsdk*.json
+GoogleService-Info*.plist
+*.env.bak.*
+services/api/.env.bak.*

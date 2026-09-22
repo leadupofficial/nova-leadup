@@ -12,7 +12,20 @@
           "package_name": "com.leadup.nova"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "386562103255-ntgs15ar9d2rej9br9l72timfhm5m3n8.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.leadup.nova",
+            "certificate_hash": "063fdc2f0fbd4cf70e38e71b05e67052a93f68c2"
+          }
+        },
+        {
+          "client_id": "386562103255-43r1hr8ahpspdllk2acdjmimns32v5v7.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDmA_sVWOe7u_AL-ETAsGin74PEvUh-05Q"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "386562103255-43r1hr8ahpspdllk2acdjmimns32v5v7.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "386562103255-nqv67hfru4le1l3c62rhkvdt5m99sofr.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.leadup.nova"
+              }
+            }
+          ]
         }
       }
     }
