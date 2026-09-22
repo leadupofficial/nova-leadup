@@ -221,8 +221,15 @@ class _OfflinePageState extends ConsumerState<OfflinePage> {
                             child: Text(
                               online
                                   ? 'Live AI is available again.'
-                                  : 'Your saved reminders still work. Live '
-                                        'AI is unavailable — reconnect to '
+                                  // "Your saved reminders still work" read as a
+                                  // contradiction beside the "Reminders — Not
+                                  // cached" row below it. Both are true of
+                                  // different things: an armed alarm is scheduled
+                                  // on the device and fires offline (verified with
+                                  // the radio off), while the *list* is not cached
+                                  // for browsing. Say which.
+                                  : 'Reminders you have already set still fire. '
+                                        'Live AI is unavailable — reconnect to '
                                         'restore conversation.',
                               textAlign: TextAlign.center,
                               style: text.bodyLarge!.copyWith(

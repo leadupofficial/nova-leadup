@@ -61,6 +61,12 @@ class _AdminTopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.nova;
     return Row(
+      // `justify-content: space-between` distributes the *gaps*, so the title
+      // keeps its natural width. Reproducing it with two `Spacer`s instead gave
+      // them two thirds of the free space and squeezed the title into ellipsis —
+      // the app bar read "Admin C…" on the handset. `spaceBetween` is what the
+      // export actually does, and it leaves the title whole.
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         NovaIconButton(
           icon: Icons.chevron_left_rounded,
@@ -68,9 +74,6 @@ class _AdminTopBar extends StatelessWidget {
           tooltip: 'Back',
           onTap: () => Navigator.of(context).maybePop(),
         ),
-        // The export uses `justify-content: space-between` across three items,
-        // which distributes the free space evenly — two Spacers reproduce it.
-        const Spacer(),
         Flexible(
           child: Text(
             'Admin Console',
@@ -81,7 +84,6 @@ class _AdminTopBar extends StatelessWidget {
             style: NovaTheme.sectionHeading(c),
           ),
         ),
-        const Spacer(),
         const _BetaPill(),
       ],
     );

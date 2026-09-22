@@ -329,6 +329,12 @@ void main() {
 
     // The rest of the screen was already right and must stay right.
     expect(find.text('No connection'), findsOneWidget);
-    expect(find.textContaining('Your saved reminders still work'), findsOneWidget);
+    // This sentence read "Your saved reminders still work", which contradicted the
+    // "Reminders - Not cached" row directly beneath it. Both are true of different
+    // things - an armed alarm fires offline, the list is not cached - so the
+    // wording now says which. The assertion is that the reassurance is still
+    // there, not that it keeps any particular phrasing.
+    expect(find.textContaining('Reminders you have already set still fire'),
+        findsOneWidget);
   });
 }
