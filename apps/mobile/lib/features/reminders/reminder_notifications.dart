@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart' as ph;
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
+
 /// The seam over `flutter_local_notifications` for reminder alarms.
 ///
 /// Everything the reconciler needs is a method here, so unit tests can prove
@@ -500,20 +501,65 @@ class FlutterLocalReminderNotifications implements ReminderNotifications {
     required bool exact,
   }) async {
     await initialize();
-    await _plugin.zonedSchedule(
+    await _arm(
       id: id,
+      reminderId: reminderId,
       title: title,
       body: body,
       // `TZDateTime.from` preserves the instant; the location only decides how
       // it is written down. Using `tz.local` (set in [initialize]) keeps the
       // serialised wall-clock time matching the device.
       scheduledDate: tz.TZDateTime.from(when, tz.local),
+      matchComponents: null,
+    );
+  }
+
+  /// Arms one alarm, preferring the mode that actually survives this platform.
+  ///
+  /// **`alarmClock`, not `exactAllowWhileIdle`.**
+  ///
+  /// Reminders used `exactAllowWhileIdle` whenever the permission probe said yes,
+  /// and on this handset that still produced **windowed** alarms: one matched to
+  /// its own reminder by `origWhen` carried `windowLength 1839803` — about 31
+  /// minutes of slop — while the probe reported `exact=true` and the plugin
+  /// returned without throwing. The mode was accepted and then batched by the
+  /// OEM. `AndroidScheduleMode.alarmClock` (`setAlarmClock` underneath) turned the
+  /// same measurement into **`windowLength 0`**.
+  ///
+  /// It also sidesteps the permission dance: the plugin only runs its
+  /// `canScheduleExactAlarms()` check on the `exact*` modes, so a user who never
+  /// grants *Alarms & reminders* still gets a punctual reminder.
+  ///
+  /// The windowed mode stays as the last resort, so a platform that refuses the
+  /// alarm-clock call still schedules something rather than nothing.
+  Future<void> _arm({
+    required int id,
+    required String reminderId,
+    required String title,
+    required String body,
+    required tz.TZDateTime scheduledDate,
+    required DateTimeComponents? matchComponents,
+  }) async {
+    Future<void> attempt(AndroidScheduleMode mode) => _plugin.zonedSchedule(
+      id: id,
+      title: title,
+      body: body,
+      scheduledDate: scheduledDate,
       notificationDetails: _details(body),
-      androidScheduleMode: exact
-          ? AndroidScheduleMode.exactAllowWhileIdle
-          : AndroidScheduleMode.inexactAllowWhileIdle,
+      androidScheduleMode: mode,
+      matchDateTimeComponents: matchComponents,
       payload: reminderId,
     );
+
+    try {
+      await attempt(AndroidScheduleMode.alarmClock);
+    } on PlatformException catch (error) {
+      debugPrint(
+        '[ReminderNotifications] alarm-clock mode refused, falling back to a '
+        'windowed alarm: ${error.message}',
+      );
+      await attempt(AndroidScheduleMode.inexactAllowWhileIdle);
+    }
   }
 
   @override
@@ -538,9 +584,9 @@ class FlutterLocalReminderNotifications implements ReminderNotifications {
       // isolate involved, so it survives the app being killed.
       scheduledDate: tz.TZDateTime.from(firstOccurrence, tz.local),
       notificationDetails: _details(body),
-      androidScheduleMode: exact
-          ? AndroidScheduleMode.exactAllowWhileIdle
-          : AndroidScheduleMode.inexactAllowWhileIdle,
+      // `alarmClock` for the same reason as the one-shot path — see [_arm] for
+      // the measurement that decided it.
+      androidScheduleMode: AndroidScheduleMode.alarmClock,
       matchDateTimeComponents: switch (repeat) {
         ReminderRepeat.daily => DateTimeComponents.time,
         ReminderRepeat.weekly => DateTimeComponents.dayOfWeekAndTime,
@@ -650,9 +696,10 @@ class FlutterLocalReminderNotifications implements ReminderNotifications {
         location: tz.local,
       ),
       notificationDetails: _details(body),
-      androidScheduleMode: exact
-          ? AndroidScheduleMode.exactAllowWhileIdle
-          : AndroidScheduleMode.inexactAllowWhileIdle,
+      // `alarmClock` for the same reason as the one-shot path: the exact modes are
+      // accepted here and then batched by the OEM, while the alarm-clock call
+      // produced `windowLength 0`.
+      androidScheduleMode: AndroidScheduleMode.alarmClock,
       matchDateTimeComponents: DateTimeComponents.time,
     );
   }
