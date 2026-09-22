@@ -1092,3 +1092,63 @@ logging every `location` the delegate receives — would name the caller directl
 **P1, open.** The mechanism is known and reproducible; the fix is not found. The
 escape hatch from round 10 (the sheet is dismissible) is still the only thing
 that reduces the harm, and it only helps before the action is approved.
+
+---
+
+## 26. Addendum — the black screen is fixed (2026-09-23)
+
+Open for four rounds as a P1. Closed with a route trace, and verified on the
+handset twice.
+
+### The trace
+
+A debug-only `NavigatorObserver` plus a delegate listener (`router.dart`,
+`app.dart`) logged every route change and every router notification. One run
+named the cause, after three rounds of elimination had not:
+
+```
+02:24:00.970  POP ModalBottomSheetRoute<bool> prev=converse   <- the sheet, correct
+02:24:00.973  POP converse prev=-                             <- the page, 3 ms later
+02:24:00.974  delegate matches=0 uri=                         <- empty -> black
+```
+
+### Why
+
+`_maybePromptVoiceApproval` keeps a branch for *"the request went away while its
+sheet was up (cancelled turn, server timeout) — take the sheet with it"*, and it
+closed the sheet with `Navigator.maybePop()`.
+
+But **approving clears `pendingApproval` as well** — it is the same signal that
+branch watches — and `_showingVoiceApproval` is not reset until the
+still-suspended call's `finally` runs. So the ordinary approve path fired the
+branch and popped the sheet's *page* on top of the sheet's own pop.
+
+That also explains the intermittency that misled earlier rounds: the outcome
+depended on whether the `finally` had already run when the listener fired.
+
+### The fix
+
+`_decidingApproval` brackets the state change the user's decision causes. The
+branch stands down while a decision is being applied, and still behaves as
+before for a request that genuinely vanishes.
+
+### Verified on the handset
+
+| Run | Trace | Frame |
+|---|---|---|
+| 1st approval | one `POP ModalBottomSheetRoute`, no `POP converse`, no `matches=0` | `(14,35,45) (27,36,51) (5,15,33)` — rendering |
+| 2nd approval | same | `(21,30,46) (2,5,17) (5,15,33)` — rendering |
+
+Contrast with the failure, which was `(0,0,0)` at every sample point.
+
+### What is kept
+
+The route trace. It is gated on `kDebugMode` so release pays nothing, and a
+routing fault is otherwise invisible — four rounds of reasoning about renderers,
+sheets and sockets got nowhere, and one trace settled it.
+
+### Effect on the rest of the validation
+
+Approvals are the gate on every write the assistant proposes by voice. Tasks,
+reminders and history can now be exercised end to end on the handset through the
+spoken path, without the flow that made the app unusable.
