@@ -291,3 +291,53 @@ started failing the day after it was written. Both fixtures are now relative to
 - `NOVA_MULTILINGUAL_TEST_REPORT.md` and `NOVA_VISUAL_UI_AUDIT.md` do not exist
   yet. Four screens are audited above; the rest are not.
 MD
+
+---
+
+## 9. Addendum — onboarding walked end to end on the handset
+
+Because the Firebase attestation blocker (§4) is intermittent, the rest of the
+lifecycle was reached through the app's **other real authentication path** — the
+email + password form behind the switch — using a genuine account created through
+`POST /api/v1/auth/register`. Nothing was faked: real credentials, real session,
+real onboarding.
+
+| Screen | Evidence | Finding |
+|---|---|---|
+| Login (email form) | `email_form.png` | The switch I added renders correctly and is fully reversible |
+| Onboarding welcome | `post_signin.png` | Reached **only** after the session existed |
+| Permissions | `perm_fixed.png` | Both rows said *"The system did not grant this"* before anything was asked — **fixed**, now *"Not turned on yet"* |
+| OS microphone dialog | `mic_dialog.png` | Real dialog; `RECORD_AUDIO: granted=true` |
+| OS notification dialog | `notif_dialog2.png` | Real dialog; `POST_NOTIFICATIONS: granted=true` |
+| Permissions resolved | `perm_scroll2.png` | Microphone *Allowed*, Notifications *Allowed*, Recording *Not now*, Memory *Allowed*, AI processing *Allowed* |
+| About you | `onb_next.png` | Accepts a name; **top bar and back affordance are missing** (see §10) |
+| Create companion | `onb_comp_scroll.png` | Name, personality, speech style, speed, preview |
+| Your preferences | `onb_health.png` | Notifications toggle + Finish setup; **top bar also missing** |
+| Home | `home.png` | Reached; avatar, *Tap to talk*, bottom nav, Today's Overview |
+
+This also **corrects an earlier finding**. The previous round recorded *"notification
+permission button raises no dialog"* as P1. This round the button raised the OS
+dialog on the first tap and the permission was granted, so the earlier observation
+was a transient device state rather than a broken request path.
+
+## 10. Visual findings from the walkthrough
+
+| # | Screen | Issue | Sev | Status |
+|---|---|---|---|---|
+| V1 | Home | The floating summon orb was drawn at the same top-right position as the top bar and sat **through the notification bell and the settings icon** | **P2** | **FIXED & RE-VERIFIED** (`home_fixed.png`) — Home keeps its hero avatar; every other screen keeps the orb |
+| V2 | About you, Your preferences | No top bar, no back affordance, and the heading is jammed against the status bar — unlike Permissions and Create companion, which both have one. Large unused area below a two-control form | **P3** | OPEN |
+| V3 | Create companion, Home | The avatar panel is a large empty box with the face low in it; the card reads as mostly void rather than a prominent avatar | **P2** | OPEN — the mandate asks for the avatar to be prominent; it is present but not composed |
+| V4 | Home | "Today's Overview" cards are clipped behind the bottom notice and the nav bar | **P3** | OPEN |
+| V5 | Create companion | Speech style offers only **Auto Tamil–English / Tamil / English / Tanglish** (`onb_companion.png`) — the language gap, now with visual evidence | **P1** | OPEN |
+
+## 11. Commits from this round
+
+| Commit | What |
+|---|---|
+| `7731e64` | Authenticate before onboarding; bound the phone-auth request; lazy Firebase; mask keeps its last four digits |
+| `12686c6` | Stop the OTP step sending a second SMS |
+| `6505040` | Report + gap analysis for the above |
+| `b1caf4c` | Do not claim a permission refusal before the user is asked |
+| `93c1c48` | Stop the floating orb covering the Home top bar |
+
+`flutter analyze` clean; `flutter test` **789 passed, 5 skipped, 0 failed**.
