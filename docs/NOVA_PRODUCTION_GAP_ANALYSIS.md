@@ -15,8 +15,10 @@ root cause, and what remains. Status legend: **FIXED** (code changed + re-verifi
 | 7 | Notification permission in onboarding | Button raises the OS dialog | Three taps produced no dialog; `POST_NOTIFICATION: ignore`; Android recorded **no user decision** | Unconfirmed — `permission_handler` request path or a silently-denied prior attempt | **P1** | OPEN | Instrument `requestNotification()` result; if it returns `denied` permanently, route the user to app settings with an explanation | Reminders fire but are never shown |
 | 8 | Permission state freshness | Reflect OS state on return | OS `granted=true` while the app showed "The system did not grant this" and kept **Continue** disabled | `PermissionNotifier.checkInitialPermissions()` runs only in the constructor; never re-read on resume | **P1** | OPEN | Re-read on `AppLifecycleState.resumed`; add a "refresh" affordance | User is stuck on the permissions screen until force-quit |
 | 9 | Pre-auth consent sync | Silent/queued | Red **"Missing or invalid authorization header"** on every consent row during onboarding | `POST /api/v1/consent` → 401 before the user exists, and the raw message is rendered | **P1** | OPEN | Queue consent locally and sync post-auth, or suppress the technical message and show calm copy | Alarming, technical, and the first thing a new user sees |
-| 10 | First-run order | Authentication first | `welcome → permissions → profile → companion → health → login` | Router gates onboarding before auth | **P1** | OPEN | Move `/login` ahead of onboarding; carry personalisation to the account after auth | Personalisation is collected from an anonymous user |
-| 11 | Phone + Firebase OTP login | Primary login | Phone block disabled: "Phone sign-in is not available on this server." | `firebase_auth` absent; no SHA fingerprint; API has no OTP route; `services/auth` OTP is a console-printing stub whose `phone_otp_codes` table is not in the canonical schema | **P0** | **BLOCKED** | Firebase console: register SHA-1/SHA-256 (debug + release), enable Phone provider, test number or Blaze billing; then add `firebase_auth`, `verifyPhoneNumber`, and a server ID-token exchange | The specified primary login does not exist |
+| 10 | First-run order | Authentication first | **FIXED & VERIFIED ON DEVICE 2026-09-23.** A genuine uninstall/reinstall (`pm clear` is refused to `shell` on this ColorOS build) opened the *Meet NOVA* welcome page. Now a fresh install opens **Welcome back** with country + phone and a single CTA, *Continue with OTP*; no company/campaign/customization/language/dashboard screen is reachable, and email+password is behind an explicit switch. After the OTP the app lands on onboarding. | Router gated onboarding before auth (`_entryLocation` returned `resumeStep()` for any incomplete status) | **P0** | **FIXED** — the auth gate now runs first and `/onboarding/otp` counts as an auth route; splash sends a signed-out user to `/login` | — | A brand-new user was personalised before they had an account, and the product's specified first screen did not exist |
+| 11 | Phone + Firebase OTP login (client + server) | Primary login, end to end | **WORKS, VERIFIED ON DEVICE 2026-09-23.** Fresh install → `7868002606` → *Continue with OTP* → 6-digit screen reading `+91 XXXXXX 2606` → `123456` → `FirebaseAuth: Notifying id token listeners about user ( vZnCX8gd3RNxUjA46pDItGa9zdc2 )` → a **new `sessions` row `71afc016-c5cb-4346-b3b8-676e047e05a3` at 2026-09-22T13:19:58Z** → onboarding. | Fixed in this session: `firebase_auth` added, debug SHA registered, `/api/v1/auth/firebase/exchange` implemented, Firebase resolved lazily | **P0** | **FIXED** | — | This is now the live login path |
+| 11a | Phone-auth app verification (Firebase Android SDK) | OTP request always reaches a code | **INTERMITTENT.** One run completed in ~2 min; the next opened a browser Custom Tab at `…gging.firebaseapp.com` showing *"Unable to process request due to missing initial state"* and the sign-in failed. | `Failed to initialize reCAPTCHA config: No Recaptcha Enterprise siteKey configured for tenant/project *`. `recaptchaenterprise.googleapis.com` is **disabled** in the project; the SDK falls back to the reCAPTCHA web flow, which is broken. The service account has no `serviceusage.services.enable`. | **P0** | **BLOCKED** | See §Blocked below — a project Owner must enable the API and provision the reCAPTCHA/Play Integrity config for `com.leadup.nova` | Users are intermittently dumped into a broken browser page instead of receiving a code |
+| 11b | OTP send count | One SMS per sign-in | **FIXED & VERIFIED.** The login screen sent a code, waited for `codeSent`, routed to the step, and the step **sent a second one** for the same sign-in. | The `/onboarding/otp` builder supplied the transport but not `requestOnStart`, which defaults to `true` | **P1** | **FIXED** — the route passes `requestOnStart: false` when the caller supplied a transport | — | Double SMS cost and needless pressure on the per-number throttle |
 | 12 | Language selection | All genuinely supported Indian languages | Four chips: Auto Tamil–English, Tamil, English, Tanglish | `companion_page.dart`, `me_page.dart`, `settings.ts` enum, `voice_protocol.dart` all hardcode the same four | **P1** | OPEN | Widen the API enum and both pickers to the verified set; mark fallback-voiced languages as partial | Non-Tamil Indian users cannot choose their language |
 | 13 | Urdu/Nepali/Kashmiri/Bhojpuri/Awadhi voice | Spoken in-language | TTS provider reports `elevenlabs-fallback` — an English voice reading non-Latin script | Google provider selected in the catalogue but no Google key is configured | **P2** | OPEN | Either configure Google TTS or remove these from the selectable list and label them partial | Replies are textually right, spoken wrong |
 | 14 | Avatar prominence | Large, centred, non-overlapping | Bubble overlaps the header bell and settings gear on every screen | In-app overlay positioned without reserving layout space | **P1** | OPEN | Move the bubble clear of the app bar or collapse header actions while it is shown; enlarge the Home avatar | Controls are visually and possibly physically blocked |
@@ -38,3 +40,52 @@ root cause, and what remains. Status legend: **FIXED** (code changed + re-verifi
 - **Do not read a green reply as a green action.** The Telugu failure produced a
   perfectly-scripted Telugu sentence while nothing was created; only the reminder count
   revealed it. Outcome assertions, not reply assertions, are what caught it.
+
+---
+
+## Blocked — exact action required
+
+These are not code problems and cannot be closed from this machine.
+
+### B1. Firebase phone-auth app verification (blocks row 11a) — P0
+
+**STATUS: BLOCKED**
+
+**Reason.** The Firebase Android SDK must produce an app-verification attestation
+before it will send an OTP. This project has neither provider configured:
+
+- `recaptchaenterprise.googleapis.com` → `403 … has not been used in project
+  nova-leadup-stagging before or is disabled`
+- `androidcheck.googleapis.com` (legacy Android Device Verification) and
+  `playintegrity.googleapis.com` → not enabled
+- `GET identitytoolkit/v2/projects/nova-leadup-stagging/config` returns
+  `recaptchaConfig: null`
+
+Enabling them needs `serviceusage.services.enable`, which the Firebase Admin SDK
+service account does not hold:
+
+```
+POST serviceusage.googleapis.com/v1/projects/nova-leadup-stagging/services/recaptchaenterprise.googleapis.com:enable
+403 PERMISSION_DENIED  "Permission denied to enable service"
+```
+
+There is no `gcloud` on this machine and no application-default credentials, so
+there is no broader credential to use.
+
+**Required (project Owner, Google Cloud / Firebase console).** Any one of:
+
+1. Enable **reCAPTCHA Enterprise API** for `nova-leadup-stagging`, then in
+   Firebase Console → Authentication → Settings provision the reCAPTCHA key for
+   the Android app `com.leadup.nova` (SHA-1
+   `06:3F:DC:2F:0F:BD:4C:F7:0E:38:E7:1B:05:E6:70:52:A9:3F:68:C2`).
+2. Or set up **Play Integrity** for the app and enable App Check.
+3. Or grant the deploy service account `roles/serviceusage.serviceUsageAdmin`
+   so the API enablement can be automated here.
+
+**Already confirmed working without it.** The Firebase backend itself is correct:
+phone provider enabled, and `+917868002606` is registered as a test number with
+the fixed code `123456`. Server-side the full chain is proven —
+`accounts:sendVerificationCode` → `accounts:signInWithPhoneNumber` (correct code
+`200`, wrong code `400 INVALID_CODE`) → `POST /api/v1/auth/firebase/exchange`
+`200` → `GET /api/v1/auth/me` `200` — and the on-device path completed once, with
+a real session row as evidence. Only the SDK's attestation step is unreliable.
