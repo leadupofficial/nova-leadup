@@ -399,3 +399,50 @@ script that is then **spoken by an English voice**. The catalogue claims Sarvam 
 must be reconciled; until then the picker should mark those as partial. Real
 speech was sampled for seven languages only — the rest were driven as text through
 the live pipeline and must not be described as verified.
+
+---
+
+## 13. Addendum — push transport for proactive nudges (2026-09-23)
+
+This was the last P0 with no external blocker: the proactive half of the product
+had **no transport at all**. `devices.push_token` existed, the admin console even
+reported `hasPushToken`, and nothing ever wrote a token or sent a message — 82
+`follow_up` rows, 0 read. The app never called `/notifications` either.
+
+### What was built
+
+| Layer | Change |
+|---|---|
+| API | `/device/register` accepts and stores `pushToken`; absent leaves the stored token alone, empty clears it. `GET /device/register` reports `hasPushToken`. |
+| API | `services/fcm.ts` — FCM HTTP v1, OAuth minted from the service-account JSON with `jsonwebtoken` (already a dependency) and the global `fetch`, so no `firebase-admin`. One request per token; a token FCM reports as unregistered is returned and cleared. |
+| API | `NotificationService.create` — the single insertion point the assistant, follow-up engine and reminder scheduler all use — pushes after writing the row, best-effort. |
+| App | `firebase_messaging` obtains the token during registration, bounded by a timeout. |
+| App | `PushForegroundHandler` draws a push that arrives while the app is open. |
+
+### Verified on the handset, with real credentials
+
+| Check | Evidence |
+|---|---|
+| A real FCM token reached the database from the phone | `devices.push_token`, 142 characters, `installation_id 5eec3a1126eaa0a684a1835f66a10bbb` |
+| The server sent it | `devices: 1, sent: 1, failed: 0, configured: true` |
+| App **backgrounded** → the user is told | shade: **NOVA · Call Arun · "You have a reminder to call Arun. Would you like to do it now?"** (`push_shade2.png`) |
+| App **foregrounded** → nothing appeared | `push_shade.png` — empty. Diagnosed: Android only draws its own notification when the app is backgrounded, and the app had no `onMessage` handler |
+| After the fix, foregrounded → visible | `fg_push_shade.png`; `dumpsys` reports `id=900001 channel=nova_reminders importance=4` |
+| Token survives a tokenless re-register | `device-push-token.test.ts` — fails with the guard removed |
+
+### Still open on this path
+
+- **The app still has no notification surface.** `/notifications` (list, read,
+  delete, unread-count) exists and the app calls none of it; the bell shows a
+  hardcoded `0`. Dismiss the shade and the nudge cannot be found again inside NOVA.
+- **Delivery is silent.** The channel is created with `Importance.high` but no
+  sound, and Android groups a soundless high channel under the silent indicator.
+  A reminder the user does not notice is not a reminder.
+- **No `delivered_at`.** Nothing records whether FCM accepted a message, so "sent"
+  cannot be distinguished from "received".
+- **The follow-up engine has not been exercised through push.** What was proven is
+  the transport, driven by the same service the engines call — not a live
+  scheduled follow-up firing on its own.
+
+`NOVA_VISUAL_UI_AUDIT.md` now exists and covers every screen photographed so far,
+with the screens that were never opened listed as unaudited.
