@@ -1727,3 +1727,46 @@ agree with it.
   mismatch that was actually a match.
 
 Neither is counted in the table above.
+
+---
+
+## 39. Addendum — the app killed mid-turn (§23) (2026-09-23)
+
+A write is proposed by voice and executed by the server, so killing the app between
+the two is the case that decides whether the data survives intact. Driving it needed
+no Settings screen — only the mic button — after two rounds of settings mis-taps.
+
+### What was done
+
+A task was dictated (*"create a task called midflight check to call the vendor
+tomorrow"*), the approval sheet appeared with **"mid-fly check to call the vendor",
+due 2026-09-24**, and then:
+
+| Step | Action |
+|---|---|
+| 1 | **Approve and run** tapped |
+| 2 | one second later, Home pressed to background the app |
+| 3 | `adb shell am kill com.leadup.nova` — the process is gone (`pidof` empty) |
+| 4 | twelve seconds for the server to finish the turn it was mid-way through |
+
+### Result
+
+| Check | Evidence |
+|---|---|
+| The action still completed | the row exists: **"mid-fly check to call the vendor"**, `status=pending` |
+| The time is the one the sheet promised | `dueAt 2026-09-23T18:30:00Z` = **Thu 24 Sep 00:00 IST**, the sheet's `2026-09-24` |
+| **Exactly one row — no duplicate** | `midflight rows AFTER: 1`, against `0` before |
+| The app recovers | relaunched to **READY**, composer usable, "Start a conversation" |
+| No crash, no ANR | no `FATAL`/`ANR` line for the package — the only matches were Crashlytics *initialising*, which my grep caught on the word |
+
+Killing the client mid-turn therefore loses nothing and duplicates nothing: the
+approval had already reached the server, the write happened once, and the app came
+back clean. That is the behaviour a user would want and the opposite of the
+half-applied state this test exists to catch.
+
+### One transcription note
+
+The dictation said "midflight" and the sheet read **"mid-fly"** — Deepgram heard it
+that way. It changed nothing here (the title is echoed back to the user before the
+write, which is exactly what the approval sheet is for), but it is a reminder that
+the sheet is the last point at which a misheard word can be caught.
