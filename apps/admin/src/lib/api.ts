@@ -1491,6 +1491,14 @@ export type ListEnvelope<T> = {
 	totalPages: number;
 	note?: string | null;
 	limitations?: string[];
+	/**
+	 * True when the API withheld end-user content from this response because the caller does not
+	 * hold the matching `*.content_read` permission. The rows, the counts and the pagination are
+	 * unchanged — only the user's own words are removed. The console must say so rather than
+	 * render an empty cell, which reads as missing data instead of withheld data.
+	 */
+	contentRedacted?: boolean;
+	contentPermission?: string;
 };
 
 export async function getOperations<T>(

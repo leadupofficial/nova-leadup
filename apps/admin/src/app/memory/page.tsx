@@ -58,8 +58,15 @@ export default async function MemoryPage({
 	};
 	const returnTo = `/memory?${new URLSearchParams({ ...query, page: String(page) }).toString()}`;
 
+	// Captured out of the loader so the note below can report withheld content. The API
+	// still returns every row and the same total; only the user's own words are removed.
+	let contentRedacted = false;
+	let contentPermission: string | undefined;
+
 	const result = await loadPage<MemoryRow>(async () => {
 		const envelope = await getOperations<MemoryRow>('memory', { page, pageSize: 25, ...query });
+		contentRedacted = Boolean(envelope.contentRedacted);
+		contentPermission = envelope.contentPermission;
 		return { rows: envelope.data, totalItems: envelope.totalItems, totalPages: envelope.totalPages };
 	});
 
@@ -144,6 +151,11 @@ export default async function MemoryPage({
 			]}
 			rowKey={(row) => row.id}
 			notes={[
+				...(contentRedacted
+					? [
+							`Memory content withheld: reading it requires the \`memory.content_read\` permission, which your role does not hold. The rows, counts and timing are complete — only the user's own words are removed.`,
+						]
+					: []),
 				errorMessage || (okMessage ? `Erased. ${okMessage}` : null),
 				...(result.ok ? [] : [result.message]),
 				'Listing memory is itself audited: every read through this page writes an admin audit row with the operator’s identity and the filter they used.',

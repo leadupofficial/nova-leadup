@@ -52,6 +52,7 @@ import {
 	adminGate,
 	assertNotSelfEscalation,
 	requirePermission,
+	holdsPermission,
 } from '../../admin/access.js';
 import { auditedOperation, recordAdminAction, actorFromRequest } from '../../admin/audit.js';
 import { evaluateAllFlags } from '../../admin/flags.js';
@@ -324,6 +325,20 @@ router.get(
 	async (req: AdminRequest, res: Response, next: NextFunction) => {
 		try {
 			const { id } = req.params;
+
+			// Content is gated on the permission that governs *that content*, not on `users.read`.
+			//
+			// This handler took `users.read` and returned everything: memory bodies verbatim, task
+			// titles and descriptions, reminder titles, and the conversation titles that
+			// `routes/chat.ts` derives from the first 100 characters of the user's own message. So
+			// `ANALYTICS_ADMIN` — described in `admin/permissions.ts` as "metrics and cost, no
+			// personal data" — could read a person's stored memories here while `memory.read` was
+			// denied to it everywhere else. The separate content permissions existed and were
+			// simply not consulted on this path, and none of these reads were audited.
+			const canReadConversationTitles = holdsPermission(req, 'conversations.content_read');
+			const canReadTaskContent = holdsPermission(req, 'tasks.content_read');
+			const canReadReminderContent = holdsPermission(req, 'reminders.content_read');
+			const canReadMemoryContent = holdsPermission(req, 'memory.content_read');
 			if (!isUuid(id)) throw new HttpError(400, 'Invalid user id', 'BAD_REQUEST');
 
 			const db = getDb();
@@ -476,13 +491,30 @@ router.get(
 					avatar: avatarRow.rows[0] ?? null,
 					organization: orgRow.rows[0] ?? null,
 					subscription: subscriptionRow.rows[0] ?? null,
-					conversations: conversationRows.rows,
-					tasks: taskRows.rows,
-					reminders: reminderRows.rows,
-					memories: memoryRows.rows,
+					conversations: canReadConversationTitles
+						? conversationRows.rows
+						: conversationRows.rows.map((c: Record<string, unknown>) => ({ ...c, title: null })),
+					tasks: canReadTaskContent
+						? taskRows.rows
+						: taskRows.rows.map((t: Record<string, unknown>) => ({ ...t, title: null, description: null })),
+					reminders: canReadReminderContent
+						? reminderRows.rows
+						: reminderRows.rows.map((r: Record<string, unknown>) => ({ ...r, title: null })),
+					memories: canReadMemoryContent ? memoryRows.rows : [],
 					usage: usageRows.rows,
 					notifications: notificationRows.rows,
 					auditLog: auditRows.rows,
+					/**
+					 * What was withheld, and what would unlock it. The console renders this instead
+					 * of an empty list: "this account has no memories" and "you may not read
+					 * memories" are different facts and only one of them is about the account.
+					 */
+					contentRedacted: {
+						conversations: !canReadConversationTitles,
+						tasks: !canReadTaskContent,
+						reminders: !canReadReminderContent,
+						memories: !canReadMemoryContent,
+					},
 					lastActivityAt: lastLogin ? lastLogin.toISOString() : null,
 				},
 			});

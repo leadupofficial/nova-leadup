@@ -96,6 +96,11 @@ export default async function RemindersPage({
 	const errorMessage = single(resolved.error);
 	const returnTo = `/reminders?${new URLSearchParams({ state, page: String(page), ...(search ? { search } : {}) }).toString()}`;
 
+	// Captured out of the loader so the note below can report withheld content. The API
+	// still returns every row and the same total; only the user's own words are removed.
+	let contentRedacted = false;
+	let contentPermission: string | undefined;
+
 	const result = await loadPage<ReminderRow>(async () => {
 		const envelope = await getOperations<ReminderRow>('reminders', {
 			page,
@@ -103,6 +108,8 @@ export default async function RemindersPage({
 			...(state !== 'all' ? { state } : {}),
 			...(search ? { search } : {}),
 		});
+		contentRedacted = Boolean(envelope.contentRedacted);
+		contentPermission = envelope.contentPermission;
 		return { rows: envelope.data, totalItems: envelope.totalItems, totalPages: envelope.totalPages };
 	});
 
@@ -146,6 +153,11 @@ export default async function RemindersPage({
 
 			<Notes
 				notes={[
+					...(contentRedacted
+						? [
+								`Reminder text withheld: reading it requires the \`reminders.content_read\` permission, which your role does not hold. The rows, counts and timing are complete — only the user's own words are removed.`,
+							]
+						: []),
 					'“Acknowledged” means the user opened the reminder’s notification. That is the only delivery signal the platform offers: the device’s OS alarm fires with the app closed, so the firing instant is never reported to the server. A reminder that was shown and ignored is therefore overdue but not acknowledged.',
 					'Reminders are delivered by the operating system’s alarm scheduler on the device, not by this backend. A recurring reminder is acknowledged once — the server records the first acknowledgement, and the client re-arms later occurrences from the repeat rule.',
 					'“Revisions” counts entries in the reminder’s journal: every reschedule (written by a database trigger on `trigger_at`) and the acknowledgement. It is the closest thing to an execution history this data supports.',

@@ -49,8 +49,15 @@ export default async function ConversationsPage({
 
 	const query = { ...(mode ? { mode } : {}), ...(search ? { search } : {}), ...(userId ? { userId } : {}) };
 
+	// Captured out of the loader so the note below can report withheld content. The API
+	// still returns every row and the same total; only the user's own words are removed.
+	let contentRedacted = false;
+	let contentPermission: string | undefined;
+
 	const result = await loadPage<ConversationRow>(async () => {
 		const envelope = await getOperations<ConversationRow>('conversations', { page, pageSize: 25, ...query });
+		contentRedacted = Boolean(envelope.contentRedacted);
+		contentPermission = envelope.contentPermission;
 		return { rows: envelope.data, totalItems: envelope.totalItems, totalPages: envelope.totalPages };
 	});
 
@@ -138,7 +145,12 @@ export default async function ConversationsPage({
 			searchValue={search}
 			rowKey={(row) => row.id}
 			notes={[
-				...(result.ok ? [] : [result.message]),
+								...(contentRedacted
+					? [
+							`Titles are withheld: reading them requires the \`conversations.content_read\` permission, which your role does not hold. The rows, counts and timing below are complete — only the user's own words are removed.`,
+						]
+					: []),
+...(result.ok ? [] : [result.message]),
 				'Message text is NOT shown here. Reading it requires the separate `conversations.content_read` permission, is a distinct API call, and is audited individually — so this page can be used for triage without exposing what anyone said.',
 				'Token counts are summed from the persisted per-message usage, so they are real totals rather than estimates. Latency is not shown because nothing records it.',
 			]}

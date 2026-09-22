@@ -18,6 +18,7 @@
 
 import { Router, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
+import type { Permission } from '../../admin/permissions.js';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import {
 	conversations,
@@ -35,7 +36,7 @@ import { retryJob } from '../../jobs/queue.js';
 import { JOB_QUEUE_TIMING, workerStatus } from '../../jobs/worker.js';
 import { HttpError } from '../../middleware/error-handler.js';
 import { validate } from '../../middleware/validate.js';
-import { type AdminRequest, adminGate, requirePermission } from '../../admin/access.js';
+import { type AdminRequest, adminGate, holdsPermission, requirePermission } from '../../admin/access.js';
 import { auditedOperation, recordAdminAction, actorFromRequest } from '../../admin/audit.js';
 
 const router: ReturnType<typeof Router> = Router();
@@ -133,10 +134,13 @@ router.get(
 				[...params, q.pageSize, offset],
 			);
 
+			// The title is summarised from what was said, so it is content, not metadata.
+			const gated = contentGate(req, 'conversations.content_read', rows.rows, ['title']);
+
 			res.json({
 				success: true,
 				data: {
-					data: rows.rows.map((row) => ({
+					data: gated.rows.map((row) => ({
 						id: row.id,
 						userId: row.user_id,
 						userEmail: row.user_email,
@@ -157,6 +161,8 @@ router.get(
 					pageSize: q.pageSize,
 					totalItems,
 					totalPages: Math.ceil(totalItems / q.pageSize) || 1,
+					contentRedacted: gated.contentRedacted,
+					contentPermission: gated.contentPermission,
 				},
 			});
 		} catch (error) {
@@ -164,6 +170,43 @@ router.get(
 		}
 	},
 );
+
+/**
+ * Redacts end-user *content* from an Assistant list response unless the caller holds the
+ * matching `*.content_read` permission.
+ *
+ * Conversations already worked this way (`conversations.read` lists shape,
+ * `conversations.content_read` reads what was said). Tasks, reminders and memory did not, and
+ * the gap was not theoretical: `ANALYTICS_ADMIN` is described in this platform's own role table
+ * as "metrics and cost, no personal data", and it could read every user's task title and
+ * description. `conversations.read` is documented as "no message text" while its list endpoint
+ * returned the conversation title, which is generated from that text.
+ *
+ * The gate runs at the response rather than in the SQL so that the rows, the counts and the
+ * pagination are identical with or without content permission. An operator without it still
+ * sees that a reminder exists, when it fires, whether it failed, and who it belongs to — they
+ * just do not see what the user wrote. `contentRedacted` lets the console say that out loud
+ * instead of rendering an empty cell that reads as missing data.
+ */
+function contentGate<T extends Record<string, unknown>>(
+	req: AdminRequest,
+	permission: Permission,
+	rows: T[],
+	fields: Array<keyof T & string>,
+): { rows: T[]; contentRedacted: boolean; contentPermission: Permission } {
+	if (holdsPermission(req, permission)) {
+		return { rows, contentRedacted: false, contentPermission: permission };
+	}
+	return {
+		rows: rows.map((row) => {
+			const copy: Record<string, unknown> = { ...row };
+			for (const field of fields) copy[field] = null;
+			return copy as T;
+		}),
+		contentRedacted: true,
+		contentPermission: permission,
+	};
+}
 
 // ─── Tasks ───────────────────────────────────────────────────────────────────
 
@@ -228,14 +271,18 @@ router.get(
 				[...params, q.pageSize, offset],
 			);
 
+			const gated = contentGate(req, 'tasks.content_read', rows.rows, ['title', 'description']);
+
 			res.json({
 				success: true,
 				data: {
-					data: rows.rows,
+					data: gated.rows,
 					page: q.page,
 					pageSize: q.pageSize,
 					totalItems,
 					totalPages: Math.ceil(totalItems / q.pageSize) || 1,
+					contentRedacted: gated.contentRedacted,
+					contentPermission: gated.contentPermission,
 				},
 			});
 		} catch (error) {
@@ -382,14 +429,18 @@ router.get(
 				[...params, q.pageSize, offset],
 			);
 
+			const gated = contentGate(req, 'reminders.content_read', rows.rows, ['title']);
+
 			res.json({
 				success: true,
 				data: {
-					data: rows.rows,
+					data: gated.rows,
 					page: q.page,
 					pageSize: q.pageSize,
 					totalItems,
 					totalPages: Math.ceil(totalItems / q.pageSize) || 1,
+					contentRedacted: gated.contentRedacted,
+					contentPermission: gated.contentPermission,
 					note:
 						'"overdue" means the trigger time has passed and the reminder is not dismissed. "acknowledged" means the user opened the notification, which is the only delivery signal the platform offers: the OS fires the alarm with the app closed, so a firing is not visible here. An overdue reminder that is not acknowledged is the case the follow-up engine acts on.',
 				},
@@ -486,7 +537,7 @@ router.patch(
 
 const MemoryQuerySchema = PageSchema.extend({
 	userId: z.string().uuid().optional(),
-	type: z.string().max(50).optional(),
+	category: z.string().max(50).optional(),
 	minImportance: z.coerce.number().min(0).max(1).optional(),
 });
 
@@ -506,9 +557,9 @@ router.get(
 				params.push(q.userId);
 				conditions.push(`m.user_id = $${params.length}`);
 			}
-			if (q.type) {
-				params.push(q.type);
-				conditions.push(`m.type = $${params.length}`);
+			if (q.category) {
+				params.push(q.category);
+				conditions.push(`m.category = $${params.length}`);
 			}
 			if (q.minImportance !== undefined) {
 				params.push(q.minImportance);
@@ -523,8 +574,8 @@ router.get(
 			const totalItems = Number(countResult.rows[0]?.total ?? 0);
 
 			const rows = await pool.query(
-				`SELECT m.id, m.user_id, u.email AS user_email, m.content, m.type, m.importance,
-				        m.metadata, m.created_at, m.updated_at
+				`SELECT m.id, m.user_id, u.email AS user_email, m.content, m.category, m.importance,
+				        m.normalized_facts, m.source_type, m.created_at, m.updated_at
 				 FROM memories m LEFT JOIN users u ON u.id = m.user_id
 				 ${where}
 				 ORDER BY m.created_at DESC
@@ -543,14 +594,18 @@ router.get(
 				after: { returned: rows.rows.length, filter: q.userId ?? 'unfiltered' },
 			});
 
+			const gated = contentGate(req, 'memory.content_read', rows.rows, ['content']);
+
 			res.json({
 				success: true,
 				data: {
-					data: rows.rows,
+					data: gated.rows,
 					page: q.page,
 					pageSize: q.pageSize,
 					totalItems,
 					totalPages: Math.ceil(totalItems / q.pageSize) || 1,
+					contentRedacted: gated.contentRedacted,
+					contentPermission: gated.contentPermission,
 				},
 			});
 		} catch (error) {

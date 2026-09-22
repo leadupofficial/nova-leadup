@@ -89,8 +89,15 @@ export default async function TasksPage({
 	};
 	const returnTo = `/tasks?${new URLSearchParams({ ...query, page: String(page) }).toString()}`;
 
+	// Captured out of the loader so the note below can report withheld content. The API
+	// still returns every row and the same total; only the user's own words are removed.
+	let contentRedacted = false;
+	let contentPermission: string | undefined;
+
 	const result = await loadPage<TaskRow>(async () => {
 		const envelope = await getOperations<TaskRow>('tasks', { page, pageSize: 25, ...query });
+		contentRedacted = Boolean(envelope.contentRedacted);
+		contentPermission = envelope.contentPermission;
 		return { rows: envelope.data, totalItems: envelope.totalItems, totalPages: envelope.totalPages };
 	});
 
@@ -280,6 +287,11 @@ export default async function TasksPage({
 
 			<Notes
 				notes={[
+					...(contentRedacted
+						? [
+								`Task titles and descriptions withheld: reading it requires the \`tasks.content_read\` permission, which your role does not hold. The rows, counts and timing are complete — only the user's own words are removed.`,
+							]
+						: []),
 					'Statuses shown are the ones the API accepts: pending, in_progress, completed, cancelled. The mobile client currently writes only pending and completed.',
 					'Changing a task from the console does not notify the user; the app sees it on its next fetch.',
 				]}
