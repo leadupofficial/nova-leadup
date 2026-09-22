@@ -284,6 +284,11 @@ class _ConsentPageState extends ConsumerState<ConsentPage> {
     if (_busy[row.purpose] ?? false) return (row.isDevice ? 'Asking the system…' : 'Saving your choice…', c.muted, false);
     if (row.isDevice && status == null && _checkingDevice) return ('Checking device access…', c.muted, false);
     return switch (status) {
+      // `permission_handler` reports `denied` both for "refused" and for "never
+      // asked", so on a fresh install this line claimed *the system did not grant
+      // this* under every row before the user had tapped anything. Only say the
+      // system refused once this row has actually been asked.
+      NovaPermissionStatus.denied when !_decided.containsKey(row.purpose) => ('Not turned on yet — choose Allow to turn it on.', c.muted, false),
       NovaPermissionStatus.denied || NovaPermissionStatus.restricted => ('The system did not grant this. You can allow it later.', c.muted, false),
       NovaPermissionStatus.permanentlyDenied => ('Blocked by the system. Tap to open Settings.', c.danger, true),
       _ when !row.isDevice && _decided[row.purpose] == false => ('Not now — nothing is stored for this.', c.muted, false),
