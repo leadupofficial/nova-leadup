@@ -2176,3 +2176,47 @@ keys have different balances and the production key is the one that is spent.
 This is exactly the failure the earlier check could not report: an operator looking at the provider
 panel before this fix saw "Sarvam: FAIL, model deprecated" and had no way to see that the actual
 problem was quota.
+
+## 14. P0 — the deploy host filled its disk, and PostgreSQL went into recovery
+
+**This is the most serious finding in this report, and it was caused by the deployment work itself.**
+
+The deploy host is a 38 GB VM that also runs PostgreSQL, Redis, MinIO and eleven containers on the
+same filesystem. Four image builds in one afternoon — each 1–2 GB, each leaving its layers behind —
+took it to **100% full**. What failed first was not the build:
+
+```
+/dev/sda1        38G   37G     0 100% /
+nova-postgres   Up 11 days (unhealthy)     the database system is in recovery mode
+                                            320 disk-related errors in the postgres log
+healthz         200                        the API answered, and every data call behind it did not
+```
+
+**Impact:** PostgreSQL aborted and replayed its WAL. Automatic recovery completed once space was
+freed and **no data was lost** — 29 users, 402 sessions, 4 reminders all present afterwards, and the
+API and console answered normally. But the platform was degraded for several minutes because of a
+*build*, and the recovery was luck rather than design: a longer write burst during the window is how
+this becomes data loss.
+
+**Recovery performed:**
+- `docker builder prune -af` → 22.26 GB of build cache reclaimed.
+- `docker image prune -f` → 7.63 GB of dangling layers.
+- Removed the superseded `nova-admin-ui:predeploy` rollback tag (1.9 GB). `nova-api:predeploy` was
+  kept. Note the trade-off: the console's rollback image no longer exists on the host, so a console
+  rollback now means rebuilding the previous commit rather than retagging.
+- Disk went 100% → 42%, then 50% after the next build.
+
+**The durable fix is `deploy/build-image.sh`**, because the failure mode is silent: a build that runs
+out of space gets all the way to the runtime stage and dies with
+`chown: ... No space left on device`, long after consuming the space. The script prunes the build
+cache *before* building, refuses to start below a free-space floor (default 8 GB), and reports free
+space before and after. It prunes cache only — never a running container or a tagged image — which is
+safe precisely because the live host is the only host.
+
+Verified both paths on the deploy host: a real build (`nova-admin-ui:latest built; 19GB free after
+build`) and the refusal (exit 1 with the reason, at a deliberately impossible floor).
+
+**Recommendation for the platform, not just the script:** this VM is one filesystem for the database,
+the object store, the cache and every image. Either the deploy host gets more disk, or builds move off
+it — because the current arrangement means a routine deploy and the production database are competing
+for the same 38 GB.
