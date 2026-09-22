@@ -137,6 +137,13 @@ final routerProvider = Provider<GoRouter>((ref) {
               requestCode: args.requestCode,
               verifyCode: args.verifyCode,
               onVerified: args.onVerified,
+              // The caller has already sent the code — that is what it waited on
+              // before routing here. Letting the page send on first build too would
+              // fire a second SMS for the same sign-in.
+              requestOnStart: false,
+              // The caller has already sent the code — that is what it waited on
+              // before routing here. Letting the page send on first build too would
+              // fire a second SMS for the same sign-in.
             );
           }
           return const OtpPage();
