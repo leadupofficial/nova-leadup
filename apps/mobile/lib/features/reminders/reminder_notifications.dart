@@ -36,6 +36,20 @@ abstract interface class ReminderNotifications {
   /// direction that does not raise a false alarm.
   Future<bool> osPermissionGranted();
 
+  /// Posts a notification immediately.
+  ///
+  /// Android does **not** show a system notification for a message that arrives
+  /// while the app is in the foreground: FCM hands it to `onMessage` and the app
+  /// is responsible for displaying it. Without this, a proactive nudge sent while
+  /// the user had NOVA open was delivered, acknowledged by FCM, and then dropped
+  /// on the floor — the one case where the user is most likely to see it.
+  Future<void> showNow({
+    required int id,
+    required String title,
+    required String body,
+    String? payload,
+  });
+
   /// Opens the system page where the user can turn this app's notifications back
   /// on. Returns whether a screen was actually opened.
   Future<bool> openNotificationSettings();
@@ -561,6 +575,23 @@ class FlutterLocalReminderNotifications implements ReminderNotifications {
     handler(reminderId).catchError((Object error) {
       debugPrint('[ReminderNotifications] could not report the acknowledgement: $error');
     });
+  }
+
+  @override
+  Future<void> showNow({
+    required int id,
+    required String title,
+    required String body,
+    String? payload,
+  }) async {
+    await initialize();
+    await _plugin.show(
+      id: id,
+      title: title,
+      body: body,
+      notificationDetails: _details(body),
+      payload: payload,
+    );
   }
 
   /// The Android details every reminder notification shares.

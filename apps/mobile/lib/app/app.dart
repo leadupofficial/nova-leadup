@@ -23,6 +23,8 @@ import '../features/reminders/reminder_sync.dart';
 import '../services/analytics_service.dart';
 import 'providers.dart';
 import 'router.dart';
+import '../features/notifications/push_messaging.dart';
+import '../features/reminders/reminder_notifications.dart';
 
 /// Root widget. Owns the router, the theme and the app-lifecycle hooks.
 class NovaApp extends ConsumerStatefulWidget {
@@ -75,6 +77,14 @@ class _NovaAppState extends ConsumerState<NovaApp> {
       // empty. Fire-and-forget by design: registration is telemetry, and a device that cannot
       // report itself must still be able to use NOVA.
       unawaited(ref.read(deviceRegistrationProvider)());
+      // A push that arrives while this app is open is handed to `onMessage` and
+      // posted by nobody: Android only draws its own notification when the app is
+      // in the background. Measured on the OnePlus 9R — FCM accepted the send, the
+      // shade stayed empty with NOVA in the foreground, and the same message
+      // appeared the moment the app was backgrounded.
+      PushForegroundHandler(
+        ref.read(reminderNotificationsProvider),
+      ).start();
     });
     // **`listenManual`, not `read`.** These notifiers are built once for the app
     // lifetime and their `build` watches the auth state, so they have to be *rebuilt*

@@ -196,6 +196,16 @@ const RegisterDeviceSchema = z
 		platformVersion: z.string().trim().max(50).optional(),
 		model: z.string().trim().max(100).optional(),
 		appVersion: z.string().trim().max(50).optional(),
+		/**
+		 * The FCM registration token from `firebase_messaging`.
+		 *
+		 * `devices.push_token` has existed all along and the admin console even
+		 * reports `hasPushToken`, but nothing ever wrote it, so there was no
+		 * transport for proactive nudges at all. An empty string clears it (the
+		 * token is dead); omitting it leaves the stored token alone, so a routine
+		 * re-registration cannot wipe a good token.
+		 */
+		pushToken: z.string().trim().max(4096).optional(),
 	})
 	.strict();
 
@@ -218,6 +228,7 @@ router.post('/register', authenticate, validate(RegisterDeviceSchema), async (re
 				platformVersion: body.platformVersion ?? null,
 				model: body.model ?? null,
 				appVersion: body.appVersion ?? null,
+				pushToken: body.pushToken ? body.pushToken : null,
 				lastSeenAt: now,
 			})
 			.onConflictDoUpdate({
@@ -231,6 +242,13 @@ router.post('/register', authenticate, validate(RegisterDeviceSchema), async (re
 					platformVersion: body.platformVersion ?? null,
 					model: body.model ?? null,
 					appVersion: body.appVersion ?? null,
+					// Only touched when the client actually reported one, so the
+					// launch-time re-registration that carries no token cannot erase it.
+					// Only touched when the client actually reported one, so the
+					// launch-time re-registration that carries no token cannot erase it.
+					...(body.pushToken === undefined
+						? {}
+						: { pushToken: body.pushToken ? body.pushToken : null }),
 					lastSeenAt: now,
 				},
 			})
@@ -247,6 +265,7 @@ router.post('/register', authenticate, validate(RegisterDeviceSchema), async (re
 					platform: body.platform ?? null,
 					platformVersion: body.platformVersion ?? null,
 					appVersion: body.appVersion ?? null,
+					hasPushToken: Boolean(body.pushToken),
 				},
 				note:
 					'Re-registering the same installationId updates this row rather than creating another. This endpoint is the only writer of the devices table.',
@@ -289,6 +308,11 @@ router.get('/register', authenticate, async (req: AuthenticatedRequest, res: Res
 							platformVersion: row.platformVersion,
 							model: row.model,
 							appVersion: row.appVersion,
+							// Reported, not returned: the client needs to know whether a
+							// push token is on file — this is the read-back for the one
+							// thing that decides whether a nudge can reach the device —
+							// without the token itself travelling back over the wire.
+							hasPushToken: Boolean(row.pushToken),
 							lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
 						}
 					: null,

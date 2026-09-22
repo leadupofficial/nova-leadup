@@ -28,6 +28,8 @@ library;
 import 'dart:math';
 
 import 'package:dio/dio.dart';
+
+import '../../features/notifications/push_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -77,6 +79,7 @@ class DeviceRegistration {
     this.model,
     this.platformVersion,
     this.name,
+    this.pushToken,
   });
 
   /// The install's stable identifier. Named `installId` so it does not shadow the
@@ -88,6 +91,13 @@ class DeviceRegistration {
   final String? platformVersion;
   final String? name;
 
+  /// The FCM registration token, when this install has one.
+  ///
+  /// Omitted rather than sent empty when absent: the server treats a missing key
+  /// as "leave the stored token alone" and an empty string as "this token is
+  /// dead", and conflating the two would erase a good token on every launch.
+  final String? pushToken;
+
   Map<String, dynamic> toJson() => <String, dynamic>{
         'installationId': installId,
         'platform': platform,
@@ -95,15 +105,20 @@ class DeviceRegistration {
         if (model != null) 'model': model,
         if (platformVersion != null) 'platformVersion': platformVersion,
         if (name != null) 'name': name,
+        if (pushToken != null && pushToken!.isNotEmpty) 'pushToken': pushToken,
       };
 
   /// Builds a report from what the app can honestly observe.
   ///
   /// Named `observe` rather than `current` so it does not shadow the `installationId`
   /// field when calling the top-level helper of the same name.
-  static Future<DeviceRegistration> observe(SharedPreferences prefs) async {
+  static Future<DeviceRegistration> observe(
+    SharedPreferences prefs, {
+    String? pushToken,
+  }) async {
     final version = await NovaVersionInfo.current();
     return DeviceRegistration(
+      pushToken: pushToken,
       installId: await installationId(prefs),
       platform: version.platform,
       appVersion: version.version,
@@ -144,7 +159,11 @@ Future<DeviceRegistrationResult> registerDevice({
   }
 
   try {
-    final registration = await DeviceRegistration.observe(prefs);
+    // Asked for here rather than at bootstrap: the token is only useful once the
+    // report that carries it can be authenticated, and asking earlier would spend
+    // a network round trip on a signed-out launch.
+    final pushToken = await const NovaPush().current();
+    final registration = await DeviceRegistration.observe(prefs, pushToken: pushToken);
     final response = await dio.post<Map<String, dynamic>>(
       deviceRegisterEndpoint,
       data: registration.toJson(),

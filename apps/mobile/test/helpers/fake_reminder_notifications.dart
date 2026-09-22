@@ -68,9 +68,24 @@ class FakeReminderNotifications implements ReminderNotifications {
   int permissionRequests = 0;
   int interactiveRequests = 0;
 
+  /// Every notification posted immediately rather than scheduled — how a push
+  /// that arrives while the app is open becomes visible to the user.
+  final List<({int id, String title, String body})> shownImmediately =
+      <({int id, String title, String body})>[];
+
   @override
   Future<void> initialize() async {
     initializeCalls++;
+  }
+
+  @override
+  Future<void> showNow({
+    required int id,
+    required String title,
+    required String body,
+    String? payload,
+  }) async {
+    shownImmediately.add((id: id, title: title, body: body));
   }
 
   @override

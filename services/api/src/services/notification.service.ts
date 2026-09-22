@@ -1,7 +1,10 @@
 import { getDb } from '../db/connection.js';
-import { notifications } from '@nova/database';
-import { eq, desc, and, sql } from 'drizzle-orm';
+import { notifications, devices } from '@nova/database';
+import { eq, desc, and, sql, isNotNull, inArray } from 'drizzle-orm';
 import type { Server as SocketIOServer } from 'socket.io';
+
+import { sendPush } from './fcm.js';
+import { logger } from '../utils/logger.js';
 
 const db = getDb();
 
@@ -66,7 +69,61 @@ export class NotificationService {
 
 		this.emitToUser(input.userId, 'notification:new', notification);
 
+		// The row is the source of truth and is already written, so a push that
+		// cannot be delivered must never fail the create — but it is delivered for
+		// real when it can be, because a notification the user never sees is the
+		// exact failure this transport exists to fix.
+		await this.pushToDevices(input.userId, notification);
+
 		return notification;
+	}
+
+	/**
+	 * Sends [notification] to every device the user has registered.
+	 *
+	 * Best-effort: failures are logged, and a token FCM reports as unregistered is
+	 * cleared so it is not asked about forever.
+	 */
+	private async pushToDevices(userId: string, notification: NotificationRow): Promise<void> {
+		try {
+			const rows = await db
+				.select({ pushToken: devices.pushToken })
+				.from(devices)
+				.where(and(eq(devices.userId, userId), isNotNull(devices.pushToken)));
+			const tokens = rows
+				.map((row) => row.pushToken)
+				.filter((token): token is string => Boolean(token));
+			if (tokens.length === 0) return;
+
+			const result = await sendPush(tokens, {
+				title: notification.title,
+				body: notification.body,
+				data: {
+					notificationId: notification.id,
+					type: notification.type,
+				},
+			});
+
+			if (result.invalidTokens.length > 0) {
+				await db
+					.update(devices)
+					.set({ pushToken: null })
+					.where(inArray(devices.pushToken, result.invalidTokens));
+			}
+
+			logger.info(
+				{
+					userId,
+					devices: tokens.length,
+					sent: result.sent,
+					failed: result.failed,
+					configured: result.configured,
+				},
+				'push attempted for notification',
+			);
+		} catch (error) {
+			logger.warn({ err: error, userId }, 'push could not be delivered');
+		}
 	}
 
 	async markAsRead(notificationId: string, userId: string): Promise<NotificationRow | null> {
