@@ -590,3 +590,58 @@ The reminder's **conversational response loop** — saying "Done", "remind me ag
 in 30 minutes", or "cancel it" after the nudge and having the state and history
 update. The notification fired and was dismissed; the reply was never spoken. That
 is the remaining half of §15 and it is recorded as **P1 OPEN**, not as passing.
+
+---
+
+## 17. Addendum — answering a reminder by voice (2026-09-23)
+
+§15's centrepiece is that a reminder is not a push notification: after the nudge
+the user should be able to *say* something and have NOVA act. That was the P1 left
+open last round. Testing it surfaced two further defects.
+
+### The loop, now verified on the device
+
+| Step | Evidence |
+|---|---|
+| A reminder fires | **"NOVA reminder — Call the plumber"**, alerting group |
+| It is opened | lands on Home with the bell badge live |
+| *Tap to talk* | opens Converse **and starts a turn** |
+| The MacBook speaks | **"Done. I already called the plumber."** — transcribed correctly on screen |
+| NOVA understands | proposes **`cancel_reminder`** with the reminder id `d5e60151-…`, behind a real approval gate with a 49-second expiry |
+| Approved | `reminders.dismissed = true` in the database, confirmed through the API |
+
+### The two defects this exposed
+
+**1. "Tap to talk" never talked.** `HomePage`'s primary CTA was
+`onPressed: () => context.go('/converse')` — navigation. On the handset it landed
+on Converse in the READY state with nothing listening, and the spoken sentence
+produced no turn at all. The floating orb was worse: `_summon` set the avatar to
+"listening" and navigated, so a session *looked* started while nothing listened.
+Only the wake word path called `startTurn`. Both now do, in the pinned language.
+
+**2. No conversational action reached history.** The mandate requires the
+interaction to be recorded. Cancelling the reminder by voice set `dismissed = true`
+and left **no** row: `/activity` reads `audit_logs`, and the assistant's tool
+executor wrote zero audit rows. The first fix hooked `executeToolUses` — and still
+wrote nothing, because the realtime loop (`realtime/tool-loop.ts`) calls
+`executeAssistantTool` directly. Hooked at that single funnel instead, a spoken
+"Remind me to call the dentist tomorrow at five in the evening" now returns
+`reminder.create | reminder | cde4950e-… | success` from `/activity`.
+
+The lesson is worth recording: the first hook *looked* right and was verified only
+because the device still showed no history row. A test asserting the hook existed
+would have passed.
+
+### Also confirmed this round
+
+- A natural spoken date and time — *"tomorrow at five in the evening"* — resolved
+  to `2026-09-24T17:00:00+05:30`, the correct next-day 5 PM in the user's zone.
+- The approval gate works: the model's proposed action is shown with its exact
+  arguments and must be approved, which is the right default for a write the user
+  did not type.
+
+### Still open
+
+- **Snooze and "remind me again" by voice** were not exercised — only cancel.
+- **Reminders are inexact** (row 4f): the armed alarm carries an ~84 s window, so
+  a reminder set for 01:27:51 posted around 01:28:5x.
