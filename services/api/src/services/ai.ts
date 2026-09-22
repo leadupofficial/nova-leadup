@@ -859,7 +859,22 @@ export async function transcribeAudio(audioBuffer: Buffer, language: string = 'e
 	const timeoutId = setTimeout(() => controller.abort(), 30_000);
 
 	try {
-		const response = await fetch('https://api.deepgram.com/v1/listen?punctuate=true&smart_format=true', {
+		// **Deepgram was never told the language.** The URL carried no language
+		// parameter at all, so every request ran Deepgram's English default while
+		// this function's `language` argument was accepted and silently ignored.
+		// Measured 2026-09-23 on one Urdu clip through this exact path:
+		//
+		//   as shipped (?punctuate&smart_format)        -> transcript: ''   (empty)
+		//   with detect_language=true                   -> "कल सौ दस बजे client को call करें."
+		//
+		// So a language that falls through to Deepgram — Urdu and Nepali both do,
+		// because Sarvam's STT model refuses them — was transcribed for nothing: the
+		// user spoke and NOVA heard an empty string. English keeps the plain URL,
+		// which is already correct for it.
+		const listenUrl = language && language !== 'en'
+			? 'https://api.deepgram.com/v1/listen?punctuate=true&smart_format=true&detect_language=true'
+			: 'https://api.deepgram.com/v1/listen?punctuate=true&smart_format=true';
+		const response = await fetch(listenUrl, {
 			method: 'POST',
 			signal: controller.signal,
 			headers: {
