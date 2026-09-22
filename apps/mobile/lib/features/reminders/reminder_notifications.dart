@@ -310,7 +310,15 @@ class FlutterLocalReminderNotifications implements ReminderNotifications {
         _platform = platform ?? const MethodChannelReminderNotificationSettings();
 
   /// Android channel. The reminder text travels as the notification body.
-  static const String channelId = 'nova_reminders';
+  ///
+  /// `_v2` because the channel used to be created without a sound, and **Android
+  /// never updates an existing channel**: changing `playSound` on an id that is
+  /// already installed is silently ignored forever, so every reminder on every
+  /// existing install arrived silent. A new id is the only way to give those users
+  /// a channel that makes a noise. The server's FCM payload names the same id, and
+  /// a channel that does not exist drops the notification, so the two must move
+  /// together — `fcm.ts` carries the matching default.
+  static const String channelId = 'nova_reminders_v2';
   static const String channelName = 'Reminders';
   static const String channelDescription =
       'Reminders you asked NOVA to keep.';
@@ -369,6 +377,11 @@ class FlutterLocalReminderNotifications implements ReminderNotifications {
               channelName,
               description: channelDescription,
               importance: Importance.high,
+              // Without this the channel is created silent and Android will not
+              // change it afterwards — the reminder arrived, was grouped under
+              // "Silent", and made no sound.
+              playSound: true,
+              enableVibration: true,
             ),
           );
     } catch (error) {
@@ -608,6 +621,8 @@ class FlutterLocalReminderNotifications implements ReminderNotifications {
       importance: Importance.high,
       priority: Priority.high,
       category: AndroidNotificationCategory.reminder,
+      playSound: true,
+      enableVibration: true,
       styleInformation: BigTextStyleInformation(body),
     ),
   );

@@ -190,7 +190,11 @@ export async function sendPush(tokens: string[], message: PushMessage): Promise<
 						android: {
 							priority: 'high',
 							notification: {
-								channel_id: message.channelId ?? 'nova_reminders',
+								// Must match the channel the app creates: Android drops a
+								// notification whose channel id does not exist. `_v2` is the
+								// sounding channel — the original was created silent and
+								// Android never updates an existing channel's sound.
+								channel_id: message.channelId ?? 'nova_reminders_v2',
 							},
 						},
 					},

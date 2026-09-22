@@ -104,6 +104,10 @@ describe('fcm sender', () => {
 		expect(body.message.token).toBe('token-a');
 		expect(body.message.notification.title).toBe('Call Arun');
 		expect(body.message.data.notificationId).toBe('n-1');
+		// The channel must exist on the device or Android drops the notification.
+		// `_v2` is the sounding one; the original was created silent and Android
+		// never updates an existing channel's sound.
+		expect(body.message.android.notification.channel_id).toBe('nova_reminders_v2');
 	});
 
 	it('de-duplicates tokens so one device is not messaged twice', async () => {
