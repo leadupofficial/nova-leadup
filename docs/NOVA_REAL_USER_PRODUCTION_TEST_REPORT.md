@@ -1885,3 +1885,67 @@ start the route trace reads `uri=/` and `PUSH home`, so the session is valid. Th
 notifications are almost certainly stale, posted while the API was unreachable
 during the offline and dead-port tests. Nothing was signed out, and nothing was
 lost by checking before writing it down.
+
+---
+
+## 42. Addendum — granting exact alarms does not make reminders exact (2026-09-23)
+
+Row 36 left the punctuality question "inconclusive". This round got a clean
+measurement, and the answer is worse than inconclusive.
+
+### The measurement
+
+With the user's **Alarms & reminders** toggle ON (granted through the app's own
+Continue button in §41, uid 10294 shown as `u0a294:allow` in `dumpsys alarm`), 30
+alarms were armed from a fresh launch. Every NOVA alarm is **windowed**:
+
+```
+RTC_WAKEUP #5:  uid 10294 whenElapsed 3601120 windowLength 95769  ...
+RTC_WAKEUP #7:  uid 10294 whenElapsed 3614120 windowLength 105530 ...
+RTC_WAKEUP #15: uid 10294 whenElapsed 3651120 windowLength 133308 ...
+                                          ... up to 1120342 ms
+```
+
+And the rendering is not ambiguous: **dumpsys prints `windowLength 0` for exact
+alarms, and there are 32 of them on this device** from other apps. NOVA has none.
+
+So after the grant, reminders are still scheduled with windows of **22 s to 19
+minutes**. One fired **24 s late** in this run.
+
+### Why
+
+`reminder_reconciler.dart` computes `exact` from
+`notifications.ensureExactAlarmPermission()` and passes it into `zonedSchedule`,
+which selects `exactAllowWhileIdle` or `inexactAllowWhileIdle`. That probe reads
+`permission_handler`'s view of the app-op — and on this device it returns
+not-granted while Android itself says the app may schedule exact alarms. The mode
+chosen is therefore always the windowed one, and **the grant changes nothing**,
+while the Reminders screen tells the user that granting it will make reminders fire
+"at the exact time you set".
+
+### The fix I tried, and reverted
+
+Attempting `exactAllowWhileIdle` first and falling back to the windowed mode only
+on the plugin's own `exact_alarms_not_permitted` refusal — making the probe
+advisory rather than authoritative. The plugin's gate is
+`alarmManager.canScheduleExactAlarms()`, the same call Android uses, so a merely
+pessimistic probe should no longer cost the user precision.
+
+**Reverted, because it could not be shown to work.** After the rebuild the alarms
+were still windowed, and the plugin logged no refusal — so I can neither confirm
+the exact path was taken nor rule out that the reconciler simply did not re-arm
+unchanged reminders. Leaving a change in the scheduling path that I cannot
+demonstrate is a net risk, so the tree is back to what it was.
+
+### The experiment that would settle it
+
+Force a re-arm — change one reminder's time so the reconciler must reschedule it —
+and read that alarm's `windowLength`. A `0` would confirm the fix; anything else
+would mean the exact path is not being reached at all. That is one round's work and
+is written down rather than guessed at.
+
+### What is solid, regardless
+
+The grant does **not** currently produce exact alarms. This is not an inference
+from code: it is 30 armed alarms with non-zero windows, against 32 exact alarms
+belonging to other apps on the same device.
