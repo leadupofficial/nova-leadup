@@ -1379,3 +1379,44 @@ notification landing on the lock screen in the channel that makes a sound.
 This also re-verifies the reminder path end to end after every change since it was
 last exercised — the sounding channel, the `update_task`/context work, the
 black-screen fix and the connect-deadline fix all shipped in between.
+
+---
+
+## 32. Addendum — a reminder with the app killed (§17) (2026-09-23)
+
+§17 lists *app killed* among the background cases. It is the ordinary state of an
+Android app under memory pressure, so a reminder that needs the process alive is
+not a reminder.
+
+### What was done
+
+A reminder titled "Killed app check" was set for **02:57:06 IST**. The app was
+backgrounded and resumed twice so its reconciler would arm the alarm, then the
+process was killed **without** the stopped state that `force-stop` creates:
+
+```
+02:54:36  adb shell am kill com.leadup.nova
+          pidof com.leadup.nova -> (nothing)
+```
+
+`dumpsys alarm` still showed 12 `ScheduledNotificationReceiver` entries — the
+alarm belongs to `AlarmManager`, not to the process.
+
+### Result
+
+| Check | Evidence |
+|---|---|
+| Fired with no app process | notification `id=570763834`, `channel=nova_reminders_v2`, `importance=4`, text **"Killed app check"** |
+| The OS restarted the app to deliver it | `pidof` now returns **16750**, where it returned nothing before the fire time |
+
+So the alarm survives process death and Android brings the app back to deliver it,
+into the channel that makes a sound.
+
+### Worth stating plainly
+
+This is deliberately **not** the `force-stop` case. `adb shell am force-stop`
+(and the user "Force stop" in Settings) puts an app into a stopped state and
+**cancels its alarms** — a platform rule, not a NOVA defect. Someone who force-stops
+NOVA will not get reminders until they open it again, and no correct implementation
+can avoid that. The case tested here is the realistic one: the system reclaiming
+the process.
