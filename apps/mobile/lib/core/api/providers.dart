@@ -152,7 +152,18 @@ final privacyPrefsProvider = FutureProvider.autoDispose<NovaPrivacyPrefs>((
   return api.getPrivacy();
 });
 
-final personaProvider = FutureProvider.autoDispose<NovaPersona>((ref) async {
+/// The user's persona, including the language they pinned.
+///
+/// **Not `autoDispose`, and read through `.future` at the call sites.** It used to
+/// be `autoDispose`, and the voice paths took `ref.read(personaProvider).asData`
+/// — a *read* of a lazy provider that has not loaded yet returns null, so
+/// `normalizeVoiceLanguage(null)` answered `'auto'` and the first turn of every app
+/// run went out as auto whatever the user had chosen. Measured on the handset: the
+/// persona was set to `hinglish`, the session logged `"language":"auto"`, and the
+/// recogniser returned *"Cal Subamericaia schedule high"* for *"Kal subah mera kya
+/// schedule hai"*. Keeping it alive and awaiting it makes the pinned language the
+/// one the microphone actually gets.
+final personaProvider = FutureProvider<NovaPersona>((ref) async {
   final api = ref.watch(novaApiProvider);
   return api.getPersona();
 });

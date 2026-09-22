@@ -266,14 +266,13 @@ class HomePage extends ConsumerWidget {
   ///
   /// Mirrors `_NovaAppState._openWakeWordSession` so the two "talk to NOVA"
   /// affordances cannot drift apart again.
-  static Future<void> _startTurn(WidgetRef ref) {
+  static Future<void> _startTurn(WidgetRef ref) async {
+    // Await the persona so the pinned language reaches the microphone; see
+    // `personaProvider`.
+    final persona = await ref.read(personaProvider.future);
     return ref
         .read(voiceRealtimeProvider.notifier)
-        .startTurn(
-          language: normalizeVoiceLanguage(
-            ref.read(personaProvider).asData?.value.languagePolicy,
-          ),
-        );
+        .startTurn(language: normalizeVoiceLanguage(persona.languagePolicy));
   }
 
   /// The badge is hidden at zero rather than drawn as `0`, which is what the

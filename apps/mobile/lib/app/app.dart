@@ -291,13 +291,14 @@ class _NovaAppState extends ConsumerState<NovaApp> {
   void _openWakeWordSession() {
     ref.read(routerProvider).go(wakeWordConverseRoute);
 
-    unawaited(
-      ref.read(voiceRealtimeProvider.notifier).startTurn(
-            language: normalizeVoiceLanguage(
-              ref.read(personaProvider).asData?.value.languagePolicy,
-            ),
-          ),
-    );
+    // The wake word must open in the pinned language too, so the persona is
+    // awaited rather than read; a `read` of a cold provider is null -> `auto`.
+    unawaited(() async {
+      final persona = await ref.read(personaProvider.future);
+      await ref
+          .read(voiceRealtimeProvider.notifier)
+          .startTurn(language: normalizeVoiceLanguage(persona.languagePolicy));
+    }());
   }
 
   @override

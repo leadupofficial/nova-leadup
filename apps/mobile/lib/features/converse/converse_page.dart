@@ -256,10 +256,11 @@ class _ConversePageState extends ConsumerState<ConversePage> {
         _showNotice(null);
       });
     }
+    // Awaited, not `read`: a lazy provider's first `read` is null, and null
+    // normalises to `auto`, which silently discards the language the user pinned.
+    final persona = await ref.read(personaProvider.future);
     await _realtime.startTurn(
-      language: normalizeVoiceLanguage(
-        ref.read(personaProvider).asData?.value.languagePolicy,
-      ),
+      language: normalizeVoiceLanguage(persona.languagePolicy),
     );
   }
 

@@ -169,13 +169,10 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
     // wake word path makes. Skipped outside a router so a widget test does not
     // open a socket.
     if (GoRouter.maybeOf(context) != null) {
+      final persona = await ref.read(personaProvider.future);
       await ref
           .read(voiceRealtimeProvider.notifier)
-          .startTurn(
-            language: normalizeVoiceLanguage(
-              ref.read(personaProvider).asData?.value.languagePolicy,
-            ),
-          );
+          .startTurn(language: normalizeVoiceLanguage(persona.languagePolicy));
     }
   }
 
