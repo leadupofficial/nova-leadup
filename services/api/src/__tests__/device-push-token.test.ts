@@ -161,4 +161,33 @@ describe('device registration stores a push token', () => {
 
     expect(JSON.stringify(res.body)).not.toContain(PUSH_TOKEN);
   });
+
+	it('tolerates a field from a newer client instead of refusing the device', async () => {
+		// A client updates on its own schedule. With `.strict()`, the app's new
+		// `pushToken` field was a 400 against a server one version behind, so
+		// registration failed outright and push stopped working — measured against
+		// the deployed build. An unknown key is ignored; a bad known value is not.
+		const res = await request(app)
+			.post('/api/v1/device/register')
+			.set(authHeader())
+			.send({
+				installationId,
+				platform: 'android',
+				pushToken: PUSH_TOKEN,
+				somethingFromTheFuture: 'v2-field',
+			});
+
+		expect(res.status).toBe(200);
+		expect(res.body.data.recorded.hasPushToken).toBe(true);
+		expect(await readBack()).toBe(true);
+	});
+
+	it('still refuses a known field with a bad value', async () => {
+		const res = await request(app)
+			.post('/api/v1/device/register')
+			.set(authHeader())
+			.send({ installationId: 'short', platform: 'android' });
+
+		expect(res.status).toBe(400);
+	});
 });

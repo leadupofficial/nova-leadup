@@ -207,7 +207,14 @@ const RegisterDeviceSchema = z
 		 */
 		pushToken: z.string().trim().max(4096).optional(),
 	})
-	.strict();
+	// Deliberately **not** `.strict()`. This endpoint is how a client reports
+	// itself, and the clients update on their own schedule: `.strict()` made the
+	// app's new `pushToken` field a 400 against a server one version behind, so
+	// device registration failed outright and push silently stopped working.
+	// Measured: `{"pushToken":"abc123"}` → 400 "Unrecognized key(s) in object:
+	// 'pushToken'" against the deployed build. Unknown keys are ignored; every
+	// field above is still validated.
+	;
 
 router.post('/register', authenticate, validate(RegisterDeviceSchema), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
 	try {
