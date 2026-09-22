@@ -70,12 +70,26 @@ Severity: **P0** blocks a core flow · **P1** major · **P2** important · **P3*
 | Notification inbox | `inbox.png` | — | — | — | New sheet: four rows with title, body, relative time, unread accent, dismiss button, and a real empty state | Verified |
 | Notification inbox (after tap) | `inbox_read.png` | — | — | — | The tapped row renders as read and the badge behind the sheet drops 4 → 3; the database confirms 1 read / 3 unread | Verified |
 
-## 6. Screens not audited
+## 6. Screens audited on the handset (2026-09-23)
 
-These were not opened on the handset, so nothing is claimed about them:
-Converse, Tasks, Memory, reminder detail, history, the menu, the admin console,
-translate, wake-word settings, avatar & appearance, privacy controls, daily
-briefing, the reminders list, and every error/empty state other than those noted. The light theme was not exercised — the app is dark-only in this build.
+Every screen below was opened on the OnePlus 9R and its screenshot read, with the
+observations recorded rather than the image alone. Screenshots: `r59_*.png`.
+
+| Screen | Verdict |
+|---|---|
+| **Memory** | Clean. Honest empty state — "Nothing remembered yet / NOVA stores what matters so you do not have to repeat yourself" with an *Add a memory* action — a search field above, and the orb sitting clear of all text. No issues. |
+| **Translate** | Functional, one layout weakness: the action buttons stack **one per line** (`Speak`/`Paste`, then `Copy`/`Edit`/`Speak`/`Share`) where a single row is the norm, taking four lines of vertical space and leaving the right half of each band empty. **P3.** |
+| **Conversations** | Two identical default rows read **"New Conversation"** and **"New conversation"** — the same string capitalised differently, which reads as sloppiness. **P3.** Each row carries a bare trash icon with no visible confirmation step; not exercised, so nothing is claimed about whether deletion is guarded. |
+| **Activity Centre** | The orb **covered the tail of a row's text** — a mid-list row read *"…via Pyth"* with the rest hidden. **Fixed** this round; see §11. The filter chip row also clips its last chip at the screen edge, which is horizontal scrolling without a fade or other affordance. **P3.** |
+
+Captured but not yet analysed, so nothing is claimed about them: the **offline**
+screen and the **admin console**.
+
+## 6b. Still not audited
+
+Not opened on the handset: reminder detail, the menu, wake-word settings, avatar &
+appearance, privacy controls, daily briefing, and every error/empty state other than
+those noted. The light theme was not exercised — the app is dark-only in this build.
 
 ## 7. Standing visual risks
 
@@ -129,3 +143,13 @@ accurate:
 That matches the measurement in §33 exactly (87–294 s late after a reboot). The
 app explains the delay and offers the fix; the access is a user choice on a system
 screen, which is what Play's policy requires.
+
+## 11. Activity Centre — the orb on a row's text (2026-09-23)
+
+| Screen | Screenshot | Issue | Sev | Root cause | Fix | Verification |
+|---|---|---|---|---|---|---|
+| Activity Centre | `r59_tasks_activity.png` | The floating orb sat on an activity row: the line behind it read *"…via Pyth"* with the remainder hidden. Round 30 moved the orb off the top of the page, which cured a *permanent* cover on Reminders; over a long list it still lands on whatever is beneath it. | **P2** | The rows are a plain `Column` with no trailing space, so the list's final row came to rest underneath the orb. The orb is 80 px tall and 98 px above the screen bottom, so ~60 px of content area is beneath it. | A 64 px clearance after the last row. Deliberately per-screen rather than a shell-wide inset: the orb is hidden on Converse (round 30), so a global bottom pad would leave a real gap there. | `r59_activity_bottom.png` — scrolled to the end, the last row reads *"…via Python-urllib/3.9"* with nothing hidden |
+
+Other long lists carry the same overlap. It is the conventional floating-button
+trade-off — a row can always be scrolled out from under the orb — and each screen
+that needs it should get the same clearance rather than a global pad.
