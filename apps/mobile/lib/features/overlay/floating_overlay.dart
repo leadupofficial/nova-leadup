@@ -141,6 +141,11 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
     unawaited(_startVoice());
   }
 
+  /// The current route path, or `''` when hosted outside a GoRouter (widget tests).
+  String _currentPath(BuildContext context) =>
+      GoRouter.maybeOf(context)?.routerDelegate.currentConfiguration.uri.path ??
+      '';
+
   @override
   Widget build(BuildContext context) {
     final c = context.nova;
@@ -160,11 +165,17 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
     return Positioned.fill(
       child: Stack(
         children: [
-          Positioned(
-            top: 60,
-            right: NovaSpace.gutter,
-            child: _orb(c, live, face),
-          ),
+          // Home already carries the hero avatar with "Tap to talk" and the wake-word
+          // hint, and it owns the only top bar in the app. Drawing the 80px summon orb
+          // there too put it straight through the notification bell and the settings
+          // icon — two avatars, one of them on top of the controls. Home keeps the
+          // prominent one; every other screen keeps the orb.
+          if (_currentPath(context) != '/')
+            Positioned(
+              top: 60,
+              right: NovaSpace.gutter,
+              child: _orb(c, live, face),
+            ),
           Positioned(
             left: NovaSpace.gutter,
             right: NovaSpace.gutter,
