@@ -324,3 +324,58 @@ chasing.
 ### Test data
 
 Every task created by these sweeps has been deleted — verified: **0** remaining.
+
+## 12. It is not the language — it is run-to-run variance (2026-09-23)
+
+§11 left the acting rate unquantified because two sweeps were contaminated by
+leftover tasks and the app's de-duplication. This round ran the method §11
+prescribed: **one language per clean state**, with the relevant tasks cleared
+before the run and after each language.
+
+### The clean baseline
+
+Against the **shipped** prompt, 13/13 same-language replies and **10/13 acted**.
+The three that did not — `hi`, `bn`, `or` — each replied with a clarifying question
+or a note that something already existed.
+
+### Then the three were re-sampled
+
+If those languages behaved that way *because of the language*, repeating them
+should reproduce it. It does not:
+
+| Language | first sweep | trial 1 | trial 2 |
+|---|---|---|---|
+| Hindi `hi` | did not act | **acted** | **acted** |
+| Bengali `bn` | did not act | **acted** | **acted** |
+| Odia `or` | did not act | did not act | **acted** |
+
+Hindi and Bengali act on every immediate retry. So the first sweep's result for
+them was **noise from a single sample**, and §10's "9/13, and it depends on the
+language" attributed run-to-run variance to the language.
+
+### What is actually true
+
+For the identical request, the assistant files the task in roughly **10–12 runs out
+of 13**, and occasionally answers with a clarifying question instead. That happens
+**regardless of language** — the spread across my four sweeps (9, 10, 9, 10) is
+consistent with that, and the retries place the three "failures" inside it.
+
+Two consequences worth stating plainly:
+
+- **The multilingual finding is withdrawn.** Same-language replies are 13/13 and
+  solid; the acting behaviour is not language-dependent.
+- **A consistency observation remains**, and is a *product* matter rather than a
+  multilingual one: the same request occasionally gets a question instead of the
+  action, which a user cannot predict. Recorded as such, at P3, with the frequency
+  measured rather than guessed.
+
+### Why the earlier numbers were wrong
+
+Not the model — the method. A sweep creates a task per language and the app
+de-duplicates, so each language's result depended on the ones before it; and two of
+the three sweeps did not start from a clean state. One language per clean state is
+the only version of this test that means anything.
+
+### Test data
+
+Every task created across these runs was deleted — verified: **0** remaining.
