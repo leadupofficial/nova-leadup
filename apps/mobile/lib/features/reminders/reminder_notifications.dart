@@ -526,9 +526,12 @@ class FlutterLocalReminderNotifications implements ReminderNotifications {
   /// OEM. `AndroidScheduleMode.alarmClock` (`setAlarmClock` underneath) turned the
   /// same measurement into **`windowLength 0`**.
   ///
-  /// It also sidesteps the permission dance: the plugin only runs its
-  /// `canScheduleExactAlarms()` check on the `exact*` modes, so a user who never
-  /// grants *Alarms & reminders* still gets a punctual reminder.
+  /// **The grant is still required.** Reading the plugin suggested `alarmClock`
+  /// skipped its `canScheduleExactAlarms()` check, and that reading was wrong:
+  /// with the *Alarms & reminders* toggle off, the same measurement returned
+  /// `windowLength 1614977` (~27 min) and the app held **zero** exact alarms. The
+  /// Reminders screen's prompt to grant it is therefore necessary and correct —
+  /// do not remove it on the strength of the plugin source.
   ///
   /// The windowed mode stays as the last resort, so a platform that refuses the
   /// alarm-clock call still schedules something rather than nothing.
