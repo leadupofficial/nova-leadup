@@ -200,6 +200,9 @@ class _NovaAppState extends ConsumerState<NovaApp> {
     // Re-report on resume: the app version cannot change while running, but the session can
     // change hands, and a shared device must be re-bound to its current account.
     unawaited(ref.read(deviceRegistrationProvider)());
+    // Before re-arming: if the wake word was heard while NOVA was away, this is the
+    // moment the user answered its notification.
+    _honourBackgroundDetection();
     ref.read(wakeWordStateProvider.notifier).arm();
     // Reminders may have changed on another device, and the OS may have dropped
     // alarms while the process was dead. Re-reconciling here is cheap.
@@ -239,9 +242,39 @@ class _NovaAppState extends ConsumerState<NovaApp> {
       return;
     }
     _handledDetectionAt = event.at;
+    _openWakeWordSession();
+  }
 
-    // Bring the conversation on screen before the turn begins, so the user sees the
-    // transcript they are about to speak into.
+  /// Keeps the notification's own promise.
+  ///
+  /// A detection while the app is in the background posts *"Heard \"Hey Nova\" — tap
+  /// to talk"*, but the notification's intent only launches NOVA, and nothing acted
+  /// on the detection once the app came forward — so tapping it landed the user on
+  /// Home with no session and the wording was simply untrue. Measured on the
+  /// handset: the shade showed the notification, tapping it opened NOVA, and no
+  /// turn ever started.
+  ///
+  /// Bounded by [wakeWordSessionFreshness] so an old detection cannot ambush a
+  /// later, unrelated visit.
+  void _honourBackgroundDetection() {
+    final detection = ref.read(wakeWordStateProvider).lastDetection;
+    if (detection == null) return;
+    if (!shouldOpenSessionFromWakeWord(
+      appInForeground: true,
+      turnActive: ref.read(voiceRealtimeProvider).isTurnActive,
+      detectionAt: detection.at,
+      lastHandledAt: _handledDetectionAt,
+      maxAge: wakeWordSessionFreshness,
+    )) {
+      return;
+    }
+    _handledDetectionAt = detection.at;
+    _openWakeWordSession();
+  }
+
+  /// Brings the conversation on screen before the turn begins, so the user sees the
+  /// transcript they are about to speak into.
+  void _openWakeWordSession() {
     ref.read(routerProvider).go(wakeWordConverseRoute);
 
     unawaited(
