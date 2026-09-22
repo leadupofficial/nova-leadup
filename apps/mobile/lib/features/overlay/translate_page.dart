@@ -407,9 +407,17 @@ class _TranslatePageState extends ConsumerState<TranslatePage> {
         side: BorderSide(color: c.border),
       ),
     );
+    // `widthFactor: 1` is load-bearing. A bare `Center` expands to fill the
+    // width it is given, and these actions sit in a `Wrap` — so each button
+    // claimed a whole line and the actions stacked one per row, taking four
+    // rows where one belongs. Sizing the centre to the button keeps the 44px
+    // hit height while letting the `Wrap` lay them out side by side.
     final hit = SizedBox(
       height: NovaMotion.minTouchTarget,
-      child: Center(child: Opacity(opacity: enabled ? 1 : 0.45, child: button)),
+      child: Center(
+        widthFactor: 1,
+        child: Opacity(opacity: enabled ? 1 : 0.45, child: button),
+      ),
     );
     if (enabled || reason == null) return hit;
     return Tooltip(message: reason, child: hit);
