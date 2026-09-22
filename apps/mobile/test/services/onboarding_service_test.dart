@@ -10,8 +10,10 @@ void main() {
       // `companion` was inserted from the OpenDesign export, shifting the two
       // steps after it.
       expect(OnboardingStep.companion.stepIndex, 3);
-      expect(OnboardingStep.healthSetup.stepIndex, 4);
-      expect(OnboardingStep.complete.stepIndex, 5);
+      // `wakeWord` was inserted after `companion`, shifting health and complete.
+      expect(OnboardingStep.wakeWord.stepIndex, 4);
+      expect(OnboardingStep.healthSetup.stepIndex, 5);
+      expect(OnboardingStep.complete.stepIndex, 6);
     });
 
     test('fromIndex maps correctly', () {
@@ -19,8 +21,34 @@ void main() {
       expect(OnboardingStep.fromIndex(1), OnboardingStep.permissions);
       expect(OnboardingStep.fromIndex(2), OnboardingStep.profileSetup);
       expect(OnboardingStep.fromIndex(3), OnboardingStep.companion);
-      expect(OnboardingStep.fromIndex(4), OnboardingStep.healthSetup);
+      expect(OnboardingStep.fromIndex(4), OnboardingStep.wakeWord);
+      expect(OnboardingStep.fromIndex(5), OnboardingStep.healthSetup);
       expect(OnboardingStep.fromIndex(99), OnboardingStep.complete);
+    });
+
+    test('every step has a distinct, contiguous index', () {
+      // An insert that forgets to shift the steps after it would leave two
+      // steps sharing an index, and a resumed onboarding would jump to the
+      // wrong one. Nothing else would fail.
+      final indices = OnboardingStep.values.map((s) => s.stepIndex).toList()
+        ..sort();
+      expect(indices, List<int>.generate(OnboardingStep.values.length, (i) => i));
+      for (final step in OnboardingStep.values) {
+        expect(OnboardingStep.fromIndex(step.stepIndex), step);
+      }
+    });
+
+    test('wake word is asked after the companion and before health', () {
+      // It is a voice choice, so it belongs with the other voice choices; and it
+      // must not move the finish line.
+      expect(
+        OnboardingStep.wakeWord.stepIndex,
+        greaterThan(OnboardingStep.companion.stepIndex),
+      );
+      expect(
+        OnboardingStep.wakeWord.stepIndex,
+        lessThan(OnboardingStep.healthSetup.stepIndex),
+      );
     });
 
     test('routeName returns correct routes', () {
@@ -28,6 +56,7 @@ void main() {
       expect(OnboardingStep.permissions.routeName, '/onboarding/permissions');
       expect(OnboardingStep.profileSetup.routeName, '/onboarding/profile');
       expect(OnboardingStep.companion.routeName, '/onboarding/companion');
+      expect(OnboardingStep.wakeWord.routeName, '/onboarding/wakeword');
       expect(OnboardingStep.healthSetup.routeName, '/onboarding/health');
       expect(OnboardingStep.complete.routeName, '/onboarding/complete');
     });

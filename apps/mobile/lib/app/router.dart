@@ -25,6 +25,7 @@ import '../features/reminders/reminders_page.dart';
 import '../features/onboarding/companion_page.dart';
 import '../features/onboarding/consent_page.dart';
 import '../features/onboarding/health_page.dart';
+import '../features/onboarding/wake_word_step_page.dart';
 import '../features/onboarding/offline_page.dart';
 import '../features/onboarding/onboarding_service.dart';
 import '../features/onboarding/otp_page.dart';
@@ -210,6 +211,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/onboarding/companion',
         name: 'onboarding-companion',
         builder: (context, state) => const CompanionPage(),
+      ),
+      GoRoute(
+        path: '/onboarding/wakeword',
+        name: 'onboarding-wakeword',
+        builder: (context, state) => const WakeWordStepPage(),
       ),
       GoRoute(
         path: '/onboarding/health',

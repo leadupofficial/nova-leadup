@@ -10,6 +10,10 @@ enum OnboardingStep {
   // §5.4 "Create Your Companion"): name, personality, speech style and voice.
   // It writes the real `/api/v1/settings/persona` resource.
   companion,
+  // Asks about the wake word. It is off until the user opts in, and onboarding
+  // used to never ask — so every new user finished setup without the product's
+  // flagship affordance and had to find it under Profile.
+  wakeWord,
   healthSetup,
   complete;
 
@@ -23,10 +27,12 @@ enum OnboardingStep {
         return 2;
       case OnboardingStep.companion:
         return 3;
-      case OnboardingStep.healthSetup:
+      case OnboardingStep.wakeWord:
         return 4;
-      case OnboardingStep.complete:
+      case OnboardingStep.healthSetup:
         return 5;
+      case OnboardingStep.complete:
+        return 6;
     }
   }
 
@@ -41,6 +47,8 @@ enum OnboardingStep {
       case 3:
         return OnboardingStep.companion;
       case 4:
+        return OnboardingStep.wakeWord;
+      case 5:
         return OnboardingStep.healthSetup;
       default:
         return OnboardingStep.complete;
@@ -57,6 +65,8 @@ enum OnboardingStep {
         return '/onboarding/profile';
       case OnboardingStep.companion:
         return '/onboarding/companion';
+      case OnboardingStep.wakeWord:
+        return '/onboarding/wakeword';
       case OnboardingStep.healthSetup:
         return '/onboarding/health';
       case OnboardingStep.complete:

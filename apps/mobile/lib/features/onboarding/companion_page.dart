@@ -277,7 +277,9 @@ class _CompanionPageState extends ConsumerState<CompanionPage> {
     // needs the speech style that is actually selected on screen.
     await onboarding.saveLanguagePolicy(_languagePolicy);
     await onboarding.setCurrentStep(OnboardingStep.healthSetup);
-    if (context.mounted) context.go(OnboardingStep.healthSetup.routeName);
+    // The wake word is asked about before the health step, so the finish line
+    // stays where it was.
+    if (context.mounted) context.go(OnboardingStep.wakeWord.routeName);
   }
 }
 
