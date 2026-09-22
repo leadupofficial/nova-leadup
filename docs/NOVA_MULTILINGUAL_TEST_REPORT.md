@@ -146,10 +146,11 @@ been.
   proactive behaviour when no language has it.
 - **Latency across languages.** Only Telugu was timed (4.6 s for the turn). One
   sample is not a latency measurement.
-- **The MacBook acoustic loop.** The capture rig was proven, but the last
-  physical loop attempt failed and has not been retried; the tier-A runs used
-  macOS-synthesised speech played into the phone's microphone, which is a
-  generated human voice rather than a person speaking.
+- **The MacBook acoustic loop.** ~~The capture rig was proven, but the last
+  physical loop attempt failed and has not been retried~~ — **the full
+  bidirectional loop is now verified; see §4a of the real-user report.** The
+  tier-A runs still used macOS-synthesised speech played into the phone's
+  microphone, which is a generated human voice rather than a person speaking.
 
 ## 7. Evidence index
 

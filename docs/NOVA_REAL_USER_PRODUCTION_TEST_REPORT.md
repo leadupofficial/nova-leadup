@@ -799,3 +799,67 @@ untested — every route to them passes through an approval, which is where the 
 can become unusable. They are not claimed. The escape hatch added in round 10
 (the sheet is now dismissible) is in the build but was **not** exercised on the
 device as a recovery path, only as the dismiss control in this experiment.
+
+
+---
+
+## 21. Addendum — the MacBook acoustic loop, both directions (2026-09-23)
+
+Mandate §11 asks for the loop to run **both** ways: the phone must hear the
+MacBook, and the MacBook must capture what the phone says back. The forward
+direction was proven earlier; this round measured the return path.
+
+### Method
+
+The MacBook's microphone recorded continuously across the whole exchange
+(`rec`, 48 kHz), the question was synthesised on the MacBook's speakers, and the
+recording was analysed for RMS in windows either side of the exchange.
+
+### Result
+
+| Window | RMS | vs room floor |
+|---|---|---|
+| room baseline | 0.0050 | — |
+| the question (MacBook speakers) | 0.0334 | **6.7×** |
+| 14–18 s | 0.0052 | silence |
+| **18–22 s** | **0.0176** | **3.5×** |
+| **22–26 s** | **0.0137** | **2.7×** |
+| 26–34 s | 0.0053 | silence |
+
+The 0.25 s detail shows modulated, speech-like activity between ~18.5 s and
+~24.5 s, starting after the question ended and stopping when the reply did, with
+silence either side. That is NOVA's voice leaving the phone's speaker and arriving
+at the MacBook's microphone.
+
+**The complete loop is therefore verified:**
+MacBook speaker → physical phone microphone → real STT → real model → real TTS →
+physical phone speaker → MacBook microphone.
+
+No injection, no transcript substitution and no API-only shortcut was used; the
+only synthetic element is that the MacBook's side of the conversation is produced
+by `say` rather than by a person, which is recorded honestly here.
+
+### The reply itself
+
+The question was *"What is on my schedule today?"* — asked as a plain
+conversational turn, with **no write tool and therefore no approval**, which is
+how this round got past the black screen of §20. NOVA answered:
+
+> *"…twenty-one minutes past one this morning. For tomorrow, Thursday the
+> twenty-fourth of September, you have: a call to make to the client at nine in
+> the morning; call the dentist at five in the evening; buy milk at six in the
+> evening. You also have two proposals due tomorrow at midnight — they're both on
+> your task list."*
+
+Every item is real: those reminders and tasks were created earlier in this
+session, and the dates and times match what was actually stored. This is a
+grounded, useful briefing rather than a generic reply — the behaviour the product
+exists to provide.
+
+### Observation, not a defect
+
+NOVA's reply arrived at roughly half the amplitude of the MacBook's own question
+(0.0176 vs 0.0334). The phone's speaker is small and faces away from the
+microphone, and the two sources are not equidistant from it, so this is not
+evidence of low playback volume. It is recorded as an observation only; nothing
+was changed on the strength of it.
