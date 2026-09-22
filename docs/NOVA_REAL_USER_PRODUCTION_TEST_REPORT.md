@@ -1030,3 +1030,65 @@ machinery the product needs, working on its own output.
 - **Snooze as a post-fire response** ("remind me again in 30 minutes" to a nudge
   that has already fired) — the relative move above was applied to a reminder that
   had not fired.
+
+---
+
+## 25. Addendum — the black screen: the mechanism, found (2026-09-23)
+
+Rounds 10–11 ruled things out and left the cause open. This round attached to the
+running Dart VM service and dumped the live widget tree, which settled it.
+
+### The technique
+
+The debug build prints its VM service URI to `logcat`. The service answers plain
+HTTP, so no WebSocket client is needed:
+
+```
+adb forward tcp:<port> tcp:<port>
+curl "http://127.0.0.1:<port>/<token>/getVM"                     # isolate id
+curl "http://127.0.0.1:<port>/<token>/ext.flutter.debugDumpApp?isolateId=<id>"
+```
+
+Validated while the app was healthy, then used while it was black.
+
+### What it showed
+
+| State | Widget tree | Tail |
+|---|---|---|
+| Healthy, sheet up | **2044 lines** | Scaffold, Navigator, GoRouter, the shell |
+| **Black, after approving** | **87 lines** | `Router<Object> → UnmanagedRestorationScope → _RouterScope → Builder → SizedBox.shrink()` |
+
+The entire routed tree is **gone** — not unpainted, not scrolled away. The
+`Builder` at the end is go_router's own, and go_router returns `SizedBox.shrink()`
+when its configuration is empty. An empty `SizedBox` inside a dark `MaterialApp`
+is exactly the pure `#000000` measured earlier, and it explains every symptom: no
+shell chrome, the process alive and focused, no exception, and only a force-stop
+restoring it.
+
+This also fits the one discriminator that had survived: approving makes the server
+continue the turn, so a navigation can race the sheet's pop — and a pop past the
+root, or a navigation arriving during a pop, is what empties the match list.
+Dismissing ends the turn instead.
+
+### What was tried and reverted
+
+A guard in `_NovaAppState` listened to `routerDelegate` and called `router.go('/')`
+whenever `currentConfiguration.matches` was empty. It **did not work**: the screen
+stayed black and the dump afterwards showed
+`Builder → SingleChildRenderObjectElement(DEFUNCT)(no widget)` — the failure state
+changed, the UI did not come back. Reverted, because a non-fix left in the tree is
+worse than none; the same call was made about the Impeller opt-out in round 11.
+
+### Where the next attempt should start
+
+Not at the rendering backend (Impeller was exonerated with Skia) and not at the
+sheet (a dismiss is fine). The question is **what empties go_router's match list
+immediately after an approval**, and the answer is a navigation racing the sheet's
+pop. Instrumenting `GoRouter`'s route-information changes around the approval —
+logging every `location` the delegate receives — would name the caller directly.
+
+### Status
+
+**P1, open.** The mechanism is known and reproducible; the fix is not found. The
+escape hatch from round 10 (the sheet is dismissible) is still the only thing
+that reduces the harm, and it only helps before the action is approved.
