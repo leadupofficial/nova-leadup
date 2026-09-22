@@ -177,12 +177,111 @@ void main() {
     expect(container.read(wakeWordStateProvider).listening, isTrue);
   });
 
-  test('availability maps to a user-facing message for every reason', () {
-    expect(
-      const WakeWordAvailability(available: true, reason: 'ok', models: ['hey_nova'])
-          .userMessage,
-      contains('hey_nova'),
+  // ─── W-10: `listening` must describe the service, not a local guess ────────
+
+  test('a detection does not claim the microphone stopped', () async {
+    // After a detection the native engine resets and keeps capturing for the next
+    // phrase. `WakeWordDetected` set `listening: false` from the local guess, so
+    // the Status row read "Wake word is paused" — and the app stopped claiming to
+    // listen only in the direction that is *wrong*, because the microphone was
+    // genuinely live.
+    final deps = await createTestDependencies(
+      preferences: <String, Object>{WakeWordController.enabledPreferenceKey: true},
     );
+    addTearDown(deps.dispose);
+
+    final container = createTestContainer(deps);
+    addTearDown(container.dispose);
+
+    container.read(wakeWordStateProvider);
+    await pumpEventQueue();
+    expect(container.read(wakeWordStateProvider).listening, isTrue);
+    expect(deps.wakeWordPlatform.running, isTrue);
+
+    deps.wakeWordPlatform.emit(
+      WakeWordDetected(name: 'hey_jarvis', score: 0.93, at: DateTime.now()),
+    );
+    await pumpEventQueue();
+
+    final state = container.read(wakeWordStateProvider);
+    expect(state.lastDetection?.name, 'hey_jarvis');
+    expect(
+      state.listening,
+      isTrue,
+      reason:
+          'the service still answers isRunning() == true, so `listening` must '
+          'stay true and the Status row must keep saying it is listening',
+    );
+    expect(state.statusMessage, contains('Listening'));
+  });
+
+  test('arm() re-arms a service that died without reporting stopped', () async {
+    // A foreground service killed under memory pressure emits no `WakeWordStopped`,
+    // so the last thing the controller heard was `listening: true`. `arm()`
+    // early-returned on exactly that stale flag, so the microphone stayed dead
+    // until a cold start — the case `arm()` exists to fix.
+    final deps = await createTestDependencies(
+      preferences: <String, Object>{WakeWordController.enabledPreferenceKey: true},
+    );
+    addTearDown(deps.dispose);
+
+    final container = createTestContainer(deps);
+    addTearDown(container.dispose);
+
+    container.read(wakeWordStateProvider);
+    await pumpEventQueue();
+    expect(container.read(wakeWordStateProvider).listening, isTrue);
+    final callsAfterInit = deps.wakeWordPlatform.startCalls;
+
+    // Killed, with no event to say so: the app's own flag still says `true`.
+    deps.wakeWordPlatform.running = false;
+
+    await container.read(wakeWordStateProvider.notifier).arm();
+    await pumpEventQueue();
+
+    expect(
+      deps.wakeWordPlatform.startCalls,
+      callsAfterInit + 1,
+      reason: 'the service is dead; arm() must not trust the stale flag',
+    );
+    expect(container.read(wakeWordStateProvider).listening, isTrue);
+  });
+
+  test('arm() does not restart a service that is genuinely running', () async {
+    final deps = await createTestDependencies(
+      preferences: <String, Object>{WakeWordController.enabledPreferenceKey: true},
+    );
+    addTearDown(deps.dispose);
+
+    final container = createTestContainer(deps);
+    addTearDown(container.dispose);
+
+    container.read(wakeWordStateProvider);
+    await pumpEventQueue();
+    final callsAfterInit = deps.wakeWordPlatform.startCalls;
+
+    await container.read(wakeWordStateProvider.notifier).arm();
+    await pumpEventQueue();
+
+    expect(deps.wakeWordPlatform.startCalls, callsAfterInit);
+    expect(container.read(wakeWordStateProvider).listening, isTrue);
+  });
+
+  test('availability maps to a user-facing message for every reason', () {
+    // The `ok` message describes *availability*, not state. It used to answer
+    // "Listening for hey_nova." from a wake word merely being installed, and the home
+    // dashboard's Status row rendered exactly that on a device where the wake word had
+    // never been switched on — while leaking the raw asset key next to a humanised one.
+    // This assertion used to require the raw name; that encoded the defect.
+    final available = const WakeWordAvailability(
+      available: true,
+      reason: 'ok',
+      models: ['hey_nova'],
+    ).userMessage;
+    expect(available, contains('Hey Nova'));
+    expect(available, isNot(contains('hey_nova')));
+    expect(available.toLowerCase(), isNot(contains('listening')));
+
     expect(
       const WakeWordAvailability(available: false, reason: 'unsupported_platform')
           .userMessage,
@@ -198,6 +297,48 @@ void main() {
           .userMessage,
       contains('microphone'),
     );
+  });
+
+  test('statusMessage states what the wake word is doing, not what is installed', () {
+    const availability = WakeWordAvailability(
+      available: true,
+      reason: 'ok',
+      models: <String>['hey_nova'],
+      selected: 'hey_nova',
+    );
+
+    // Installed, but the user never switched it on. This is the D1 defect: "Listening"
+    // must not be claimed from availability alone.
+    const off = WakeWordState(availability: availability);
+    expect(off.statusMessage, 'Wake word is off');
+    expect(off.statusMessage.toLowerCase(), isNot(contains('listening')));
+
+    // Switched on, but the native service has not reported listening.
+    const paused = WakeWordState(availability: availability, enabled: true);
+    expect(paused.statusMessage, 'Wake word is paused');
+    expect(paused.statusMessage.toLowerCase(), isNot(contains('listening')));
+
+    // Genuinely listening: the phrase is named humanised, like every other surface.
+    const listening = WakeWordState(
+      availability: availability,
+      enabled: true,
+      listening: true,
+    );
+    expect(listening.statusMessage, 'Listening for "Hey Nova"');
+
+    // A real failure keeps the native reason rather than becoming a cheerful status.
+    const failed = WakeWordState(
+      availability: WakeWordAvailability(
+        available: false,
+        reason: 'no_wake_word_model',
+      ),
+      enabled: true,
+      listening: true,
+    );
+    expect(failed.statusMessage, contains('No wake word is installed'));
+
+    // Before the probe has answered.
+    expect(const WakeWordState().statusMessage, 'Checking availability…');
   });
 
   // ─── Model selection (requirement 2) ──────────────────────────────────────

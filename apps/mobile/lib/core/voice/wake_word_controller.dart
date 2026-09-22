@@ -36,31 +36,52 @@ class WakeWordState {
 
   bool get isSupported => availability?.available ?? false;
 
-  /// The classifiers the native service found in the app bundle.
+  /// The wake words the native service found in the app bundle.
   List<String> get installedModels => availability?.models ?? const <String>[];
 
-  /// The classifier the service will actually listen for — the user's stored
-  /// choice, or (when nothing is stored) the one installed classifier. Null when
-  /// no classifier is installed at all.
+  /// The wake word the service will actually listen for — the user's stored
+  /// choice, or (when nothing is stored) the one installed wake word. Null when
+  /// no wake word is installed at all.
   String? get selectedModel => availability?.selected;
 
   /// True only when there is a real choice to make. Today's build ships one
-  /// classifier (`hey_jarvis`), so this is false and the UI says so instead of
+  /// wake word (`hey_nova`), so this is false and the UI says so instead of
   /// drawing a picker with a single, inert row.
   bool get hasChoice => availability?.hasChoice ?? false;
 
-  /// The phrase NOVA will actually listen for, humanised (`Hey Jarvis`), or null
-  /// when no classifier is installed.
+  /// The phrase NOVA will actually listen for, humanised (`Hey Nova`), or null
+  /// when no wake word is installed.
   ///
   /// There is deliberately no invented fallback. This used to answer `'Hey
-  /// Nova'`, which no build can honour: openWakeWord ships no "hey nova"
-  /// classifier and this repo contains none, so every screen that showed it was
-  /// naming a phrase the microphone could not hear.
+  /// Nova'` unconditionally, from a hardcoded product name rather than from what
+  /// the service reports; every screen that showed it was naming a phrase the
+  /// microphone might not be loaded with. The phrase now comes from the
+  /// installed keywords file, which is data — `hey_nova` is the shipped one.
   String? get phrase {
     final selected = availability?.selectedPhrase;
     if (selected != null) return selected;
     if (installedModels.isEmpty) return null;
     return installedModels.map(humanizeWakeWordName).join(' or ');
+  }
+
+  /// What the wake word is doing *right now* — the Status row's line.
+  ///
+  /// [availability] cannot answer this on its own: a wake word being installed is
+  /// not a service being listened for. This reads the user's toggle and the state
+  /// the native service reports as well, so the row says "Listening" only when it
+  /// genuinely is, and names the phrase the same humanised way every other surface
+  /// does. A real failure keeps the native reason message rather than being turned
+  /// into a cheerful status.
+  String get statusMessage {
+    final availability = this.availability;
+    if (availability == null) return 'Checking availability…';
+    if (!availability.available) return availability.userMessage;
+    final phrase = this.phrase;
+    if (enabled && listening) {
+      return phrase == null ? 'Listening' : 'Listening for "$phrase"';
+    }
+    if (enabled) return 'Wake word is paused';
+    return 'Wake word is off';
   }
 
   WakeWordState copyWith({
@@ -143,7 +164,7 @@ class WakeWordController extends Notifier<WakeWordState> {
   /// Re-reads availability from the native service.
   ///
   /// Used by the settings screen's "Re-check" action: the set of installed
-  /// classifiers is fixed at build time, but the probe also reports whether the
+  /// wake words is fixed at build time, but the probe also reports whether the
   /// platform is supported at all, and that can change (e.g. the plugin is only
   /// registered on Android).
   Future<void> refreshAvailability() async {
@@ -153,14 +174,14 @@ class WakeWordController extends Notifier<WakeWordState> {
     state = state.copyWith(availability: availability);
   }
 
-  /// Chooses which installed classifier the service listens for.
+  /// Chooses which installed wake word the service listens for.
   ///
   /// Nothing is written unless the native service accepts the name: it is the
-  /// only party that can see which `.onnx` assets are actually installed, so a
+  /// only party that can see which keywords files are actually installed, so a
   /// phrase that is not installed is refused here rather than shown as selected.
   ///
   /// The selection is applied immediately when the service is currently
-  /// listening (the engine is already built around the old classifier). A
+  /// listening (the engine is already built around the old wake word). A
   /// paused service picks the new choice up on its next start — this never
   /// starts the microphone behind the user's back.
   Future<bool> setModel(String name) async {
@@ -174,7 +195,7 @@ class WakeWordController extends Notifier<WakeWordState> {
 
     if (!availability.models.contains(name)) {
       // Refuse before reaching the platform: the UI can only offer installed
-      // classifiers, so this is a programming error or a stale screen, and
+      // wake words, so this is a programming error or a stale screen, and
       // either way there is nothing to persist.
       state = state.copyWith(
         availability: availability,
@@ -187,7 +208,7 @@ class WakeWordController extends Notifier<WakeWordState> {
     if (_disposed) return false;
     if (!accepted) {
       // The platform is the authority on what is installed. Re-read rather than
-      // keeping a stale list, so the screen stops offering a classifier the
+      // keeping a stale list, so the screen stops offering a wake word the
       // service does not have.
       final refreshed = await platform.availability();
       if (_disposed) return false;
@@ -299,22 +320,46 @@ class WakeWordController extends Notifier<WakeWordState> {
   /// foreground service can be killed under memory pressure, and this is the
   /// reliable place to bring it back (a BOOT_COMPLETED restart is not permitted for
   /// microphone services on Android 15+).
+  ///
+  /// The service is asked, never assumed. `state.listening` cannot answer "is the
+  /// microphone live": a service killed under memory pressure emits no
+  /// `WakeWordStopped`, so the flag can be stale *true* — and the early return on it
+  /// meant exactly the case this method exists for was the case it skipped. The
+  /// same flag can be stale *false*, because a detection clears it while the native
+  /// engine keeps capturing.
   Future<void> arm() async {
     if (!state.enabled) return;
-    if (state.listening) return;
     final platform = ref.read(wakeWordPlatformProvider);
     final availability = state.availability ?? await platform.availability();
     if (_disposed) return;
     if (!availability.available) {
-      state = state.copyWith(availability: availability);
+      state = state.copyWith(availability: availability, listening: false);
       return;
     }
-    if (await platform.isRunning()) {
-      if (_disposed) return;
+
+    final running = await platform.isRunning();
+    if (_disposed) return;
+    if (running) {
       state = state.copyWith(listening: true);
       return;
     }
+
+    state = state.copyWith(listening: false);
     await start();
+  }
+
+  /// Makes `listening` describe the native service rather than a local guess.
+  ///
+  /// Used after a detection, which is the event that most invites the wrong guess:
+  /// the engine resets and immediately keeps capturing for the next phrase, so
+  /// nothing about it means "the microphone stopped". Clearing the flag here made
+  /// the Status row read "Wake word is paused" while the microphone was genuinely
+  /// live — the app claiming *not* to listen, which is still a false claim about
+  /// the microphone, and one the user cannot act on.
+  Future<void> _refreshListening() async {
+    final running = await ref.read(wakeWordPlatformProvider).isRunning();
+    if (_disposed) return;
+    state = state.copyWith(listening: running);
   }
 
   void clearError() {
@@ -333,7 +378,11 @@ class WakeWordController extends Notifier<WakeWordState> {
       case WakeWordServiceStateChanged(:final running):
         state = state.copyWith(listening: running);
       case WakeWordDetected():
-        state = state.copyWith(listening: false, lastDetection: event);
+        // `lastDetection` drives the orb and the conversation flow; whether the
+        // microphone is still live is asked of the service, not inferred from the
+        // fact that a phrase was heard.
+        state = state.copyWith(lastDetection: event);
+        unawaited(_refreshListening());
         unawaited(_onDetected(event));
       case WakeWordFailure(:final code, :final message):
         state = state.copyWith(

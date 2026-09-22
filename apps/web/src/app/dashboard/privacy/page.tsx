@@ -20,6 +20,24 @@ import {
 import { GlassPanel, GlassButton } from '../../../components/glass';
 import { cn } from '../../../lib/utils';
 
+/**
+ * Where Play's account-deletion web resource actually lives.
+ *
+ * The page is served by `apps/admin` (`/delete-account`), because the admin console is
+ * what answers on the public origin the store listings point at. This app does not
+ * serve that route, so a relative link resolves here and 404s — verified live before
+ * this was made absolute.
+ *
+ * Override with `NEXT_PUBLIC_ACCOUNT_DELETION_URL` when the console is on a different
+ * host; the default is the deployed public origin.
+ */
+const ACCOUNT_DELETION_URL =
+  process.env.NEXT_PUBLIC_ACCOUNT_DELETION_URL ?? 'https://nova.leadup.in/delete-account';
+
+function accountDeletionUrl(): string {
+  return ACCOUNT_DELETION_URL;
+}
+
 interface PrivacyCategory {
  id: string;
  label: string;
@@ -117,7 +135,12 @@ export default function PrivacyScreen() {
  <div>
  <h3 className="text-sm font-semibold text-white">Private Mode</h3>
  <p className="text-xs text-slate-500 mt-0.5">
- {privateMode ? 'Data will not be stored' : 'No data stored during sessions'}
+ {/* This card toggled `useState` and nothing else, while telling the user
+     "No data stored during sessions". Nothing in apps/web can store or
+     withhold anything — it has no session and no API client — so the copy now
+     says what the switch actually is: a preview of the setting. The real
+     control writes to `PUT /api/v1/settings/privacy` from the mobile app. */}
+ Preview only — set this in the mobile app
  </p>
  </div>
  </div>
@@ -146,7 +169,11 @@ export default function PrivacyScreen() {
  >
  <p className="text-xs text-cyan-400/80 flex items-center gap-1.5">
  <Lock size={12} />
- Private mode is active. Conversations won't be stored.
+ {/* This said "Private mode is active. Conversations won't be stored." — a
+     retention guarantee from a component with no storage to withhold. It now
+     describes the preview, not a promise. */}
+ Preview selection recorded on this page only — nothing is sent or stored by this
+ preview.
  </p>
  </motion.div>
  )}
@@ -212,6 +239,15 @@ export default function PrivacyScreen() {
  </GlassButton>
  <motion.button
  whileTap={{ scale: 0.98 }}
+ onClick={() => {
+ // This was a button with no handler at all. Deleting data is a verified
+ // request, not a silent client-side action, so it goes to the public deletion
+ // page the stores are given — the only surface that can confirm identity.
+ // The deletion page is served by the admin console (which is what answers on the
+ // public origin), NOT by this app, so this must be an absolute URL. A relative
+ // '/delete-account' resolved against this app and 404'd.
+ window.location.href = accountDeletionUrl();
+ }}
  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl
  text-sm font-medium text-red-400 bg-red-500/[0.08] border border-red-500/15
  hover:bg-red-500/[0.12] transition-colors cursor-pointer"
@@ -233,9 +269,16 @@ export default function PrivacyScreen() {
  <h3 className="text-sm font-medium text-white">Delete Account</h3>
  <p className="text-xs text-slate-500 mt-1">
  Permanently remove your account and all associated data. This action cannot be undone.
+ The fastest route is in the mobile app, under Profile → Delete account.
  </p>
  <motion.button
  whileTap={{ scale: 0.97 }}
+ onClick={() => {
+ // Previously dead UI: the button rendered and did nothing, which is exactly the
+ // "advertised capability that does not exist" a store reviewer rejects.
+ // Absolute URL for the reason given above.
+ window.location.href = accountDeletionUrl();
+ }}
  className="mt-3 px-4 py-2 rounded-xl text-sm font-medium bg-red-500/15 text-red-400
  border border-red-500/20 hover:bg-red-500/25 transition-colors cursor-pointer"
  >

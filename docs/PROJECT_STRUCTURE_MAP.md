@@ -3,6 +3,39 @@
 > **Generated:** 2026-09-11
 > **Purpose:** Exhaustive reference of every directory, key file, tech stack component, and architectural role in the NOVA-Leadup monorepo.
 
+> **Correction, verified 2026-09-19.** This map was generated on 2026-09-11 and has
+> drifted badly. The corrections below were checked against the working tree and the
+> repository's own gates; where a later section disagrees with this box, this box is
+> right and the section is history.
+>
+> - **`apps/mobile` is Flutter, not Expo, and it is active.** It holds `pubspec.yaml`
+>   and Dart sources under `lib/`; `flutter analyze` reports *No issues found* and
+>   `flutter test` runs 579 passing tests (5 skipped). There is **no `apps/mobile_old`**.
+>   The Expo/React Native sources the map describes (`app/`, `src/`, `package.json`,
+>   `eas.json`, `app.config.js`) have been **removed** from `apps/mobile`; only `android/`,
+>   `ios/`, `lib/`, `test/`, `assets/` and `tools/` remain.
+> - **`apps/web` is not removed.** It is a Next.js app (`@nova/web`) that builds and
+>   lints. `apps/` contains exactly `admin`, `mobile` and `web`.
+> - **`services/` holds 13 directories, not 14**: `admin`, `agent-orchestrator`,
+>   `api_disabled`, `api`, `auth`, `integration-service`, `notification-service`,
+>   `notifications`, `realtime-gateway`, `voice-api`, `worker`, `workers`,
+>   `workflow-engine`. Five of those (`agent-orchestrator`, `api_disabled`,
+>   `notification-service`, `worker`, `workers`) are quarantined dead code whose
+>   `build`/`typecheck` scripts print `[dead-service] build skipped`. `notifications/`
+>   is an untracked duplicate with no `package.json`, so it is not a workspace package
+>   and its tests do not run.
+> - **The gates pass the map's description.** On 2026-09-19 with the Turbo cache
+>   bypassed: `pnpm run build` 27/27, `pnpm run typecheck` 31/31, `pnpm run test` 34/34,
+>   `pnpm run lint` 25/25.
+> - **The database is 45 tables.** `packages/database/src/schema.ts` declares all 45,
+>   and `drizzle/0003_steady_archangel.sql` is the migration that brings the four
+>   `lead_*` tables and `notification_preferences` into the migration set — before it,
+>   a freshly migrated database was missing all five.
+>
+> The canonical current statements live in
+> [`REQUIREMENTS_VERIFICATION.md`](./REQUIREMENTS_VERIFICATION.md) and
+> [`CURRENT_ARCHITECTURE.md`](../CURRENT_ARCHITECTURE.md).
+
 ---
 
 ## Table of Contents

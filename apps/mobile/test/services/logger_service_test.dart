@@ -1,8 +1,25 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/services/logger_service.dart';
 
 void main() {
+  /// Everything `debugPrint` writes while the capturing callback is installed.
+  ///
+  /// The pre-`initialize()` contract is observable only through `debugPrint`: the
+  /// fallback warning goes there, and so does the flush that `initialize()` performs.
+  late List<String> printed;
+  late DebugPrintCallback originalDebugPrint;
+
+  setUp(() {
+    printed = <String>[];
+    originalDebugPrint = debugPrint;
+    debugPrint = (String? message, {int? wrapWidth}) {
+      if (message != null) printed.add(message);
+    };
+  });
+
   tearDown(() {
+    debugPrint = originalDebugPrint;
     LoggerService.resetForTesting();
   });
 
@@ -36,13 +53,48 @@ void main() {
   });
 
   group('LoggerService._guard', () {
-    test('throws StateError before initialize', () {
+    // This test used to assert `throwsStateError`, which is what the service did
+    // *before* the guard was deliberately changed: a log call made before
+    // `initialize()` now falls back to `debugPrint` and buffers the line, so the
+    // error-reporting path never becomes a crash source. The implementation is the
+    // intended behaviour, so the stale assertion is the defect — not the code. What
+    // follows is what the guard is actually documented to do.
+    test('warns and buffers instead of throwing before initialize', () async {
       final service = LoggerService();
-      expect(() => service.v('tag', 'msg'), throwsStateError);
-      expect(() => service.d('tag', 'msg'), throwsStateError);
-      expect(() => service.i('tag', 'msg'), throwsStateError);
-      expect(() => service.w('tag', 'msg'), throwsStateError);
-      expect(() => service.e('tag', 'msg'), throwsStateError);
+      expect(service.isInitialized, isFalse);
+
+      // Nothing throws, at any level. `e` is included because errors are the calls
+      // most likely to be made early, from a crash handler.
+      expect(() => service.v('tag', 'verbose'), returnsNormally);
+      expect(() => service.d('tag', 'debug'), returnsNormally);
+      expect(() => service.i('tag', 'info'), returnsNormally);
+      expect(() => service.w('tag', 'warn'), returnsNormally);
+      expect(() => service.e('tag', 'error'), returnsNormally);
+
+      // The fallback really ran, once per call, and said why.
+      expect(
+        printed.where(
+          (line) => line.contains('not initialized — falling back to debugPrint'),
+        ),
+        hasLength(5),
+      );
+      // ...and the log lines themselves are not emitted yet: they are buffered, so a
+      // pre-initialize call cannot interleave with a half-built reporter.
+      expect(printed.where((line) => line.startsWith('[VERBOSE]')), isEmpty);
+      expect(printed.where((line) => line.startsWith('[ERROR]')), isEmpty);
+
+      await service.initialize();
+
+      // Buffered, not lost: `initialize()` flushes every pre-init line.
+      expect(printed, contains('[VERBOSE][tag] verbose'));
+      expect(printed, contains('[DEBUG][tag] debug'));
+      expect(printed, contains('[INFO][tag] info'));
+      expect(printed, contains('[WARN][tag] warn'));
+      expect(
+        printed.any((line) => line.startsWith('[ERROR][tag] error')),
+        isTrue,
+        reason: 'the pre-initialize error line was buffered and must be flushed',
+      );
     });
 
     test('does not throw after initialize', () async {

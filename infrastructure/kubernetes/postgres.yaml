@@ -1,0 +1,137 @@
+# NOVA Leadup — Kubernetes PostgreSQL Deployment
+# Runs PostgreSQL 16 with pgvector extension in the nova namespace.
+#
+# Re-indented: the original had every key at one space, so the PVC, the pod template,
+# the env list, the volumes and the ConfigMap's block scalar were all flat and the file
+# was not valid YAML.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nova-postgres-pvc
+  namespace: nova
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nova-postgres
+  namespace: nova
+  labels:
+    app: nova-postgres
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: nova
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nova-postgres
+  template:
+    metadata:
+      labels:
+        app: nova-postgres
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/part-of: nova
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: nova-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: nova-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nova-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+            - name: postgres-init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - "$(POSTGRES_USER)"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - "$(POSTGRES_USER)"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: nova-postgres-pvc
+        - name: postgres-init
+          configMap:
+            name: nova-postgres-init
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nova-postgres
+  namespace: nova
+  labels:
+    app: nova-postgres
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: nova
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+  selector:
+    app: nova-postgres
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nova-postgres-init
+  namespace: nova
+data:
+  01-extensions.sql: |
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+    CREATE EXTENSION IF NOT EXISTS "citext";

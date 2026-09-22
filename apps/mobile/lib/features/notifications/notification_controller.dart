@@ -423,6 +423,23 @@ class NotificationAssistantController extends Notifier<NotificationAssistantStat
                 ...state.inbox,
               ].take(inboxLimit).toList(growable: false),
             );
+            // §9.4: a high-priority notification is *spoken as it arrives*, not
+            // only when the user opens this screen and taps a row. That manual
+            // tap was the only call site, so the feature the brief calls
+            // "proactive spoken updates" never happened on its own.
+            //
+            // Both gates §9.3/§9.5 require are still enforced, neither is
+            // bypassed here: `readAloudEnabled` is the persisted opt-in and
+            // `sessionSpeechConsent` is the non-persisted per-session
+            // confirmation. Until the user has confirmed in this session,
+            // `speak` returns `confirmationRequired`; rather than prompt
+            // unprompted, nothing is spoken. `speak` re-runs the content guard
+            // immediately before it speaks.
+            if (NotificationFilter.isHighPriorityWork(notification) &&
+                state.settings.readAloudEnabled &&
+                state.sessionSpeechConsent) {
+              unawaited(speak(data));
+            }
           case NotificationDropped(:final reason):
             // Dropped, not stored. The log line names the app and the rule only
             // — never the title or the body, which are already unreachable from

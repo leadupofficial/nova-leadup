@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../config/remote_config_provider.dart';
 import '../../services/voice_stream_service.dart';
 import 'device_tts.dart';
 import 'voice_capture.dart';
@@ -91,6 +92,22 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
   /// a bare protocol code by [normalizeVoiceLanguage].
   Future<void> startTurn({String language = 'auto'}) async {
     final generation = _generation;
+
+    // Operator gate. `capabilities.voice` is the server's combined answer for the
+    // VOICE_ASSISTANT/VOICE_STT/VOICE_TTS flags *and* the voice/STT/TTS kill switches,
+    // so this single check is what makes an admin change visible here. It runs before
+    // anything is sent: opening the microphone and then failing would leave the user
+    // speaking into a dead session, and the mic would already be open.
+    if (!ref.read(voiceCapabilityEnabledProvider)) {
+      _fail(
+        code: 'voice_disabled',
+        message: ref.read(remoteConfigProvider).config.maintenance.enabled
+            ? 'NOVA is under maintenance. Voice is unavailable right now.'
+            : 'Voice has been temporarily disabled. You can still type to NOVA.',
+      );
+      return;
+    }
+
     // A turn started from under an open confirmation sheet supersedes it: send
     // the "no" before the cancel, so the tool is refused rather than left
     // waiting on a request nobody is looking at any more.
@@ -628,6 +645,13 @@ class VoiceRealtimeController extends Notifier<VoiceRealtimeState> {
   }
 
   void _set(VoiceRealtimeState next) {
+    // Every caller reaches this after at least one `await` — `cancel()` stops capture, playback and
+    // device speech before landing here — and the provider can be disposed in that gap. Writing
+    // state on a disposed provider throws `UnmountedRefException`, which in a widget test surfaces
+    // *after* the test body has finished: the E2E converse run reported "Some tests failed" with
+    // every assertion passed and nothing pointing at the cause. The guard is the same one
+    // `briefing_controller.dart` already uses on its async paths.
+    if (!ref.mounted) return;
     state = next;
   }
 

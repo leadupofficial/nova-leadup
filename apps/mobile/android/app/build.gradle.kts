@@ -100,7 +100,13 @@ android {
 
     splits {
         abi {
-            isEnable = true
+            // Per-ABI APKs for sideloading, but **not** when building an App Bundle:
+            // Google Play only accepts an `.aab`, and AGP refuses to build one while
+            // ABI splits are enabled — "Multiple shrunk-resources files found in
+            // directory ... Please disable building multiple APKs when building an
+            // Android app bundle". `flutter build appbundle` failed on exactly that
+            // until this condition was added, so the release path to Play was blocked.
+            isEnable = !gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
             reset()
             include("armeabi-v7a", "arm64-v8a", "x86_64")
             isUniversalApk = true
@@ -122,7 +128,7 @@ android {
     }
 
     androidResources {
-        // openWakeWord loads its ONNX graphs through AssetManager. Shipping them
+        // The wake-word engine loads its ONNX graphs through AssetManager. Shipping them
         // uncompressed keeps them memory-mappable instead of forcing a full copy into
         // the heap on every model load.
         noCompress += "onnx"
@@ -173,6 +179,22 @@ kotlin {
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
+    // sherpa-onnx keyword spotting: the app's only wake-word engine.
+    //
+    // openWakeWord used to be here, and it shipped a fixed `hey_jarvis` classifier — the
+    // only phrase it could ever detect, with no pretrained "Nova". Measured on a real
+    // device, natural speech scored ~0.64 against its 0.5 threshold, where synthesised
+    // speech scored 0.99: the margin on a real voice was thin, so it fired sometimes and
+    // missed others. sherpa-onnx instead takes the wake word as a **BPE-tokenised text
+    // file**, so the phrase is data:
+    //
+    //     HEY NOVA  ->  ▁HE Y ▁NO V A :2.0
+    //
+    // Vendored rather than resolved because the official AAR is not published to Maven
+    // Central — it comes from the k2-fsa/sherpa-onnx GitHub releases. openWakeWord is not
+    // wired alongside it; see the note on its removal below.
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
+
     // JVM unit tests for the pure-Kotlin pieces of the notification assistant
     // (`NotificationContentGuard`, the Kotlin half of the §9.5 filter). It has
     // no Android dependency, so it runs as a plain JVM test with
@@ -180,31 +202,21 @@ dependencies {
     // in the APK.
     testImplementation("junit:junit:4.13.2")
 
-    // On-device wake word detection (openWakeWord, Apache-2.0).
+    // **openWakeWord was removed here.** It shipped a fixed `hey_jarvis` classifier and
+    // pulled in its own `onnxruntime-android`; sherpa-onnx bundles a different
+    // `libonnxruntime.so`, and two copies cannot coexist in one APK
+    // (`mergeDebugNativeLibs`: "2 files found with path 'lib/arm64-v8a/libonnxruntime.so'").
     //
-    // Chosen over Picovoice Porcupine because it needs no access key, no account, and
-    // no per-device licence: the models are bundled in the APK and inference runs
-    // locally through ONNX Runtime. This pulls in onnxruntime-android transitively.
-    implementation("xyz.rementia:openwakeword:0.1.5")
-
-    // Pin ONNX Runtime past the version openwakeword 0.1.5 asks for.
+    // Keeping both would have meant `pickFirsts`, i.e. shipping whichever ONNX Runtime
+    // won the race against a C API built for the other — so the old engine is gone
+    // rather than pinned alongside.
     //
-    // It resolves 1.18.0, whose libonnxruntime4j_jni.so has 4 KB LOAD-segment
-    // alignment. Google Play requires every native library in a submission to be
-    // 16 KB aligned, and 4 KB is what makes the bundle fail the check. Measured
-    // across releases: 1.20.0 is still 4 KB (libonnxruntime.so is aligned but the
-    // JNI bridge is not), 1.22.0 is the first release where every shipped arm64
-    // library is 16 KB. Raise this only after re-measuring, not on the assumption
-    // that newer is aligned.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
-}
-
-// The transitive 1.18.0 must not win: without this a dependency that declares it
-// directly can drag the 4 KB copy back in.
-configurations.all {
-    resolutionStrategy {
-        force("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
-    }
+    // That pin also carried a Play requirement worth keeping in view: every native
+    // library must be **16 KB page aligned**. openwakeword resolved onnxruntime 1.18.0
+    // at 4 KB, which fails the check. The sherpa AAR's arm64 libraries were measured at
+    // 16 KB each (`libonnxruntime.so`, `libsherpa-onnx-{c,cxx,jni}-api.so`), so dropping
+    // the pin does not reintroduce the alignment failure. **Re-measure if the AAR is ever
+    // upgraded** — that is the check that silently breaks a Play submission.
 }
 
 flutter {

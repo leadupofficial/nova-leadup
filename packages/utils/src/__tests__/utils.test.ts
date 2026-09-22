@@ -163,7 +163,7 @@ await assertion;
  });
 
  it('applies exponential backoff between retries', async () => {
- let callTimes: number[] = [];
+ const callTimes: number[] = [];
  const fn = vi.fn()
  .mockImplementationOnce(() => {
  callTimes.push(Date.now());

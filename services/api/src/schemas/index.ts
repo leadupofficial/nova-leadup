@@ -57,9 +57,24 @@ const DateRangeSchema = z.object({
 
 // ─── Auth schemas ─────────────────────────────────────────────────────────────
 
+/**
+ * Minimum password length, in one place.
+ *
+ * The client told users "At least 8 characters" while this schema required 12, and
+ * `utils/validation.ts` had a third value. A reviewer (or anyone) typing a 9-character
+ * password satisfied the app's own check and was then rejected by the server with a raw
+ * Zod message. The server is authoritative; the client now matches it and the message
+ * is written for a human.
+ */
+export const PASSWORD_MIN_LENGTH = 12;
+
+const passwordField = z
+	.string()
+	.min(PASSWORD_MIN_LENGTH, `Password must be at least ${PASSWORD_MIN_LENGTH} characters`);
+
 export const RegisterSchema = z.object({
-	email: z.string().email(),
-	password: z.string().min(12),
+	email: z.string().email('Enter a valid email address'),
+	password: passwordField,
 	name: z.string().min(1).max(255).optional(),
 });
 
@@ -78,7 +93,7 @@ export const ForgotPasswordSchema = z.object({
 
 export const ResetPasswordSchema = z.object({
 	token: z.string().min(1),
-	password: z.string().min(12),
+	password: passwordField,
 });
 
 export const VerifyEmailSchema = z.object({
@@ -116,8 +131,12 @@ export const SendMessageSchema = z.object({
 
 // ─── Memory schemas ───────────────────────────────────────────────────────────
 
+// `content` had no upper bound: `POST /memories` with 400,000 characters returned 201 and
+// stored the lot. The cap matches a description field rather than a document on purpose —
+// a memory is a sentence or two, and anything larger is a client bug or an attempt to use
+// the table as blob storage.
 export const CreateMemorySchema = z.object({
-	content: z.string().min(1),
+	content: z.string().min(1).max(4000),
 	category: z.enum(['fact', 'preference', 'event', 'contact', 'decision']),
 	sourceType: z.enum(['conversation', 'recording', 'manual', 'imported']),
 	visibility: z.enum(['private', 'shared', 'team']).default('private'),
@@ -129,7 +148,7 @@ export const CreateMemorySchema = z.object({
 });
 
 export const UpdateMemorySchema = z.object({
-	content: z.string().min(1).optional(),
+	content: z.string().min(1).max(4000).optional(),
 	category: z.enum(['fact', 'preference', 'event', 'contact', 'decision']).optional(),
 	visibility: z.enum(['private', 'shared', 'team']).optional(),
 	sensitivity: z.enum(['normal', 'sensitive', 'confidential']).optional(),
@@ -140,7 +159,7 @@ export const UpdateMemorySchema = z.object({
 });
 
 export const MemorySearchSchema = z.object({
-	query: z.string().min(1),
+	query: z.string().min(1).max(500),
 	category: z.enum(['fact', 'preference', 'event', 'contact', 'decision']).optional(),
 	visibility: z.enum(['private', 'shared', 'team']).optional(),
 	limit: z.coerce.number().int().min(1).max(50).default(10),
@@ -156,6 +175,12 @@ export const MemoryListQuerySchema = z.object({
 	category: z.enum(['fact', 'preference', 'event', 'contact', 'decision']).optional(),
 	visibility: z.enum(['private', 'shared', 'team']).optional(),
 	status: z.enum(['proposed', 'approved', 'rejected', 'archived', 'active', 'corrected']).optional(),
+	// `?search=` is what the mobile client's memory list sends
+	// (`apps/mobile/lib/core/api/nova_api.dart`), and this schema had no such field —
+	// zod strips unknown keys, so `validate()` dropped it and the list returned every
+	// memory regardless of what was typed. Bounded like the dedicated search's
+	// `query`, and applied by the route as an escaped content `ILIKE`.
+	search: z.string().max(200).optional(),
 });
 
 // ─── Call log schemas ─────────────────────────────────────────────────────────
@@ -250,6 +275,10 @@ export const CreateTaskSchema = z.object({
 	dueAt: z.coerce.date().optional(),
 	assigneeId: z.string().uuid().optional(),
 	tags: z.array(z.string().max(50)).optional(),
+	// Retry identity for this one create, so a client retry of the same request
+	// is absorbed instead of filing a second task. The `Idempotency-Key` header
+	// is accepted too and takes precedence; see services/create-dedupe.ts.
+	idempotencyKey: z.string().min(1).max(200).optional(),
 });
 
 export const UpdateTaskSchema = z.object({
@@ -287,6 +316,8 @@ export const CreateReminderSchema = z.object({
 	linkedTaskId: z.string().uuid().optional().nullable(),
 	linkedContactId: z.string().uuid().optional().nullable(),
 	sourceAudit: z.string().max(2000).optional().nullable(),
+	// See the matching field in `CreateTaskSchema`.
+	idempotencyKey: z.string().min(1).max(200).optional(),
 }).refine((value) => value.triggerAt !== undefined || value.dueAt !== undefined, {
 	message: 'triggerAt is required',
 	path: ['triggerAt'],
@@ -438,6 +469,24 @@ export const BiometricAuthSchema = z.object({
 
 // ─── Recording schemas ────────────────────────────────────────────────────────
 
+/**
+ * The longest recording NOVA will accept, in seconds (4 hours).
+ *
+ * Nothing enforced a ceiling before this: `CreateRecordingSchema` and
+ * `UpdateRecordingSchema` took any non-negative integer a client sent, and the
+ * upload query's only bound was a placeholder `86_400` — a day-long meeting the
+ * API would meter, store and queue for transcription. Four hours is far past any
+ * real meeting and well inside the 32 MB object-store limit at the compressed
+ * bitrates the capture path uses.
+ *
+ * The figure is client-reported, like the entitlement meter's: a client that
+ * under-reports is not detected here, and the honest ceiling for that is a
+ * server-side probe of the audio, which this deployment has no decoder for.
+ * Enforcing it at every write boundary is still what stops a legitimate client
+ * from creating and processing an unbounded recording.
+ */
+export const MAX_RECORDING_SECONDS = 4 * 60 * 60;
+
 export const CreateRecordingSchema = z.object({
 	title: z.string().min(1).max(500),
 	language: z.string().max(50).optional(),
@@ -448,17 +497,24 @@ export const CreateRecordingSchema = z.object({
 	// route synthesises a placeholder when the upload pipeline has not supplied
 	// the real object-store key yet.
 	storageKey: z.string().min(1).max(1000).optional(),
-	durationSeconds: z.coerce.number().int().min(0).optional(),
+	durationSeconds: z.coerce.number().int().min(0).max(MAX_RECORDING_SECONDS).optional(),
 	consentRecorded: z.boolean().optional(),
 });
 
 export const UpdateRecordingSchema = z.object({
 	title: z.string().min(1).max(500).optional(),
-	durationSeconds: z.coerce.number().int().min(0).optional(),
-	// Free-form rather than an enum: the client's capture pipeline owns the
-	// vocabulary (recording | processing | completed | failed) and the column is
-	// a varchar(50).
-	status: z.string().min(1).max(50).optional(),
+	durationSeconds: z.coerce.number().int().min(0).max(MAX_RECORDING_SECONDS).optional(),
+	// An enum, not a free-form string. The comment here used to argue that the client
+	// owns this vocabulary; the problem was not ownership but that **any** string was
+	// accepted, so `{"status":"totally-made-up"}` wrote a value no reader recognises and
+	// `{"status":"completed"}` could be asserted at will. The set below is exactly
+	// `RECORDING_STATUS` in `recording-pipeline.ts` — all five, because the app's capture
+	// flow legitimately sends `completed` when capture finishes, and narrowing it to the
+	// terminal states would reject `recording` and `uploaded`.
+	//
+	// Kept as a literal rather than importing the constant: `schemas` is imported by the
+	// pipeline, and importing back would be a cycle.
+	status: z.enum(['recording', 'uploaded', 'processing', 'completed', 'failed']).optional(),
 	consentRecorded: z.boolean().optional(),
 });
 
@@ -477,7 +533,9 @@ export const RecordingListQuerySchema = z.object({
  */
 export const RecordingAudioQuerySchema = z.object({
 	language: z.string().max(50).optional(),
-	durationSeconds: z.coerce.number().int().min(0).max(86_400).optional(),
+	// Was `.max(86_400)` — a day, which is a placeholder rather than a policy.
+	// The same ceiling as every other write path (see MAX_RECORDING_SECONDS).
+	durationSeconds: z.coerce.number().int().min(0).max(MAX_RECORDING_SECONDS).optional(),
 });
 
 /** Body of the async process request. Every field is optional. */
@@ -522,4 +580,41 @@ export const CreateConsentSchema = z.object({
 	granted: z.boolean(),
 	// `consent_records.method` is NOT NULL; the route defaults it to 'app'.
 	method: z.string().min(1).max(50).optional(),
+});
+
+// ─── Account deletion schemas ─────────────────────────────────────────────────
+
+/**
+ * In-app account deletion (App Store 5.1.1(v), Play account-deletion policy).
+ *
+ * `confirm` is a literal, not a boolean: the client has to send the word, which
+ * makes an accidental call obvious in the logs and impossible to trigger from a
+ * generic "delete" helper that flips a flag.
+ */
+export const DeleteAccountSchema = z.object({
+	confirm: z.literal('DELETE'),
+	password: z.string().min(1).max(200).optional(),
+	reason: z.string().max(500).optional(),
+});
+
+/** Web-filed deletion request; public, so the bounds are deliberately tight. */
+export const DeletionRequestSchema = z.object({
+	email: z.string().email().max(255),
+	reason: z.string().max(500).optional(),
+});
+
+// ─── AI content reporting ─────────────────────────────────────────────────────
+
+/**
+ * In-app report of an offensive or unsafe AI reply (Play AI-Generated Content
+ * policy; App Review 1.2).
+ *
+ * `reason` is an enum rather than free text so the review queue is sortable, and
+ * `excerpt` is capped at 500 characters so a report cannot become a second copy of
+ * the conversation.
+ */
+export const AIReportSchema = z.object({
+	messageId: z.string().min(1).max(100),
+	reason: z.enum(['harmful', 'sexual', 'hate', 'unsafe', 'other']),
+	excerpt: z.string().max(500).optional(),
 });

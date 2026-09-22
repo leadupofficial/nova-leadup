@@ -125,7 +125,7 @@ class ActivityPage extends ConsumerWidget {
                         ? 'Nothing here yet'
                         : 'No ${filter.label.toLowerCase()} activity',
                     message:
-                        'Actions NOVA takes on your behalf are recorded here.',
+                        'Account and privacy events are recorded here.',
                   )
                 : Column(
                     children: list

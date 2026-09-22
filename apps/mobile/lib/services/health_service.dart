@@ -21,9 +21,16 @@ class HealthService {
 
   HealthService({required this.network});
 
-  Future<HealthCheckResult> check({String path = '/healthz'}) async {
+  Future<HealthCheckResult> check({
+    String path = '/healthz',
+    CancelToken? cancelToken,
+  }) async {
     try {
-      final response = await network.requestOnce('GET', path);
+      final response = await network.requestOnce(
+        'GET',
+        path,
+        cancelToken: cancelToken,
+      );
       final statusCode = response.statusCode;
       final isHealthy = statusCode != null && statusCode >= 200 && statusCode < 300;
 

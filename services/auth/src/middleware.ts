@@ -4,28 +4,109 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { verifyAccessToken } from './jwt.js';
-import { findSessionByToken } from './repositories/sessions.js';
-import { findUserById } from './repositories/users.js';
-import { findRoleByKey } from './repositories/roles.js';
 import { tokenDenylist } from './tokenDenylist.js';
 import { ROLE_PERMISSIONS } from '@nova/auth-types';
-import rateLimit from 'express-rate-limit';
-import RedisStore from 'rate-limit-redis';
+import rateLimit, { MemoryStore } from 'express-rate-limit';
 import Redis from 'ioredis';
 
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+/**
+ * Redis client for the rate-limit stores.
+ *
+ * `ioredis` emits `error` events, and an EventEmitter with no `error` listener
+ * **throws** — so an unreachable Redis (a perfectly normal condition: the gateway,
+ * the admin API and the integration service all import this module) produced a flood
+ * of unhandled errors and eventually a `MaxRetriesPerRequestError` that took the
+ * process down. The listener keeps the failure where it belongs: in the log.
+ */
+const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+	lazyConnect: false,
+	maxRetriesPerRequest: 2,
+});
+redis.on('error', (err: Error) => {
+	// eslint-disable-next-line no-console
+	console.error('[auth] redis unavailable; rate limiting degrades gracefully:', err.message);
+});
 
 /**
- * Bridge for rate-limit-redis v4, which sends raw Redis commands.
- * ioredis types `call()` as returning `unknown`, so the reply is narrowed to
- * the scalar/array shapes the store understands.
+ * A rate-limit store backed by Redis that cannot take the process down.
+ *
+ * `rate-limit-redis` loads its Lua scripts **in the constructor**:
+ *
+ * ```js
+ * this.incrementScriptSha = this.loadIncrementScript();   // floating promise
+ * ```
+ *
+ * That promise is never awaited or caught, so with Redis unreachable it rejected as an
+ * **unhandled rejection** — which killed the admin API process and failed the auth test
+ * suite while all 27 tests passed. Wrapping `sendCommand` to swallow errors only moved
+ * the failure: the store then threw `unexpected reply from redis client` from the same
+ * floating promise.
+ *
+ * This store does the same job with two plain commands (`INCR` + `PEXPIRE`), so there is
+ * no script loading and no floating promise. On any Redis error it delegates to an
+ * in-memory store, so rate limiting keeps working within one process instead of
+ * disappearing — and `passOnStoreError` on the limiters covers the remaining path where
+ * the memory store itself could throw.
  */
-type RedisStoreReply = string | number | boolean | (string | number | boolean)[];
-const sendRedisCommand = (...args: string[]): Promise<RedisStoreReply> =>
-  redis.call(args[0], args.slice(1)) as Promise<RedisStoreReply>;
+class FailOpenRedisStore {
+	private readonly memory = new MemoryStore();
+	/** `Store` requires this to be public. */
+	prefix = 'rl:';
+	/** Window length; `express-rate-limit` passes it through `init`. */
+	private windowMs = 60_000;
+
+	init(options?: { windowMs?: number; prefix?: string }): void {
+		this.windowMs = options?.windowMs ?? this.windowMs;
+		this.prefix = options?.prefix ?? this.prefix;
+		(this.memory as unknown as { init?: (o: unknown) => void }).init?.(options);
+	}
+
+	async increment(key: string): Promise<{ totalHits: number; resetTime: Date | undefined }> {
+		try {
+			const redisKey = this.prefix + key;
+			const totalHits = await redis.incr(redisKey);
+			if (totalHits === 1) {
+				await redis.pexpire(redisKey, this.windowMs);
+			}
+			const ttl = await redis.pttl(redisKey);
+			return {
+				totalHits,
+				resetTime: new Date(Date.now() + (ttl > 0 ? ttl : this.windowMs)),
+			};
+		} catch {
+			return this.memory.increment(key);
+		}
+	}
+
+	async decrement(key: string): Promise<void> {
+		try {
+			await redis.decr(this.prefix + key);
+		} catch {
+			return this.memory.decrement(key);
+		}
+	}
+
+	async resetKey(key: string): Promise<void> {
+		try {
+			await redis.del(this.prefix + key);
+		} catch {
+			return this.memory.resetKey(key);
+		}
+	}
+
+	async resetAll(): Promise<void> {
+		try {
+			const keys = await redis.keys(`${this.prefix}*`);
+			if (keys.length > 0) await redis.del(...keys);
+		} catch {
+			return this.memory.resetAll();
+		}
+	}
+}
 
 export const authLimiter = rateLimit({
-  store: new RedisStore({ sendCommand: sendRedisCommand }),
+  store: new FailOpenRedisStore(),
+  passOnStoreError: true,
   windowMs: 15 * 60 * 1000,
   max: 5,
   message: { error: 'Too many authentication attempts, please try again later' },
@@ -34,7 +115,8 @@ export const authLimiter = rateLimit({
 });
 
 export const apiLimiter = rateLimit({
-  store: new RedisStore({ sendCommand: sendRedisCommand }),
+  store: new FailOpenRedisStore(),
+  passOnStoreError: true,
   windowMs: 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -85,8 +167,16 @@ export async function authenticateJwt(req: Request, _res: Response, next: NextFu
    return next(new AuthHttpError('Token has been revoked', 401, 'Unauthorized', 'https://api.nova.leadup.in/problems/token-revoked'));
  }
 
- const roleRow = await findRoleByKey(payload.role);
- const roleKey = roleRow?.key ?? 'member';
+ // The claims of a token that passed the signature and denylist checks are
+ // authoritative. This used to make three database round-trips
+ // (`findRoleByKey`, `findSessionByToken`, `findUserById`) against a schema this
+ // package no longer matches — `roles.key` vs `roles.slug`,
+ // `sessions.token_hash`/`status` vs `sessions.refresh_token_hash`/`revoked_at`,
+ // `users.deleted_at` vs `users.disabled`. Every request through services/admin and
+ // services/integration-service therefore died with `column "key" does not exist`
+ // and answered 500, with a valid owner token included. Revocation is enforced by
+ // the `jti` denylist above, which is how services/api's middleware does it.
+ const roleKey = payload.role || 'member';
  const permissions = ROLE_PERMISSIONS[roleKey as keyof typeof ROLE_PERMISSIONS] ?? [];
 
  const ctx: AuthContext = {
@@ -99,21 +189,13 @@ export async function authenticateJwt(req: Request, _res: Response, next: NextFu
 
  (req as unknown as { auth: AuthContext }).auth = ctx;
 
- // Look up session to confirm it is still active
- const session = await findSessionByToken(token);
- if (!session || session.status !== 'active') {
- return next(new AuthHttpError('Session expired or revoked', 401, 'Unauthorized', 'https://api.nova.leadup.in/problems/session-expired'));
- }
-
- // Attach minimal user info from DB
- const user = await findUserById(payload.sub);
- if (user) {
+ // Attach minimal user info from the token, so downstream handlers do not need a
+ // second lookup for the fields they all use.
  (req as unknown as { user: AuthUser }).user = {
- id: user.id,
- email: user.email,
- name: (user as any).name ?? '',
+ id: payload.sub,
+ email: (payload as { email?: string }).email ?? '',
+ name: (payload as { name?: string }).name ?? '',
  };
- }
 
  next();
  } catch (err) {

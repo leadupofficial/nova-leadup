@@ -128,13 +128,22 @@ export function parseDateTime(value: string, timeZone: string): Date | null {
 	return Number.isNaN(fallback.getTime()) ? null : fallback;
 }
 
-/** Renders an instant in a zone, matching the grounding block's format. */
+/**
+ * Renders an instant in a zone, matching the grounding block's format.
+ *
+ * The year is included on purpose. Without it this rendered "Mon 21 Sept,
+ * 02:54 pm", and a model asked to correct a past reminder read that as *some*
+ * 21 September — it retried with another 2025 date every time and the turn
+ * ended with the loop capped. A wall-clock time the model is told to recompute
+ * from is only usable if the year is in it.
+ */
 export function formatInZone(date: Date, timeZone: string): string {
 	return new Intl.DateTimeFormat('en-GB', {
 		timeZone,
 		weekday: 'short',
 		day: '2-digit',
 		month: 'short',
+		year: 'numeric',
 		hour: '2-digit',
 		minute: '2-digit',
 		hour12: true,

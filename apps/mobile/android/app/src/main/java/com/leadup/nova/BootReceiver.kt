@@ -17,11 +17,17 @@ import android.util.Log
  *    for someone who never asked for it is both a privacy problem and a Play policy
  *    problem.
  *
- * 2. **Android 15+ forbids it.** Starting a `microphone`-type foreground service from
- *    a `BOOT_COMPLETED` receiver is disallowed from Android 15 (API 35) onwards and
- *    raises `ForegroundServiceStartNotAllowedException`. On those versions we skip the
- *    start entirely and let the wake word re-arm the next time the app is opened, so
- *    the receiver never crashes the process.
+ * 2. **Android 14+ forbids it.** Android 14 (API 34) introduced the *while-in-use*
+ *    restriction: an app in the background may not start a foreground service that uses
+ *    a while-in-use permission, and `microphone` is one of them. A `BOOT_COMPLETED`
+ *    receiver always runs in the background, so from API 34 the start fails with
+ *    `ForegroundServiceStartNotAllowedException`. (Android 15 / API 35 then tightened the
+ *    same rule specifically for `BOOT_COMPLETED`.) On those versions we skip the start
+ *    entirely and let the wake word re-arm the next time the app is opened, so the
+ *    receiver never crashes the process.
+ *
+ *    The guard is `UPSIDE_DOWN_CAKE` (34), not `VANILLA_ICE_CREAM` (35): gating at 35
+ *    left API 34 devices taking the exception path at every boot.
  */
 class BootReceiver : BroadcastReceiver() {
 
@@ -34,11 +40,12 @@ class BootReceiver : BroadcastReceiver() {
             return
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             Log.i(
                 TAG,
-                "Boot completed on API ${Build.VERSION.SDK_INT}: microphone foreground services " +
-                    "cannot be started from BOOT_COMPLETED. Wake word will re-arm on next app launch.",
+                "Boot completed on API ${Build.VERSION.SDK_INT}: a microphone foreground service " +
+                    "cannot be started while the app is in the background. Wake word will re-arm " +
+                    "on next app launch.",
             )
             return
         }

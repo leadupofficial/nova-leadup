@@ -8,6 +8,7 @@
  * copies of that logic would drift, so it lives here.
  */
 import { z } from 'zod';
+import { audioRecordings } from '@nova/database';
 import { HttpError } from '../middleware/error-handler.js';
 import { decodeCursor } from '../schemas/index.js';
 
@@ -44,4 +45,41 @@ export function parseCursor(raw: string): string {
 		throw new HttpError(400, 'Invalid cursor', 'INVALID_CURSOR');
 	}
 	return id;
+}
+
+/**
+ * The columns of a recording a client is allowed to see.
+ *
+ * The list, detail and upload routes returned the whole row, which carries `storageKey` —
+ * the object-storage path `recordings/<userId>/<recordingId><ext>` — and `tenantId`.
+ * Neither is read by any client (checked across the Dart and TypeScript consumers), and
+ * both are internal addressing rather than data the app asked for. Selecting explicitly
+ * also means a column added to the table later does not silently become public API.
+ *
+ * This is not about the *deliberate* `storage` envelope on the upload response, which
+ * tells the client where its bytes went and is part of that endpoint's contract. It is
+ * about not dumping the row and hoping the extra fields are harmless.
+ */
+export const RECORDING_COLUMNS = {
+	id: audioRecordings.id,
+	title: audioRecordings.title,
+	durationSeconds: audioRecordings.durationSeconds,
+	language: audioRecordings.language,
+	status: audioRecordings.status,
+	participants: audioRecordings.participants,
+	consentRecorded: audioRecordings.consentRecorded,
+	// Why a run failed, as the pipeline's own failure path recorded it. Without a
+	// reason the client can only say "failed", so the user cannot tell a retryable
+	// provider error from an upload that never arrived.
+	failureReason: audioRecordings.failureReason,
+	completedAt: audioRecordings.completedAt,
+	createdAt: audioRecordings.createdAt,
+	updatedAt: audioRecordings.updatedAt,
+} as const;
+
+/** The same projection applied to a row that was already read in full. */
+export function toClientRecording<T extends Record<string, unknown>>(row: T) {
+	const picked: Record<string, unknown> = {};
+	for (const key of Object.keys(RECORDING_COLUMNS)) picked[key] = row[key];
+	return picked as Pick<T, keyof typeof RECORDING_COLUMNS>;
 }

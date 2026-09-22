@@ -33,6 +33,11 @@
  * row at `processing` — the truth — rather than silently completing it. Moving
  * this onto a real queue is a change to the runner, not to the stages.
  *
+ * The recovery half of that trade lives in `jobs/recording-reaper.ts`: the row
+ * itself (its `status` and `updated_at`) is the durable state, and a sweep
+ * re-enqueues or closes any recording whose state has not moved past its
+ * deadline. So a restart mid-job is no longer a permanent strand.
+ *
  * ## Diarisation
  *
  * Not available, and not simulated. Every segment carries `speakerIndex: 0`,
@@ -42,9 +47,10 @@
  * exactly the fabrication this pipeline exists to avoid.
  */
 import { and, eq } from 'drizzle-orm';
+import { getPrivacyPreferences } from './privacy-preferences.js';
 import { audioRecordings, transcripts, recordingSummaries, transcriptSegments } from '@nova/database';
 import { getDb } from '../db/connection.js';
-import { getAudio } from './audio-storage.js';
+import { deleteAudio, getAudio } from './audio-storage.js';
 import { transcribeAudioForLanguage, type TranscribedWord } from './ai.js';
 import {
 	summariseTranscript,
@@ -197,6 +203,17 @@ export function resetPipelineState(): void {
 	inFlight.clear();
 }
 
+/**
+ * Whether this process is running the pipeline for `recordingId` right now.
+ *
+ * Used by `jobs/recording-reaper.ts`: a row it is considering re-enqueuing may be
+ * a run this very process is still executing (a long transcription), and
+ * restarting that would be work done twice over the same audio.
+ */
+export function isPipelineInFlight(recordingId: string): boolean {
+	return inFlight.has(recordingId);
+}
+
 async function setStatus(
 	recordingId: string,
 	userId: string,
@@ -210,14 +227,57 @@ async function setStatus(
 		.where(and(eq(audioRecordings.id, recordingId), eq(audioRecordings.userId, userId)));
 }
 
+/**
+ * Marks a run failed — and, when the user has "Save recordings" off, removes the audio
+ * on the way out.
+ *
+ * The success path already deletes the object after the summary exists. Without this,
+ * a run that fails (provider error, the process dying, `/process` never being called)
+ * left the audio in storage until the retention window — default 30 days — which is not
+ * what the switch promised.
+ */
 async function fail(
 	recordingId: string,
 	userId: string,
 	reason: string,
 	err?: unknown,
 ): Promise<PipelineResult> {
-	await setStatus(recordingId, userId, RECORDING_STATUS.failed);
+	await setStatus(recordingId, userId, RECORDING_STATUS.failed, { failureReason: reason });
 	logger.error({ err, recordingId, reason }, 'Recording pipeline failed');
+
+	// Honour "Save recordings" on the way out. The success path deletes the object once
+	// the summary exists; without this, a run that fails — provider error, a dead
+	// process, or `/process` simply never being called — left the audio in storage until
+	// the retention window (30 days by default), which is not what the switch promised.
+	try {
+		const db = getDb();
+		const prefs = await getPrivacyPreferences(db, userId);
+		if (!prefs.saveRecordings) {
+			const [row] = await db
+				.select({ storageKey: audioRecordings.storageKey })
+				.from(audioRecordings)
+				.where(and(eq(audioRecordings.id, recordingId), eq(audioRecordings.userId, userId)))
+				.limit(1);
+			if (row?.storageKey) {
+				await deleteAudio(row.storageKey);
+				await db
+					.update(audioRecordings)
+					.set({ deletedAt: new Date(), updatedAt: new Date() })
+					.where(eq(audioRecordings.id, recordingId));
+				logger.info(
+					{ recordingId, userId },
+					'Recording audio deleted after a failed run — "Save recordings" is off',
+				);
+			}
+		}
+	} catch (purgeErr) {
+		// Never let the cleanup change the outcome of the run it is cleaning up after.
+		logger.error(
+			{ err: purgeErr, recordingId },
+			'Could not purge the recording audio after a failure; it remains eligible for the retention sweep',
+		);
+	}
+
 	return {
 		recordingId,
 		status: RECORDING_STATUS.failed,
@@ -280,7 +340,10 @@ export async function runRecordingPipeline(
 			};
 		}
 
-		await setStatus(recordingId, userId, RECORDING_STATUS.processing);
+		// A fresh run starts with no failure, so a recording that is re-processed
+		// after an earlier failure does not end up `completed` while still carrying
+		// the old reason — a status and a reason that contradict each other.
+		await setStatus(recordingId, userId, RECORDING_STATUS.processing, { failureReason: null });
 
 		// ── 1. Read the audio back out of object storage ──────────────────────
 		let audio: Buffer;
@@ -309,21 +372,53 @@ export async function runRecordingPipeline(
 		// ── 3. Persist the transcript ────────────────────────────────────────
 		// The unique index on `transcripts.recording_id` makes a re-run an
 		// update, and the segments cascade with the old row.
-		await db.delete(transcripts).where(eq(transcripts.recordingId, recordingId));
+		//
+		// "Save transcripts" in Profile → Privacy controls. When it is off the text is
+		// still produced and summarised for this run — the user asked for a summary —
+		// but nothing is written to the database, so it cannot be read back later.
+		// `transcript` stays null and every downstream write tolerates that.
+		const prefs = await getPrivacyPreferences(db, userId);
+
+		// The deletes run whether or not the switch is on, and deliberately: a user who
+		// has just turned "Save transcripts" off is asking for the stored ones to go, and
+		// a re-process is the moment that can be honoured. A previous revision deleted
+		// before the guard too, which an adversarial pass read as data loss — it is the
+		// opposite: the row that would be destroyed is the one the user asked not to
+		// keep.
+		//
+		// **Order matters, and it was wrong.** `recording_summaries.transcript_id` is
+		// `NO ACTION`, not CASCADE (`schema.ts` declares no `onDelete` on it;
+		// `confdeltype = 'a'`). Deleting the transcript first therefore raised 23503
+		// whenever a summary referenced it, the summary delete below was never reached,
+		// and — because this sits inside the pipeline's try — a perfectly good completed
+		// recording was flipped to `failed` on every re-process. Reproduced: run 1
+		// `completed`, run 2 `failed` with
+		// `constraint "recording_summaries_transcript_id_transcripts_id_fk"`. The
+		// retention sweep had already been fixed for exactly this; the pipeline had not.
 		await db.delete(recordingSummaries).where(eq(recordingSummaries.recordingId, recordingId));
+		await db.delete(transcripts).where(eq(transcripts.recordingId, recordingId));
 
-		const [transcript] = await db
-			.insert(transcripts)
-			.values({
-				recordingId,
-				fullText: text,
-				language: transcription.language ?? language,
-			})
-			.returning();
+		let transcript: { id: string } | undefined;
+		if (prefs.saveTranscripts) {
+			[transcript] = await db
+				.insert(transcripts)
+				.values({
+					recordingId,
+					fullText: text,
+					language: transcription.language ?? language,
+				})
+				.returning();
 
-		if (segments.length && transcript?.id) {
-			await db.insert(transcriptSegments).values(
-				segments.map((segment) => ({ ...segment, transcriptId: transcript.id })),
+			const transcriptId = transcript?.id;
+			if (segments.length && transcriptId) {
+				await db.insert(transcriptSegments).values(
+					segments.map((segment) => ({ ...segment, transcriptId })),
+				);
+			}
+		} else {
+			logger.info(
+				{ recordingId, userId },
+				'Transcript produced but not stored — "Save transcripts" is off',
 			);
 		}
 
@@ -334,17 +429,56 @@ export async function runRecordingPipeline(
 		});
 		const draft: MeetingSummaryDraft = summary.draft;
 
-		await db.insert(recordingSummaries).values({
-			recordingId,
-			transcriptId: transcript?.id ?? null,
-			summary: draft.summary,
-			decisions: draft.decisions,
-			actionItems: draft.actionItems,
-			extractedContacts: draft.contacts,
-		});
+		// The summary is derived from the transcript — it carries the decisions, action
+		// items and contacts that were extracted from it — so it is gated on the same
+		// switch. Writing it while "Save transcripts" is off would retain exactly the
+		// content the user asked not to keep, just in a different table. There is no
+		// separate "save summaries" preference to consult.
+		if (prefs.saveTranscripts) {
+			await db.insert(recordingSummaries).values({
+				recordingId,
+				transcriptId: transcript?.id ?? null,
+				summary: draft.summary,
+				decisions: draft.decisions,
+				actionItems: draft.actionItems,
+				extractedContacts: draft.contacts,
+			});
+		} else {
+			logger.info(
+				{ recordingId, userId },
+				'Summary produced but not stored — "Save transcripts" is off',
+			);
+		}
 
 		// ── 5. Complete ──────────────────────────────────────────────────────
 		await setStatus(recordingId, userId, RECORDING_STATUS.completed, { completedAt: new Date() });
+
+		// ── 5b. Honour "Save recordings" ─────────────────────────────────────
+		//
+		// The row had to exist for the capture to upload against, and the audio had to
+		// be stored to be transcribed — but once the summary exists, a user who
+		// switched "Save recordings" off is entitled to have the audio go away. The
+		// object is removed before the row is stamped, so a storage failure leaves the
+		// recording visible (and swept later) rather than silently retaining audio the
+		// user asked not to keep.
+		if (!prefs.saveRecordings) {
+			try {
+				await deleteAudio(recording.storageKey);
+				await db
+					.update(audioRecordings)
+					.set({ deletedAt: new Date(), updatedAt: new Date() })
+					.where(eq(audioRecordings.id, recordingId));
+				logger.info(
+					{ recordingId, userId },
+					'Recording audio deleted after processing — "Save recordings" is off',
+				);
+			} catch (err) {
+				logger.error(
+					{ err, recordingId, userId },
+					'Could not delete the recording audio after processing; it remains eligible for the retention sweep',
+				);
+			}
+		}
 
 		logger.info(
 			{
@@ -392,4 +526,21 @@ export function enqueueRecordingProcessing(recordingId: string, userId: string):
 			logger.error({ err, recordingId }, 'Recording pipeline crashed outside its own error handling');
 		});
 	});
+}
+
+/**
+ * Closes a recording that no run is going to finish, from outside the pipeline.
+ *
+ * `jobs/recording-reaper.ts` uses this instead of writing `status = 'failed'`
+ * itself so there is one writer for the failed transition — and, more
+ * importantly, so the scan honours the same "Save recordings" promise as a run
+ * that fails on its own (see [fail]: the audio is deleted when the switch is
+ * off). `reason` lands in the log line, next to the recording id.
+ */
+export async function failStuckRecording(
+	recordingId: string,
+	userId: string,
+	reason: string,
+): Promise<void> {
+	await fail(recordingId, userId, reason);
 }

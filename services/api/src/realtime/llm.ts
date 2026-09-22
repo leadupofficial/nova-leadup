@@ -11,25 +11,60 @@
  * events, `tool_use` blocks streamed as `input_json_delta`), reusing the same
  * base URL, credential and auth style as the SDK path via
  * `getAnthropicHttpConfig()`, and the same safety pre-flight via the exported
- * guardrails in `services/ai.ts`.
+ * guardrails in `services/ai.ts`. The SSE reading itself lives in
+ * `services/llm-transport.ts` so the primary and the fallback provider cannot
+ * be parsed differently.
+ *
+ * ── The fallback rule on this path ──────────────────────────────────────
+ * A spoken turn cannot be unsaid, so the fallback is taken **only when the
+ * request failed before a single delta reached the caller** — the natural
+ * first-token boundary, since nothing exists to emit before then. That is the
+ * "buffer until the first token, then commit" option with no extra buffering:
+ * the first `onTextDelta` *is* the commit. Once a token has been handed to TTS
+ * the turn belongs to the primary provider and its failure propagates.
+ *
+ * The trade-off, stated plainly: a provider that dies mid-sentence still ends
+ * the turn with half a sentence spoken and no retry. Buffering the whole reply
+ * to make that retryable would destroy the latency-to-first-word that is the
+ * entire reason this path streams.
+ *
+ * A turn that has already executed a tool is never retried on either path — see
+ * `services/llm-fallback.ts#shouldUseFallback`. Tools are executed *between*
+ * model calls, so the fallback covers the first model call of a turn and stops
+ * covering the turn the moment a reminder or task has actually been written.
  */
 import { HttpError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
+import { AI_CREDIT_EXHAUSTED_MESSAGE, isCreditExhausted } from '../services/assistant.js';
 import {
 	getAnthropicHttpConfig,
 	SAFETY_SYSTEM_PROMPT_SUFFIX,
 	containsJailbreak,
 	containsUnsafeContent,
 	redactPII,
-	looksLikeProviderNotice,
+	defaultMaxOutputTokens,
 	type ChatContentBlock,
 	type ChatMessage,
 	type ToolDefinition,
 	type ToolUseBlock,
 } from '../services/ai.js';
+import {
+	FALLBACK_PROVIDER_LABEL,
+	ProviderRequestError,
+	getLlmFallbackConfig,
+	isAbortError,
+	withProviderFallback,
+} from '../services/llm-fallback.js';
+import { streamOnEndpoint, TRANSPORT_TIMEOUT_MS, type LlmRequest } from '../services/llm-transport.js';
 
-/** Provider calls are capped like the REST path (P0-06: 120 s). */
-const REQUEST_TIMEOUT_MS = 120_000;
+// Re-exported so `session.ts` and the socket tests keep importing both from here.
+export { isAbortError };
+
+/**
+ * The 120 s provider ceiling, re-exported from the transport that enforces it so
+ * a change to the budget is one edit.
+ */
+export const STREAM_REQUEST_TIMEOUT_MS = TRANSPORT_TIMEOUT_MS;
 
 export interface StreamChatOptions {
 	model?: string;
@@ -38,6 +73,27 @@ export interface StreamChatOptions {
 	systemPrompt?: string;
 	tools?: ToolDefinition[];
 	signal?: AbortSignal;
+	/**
+	 * Whether a pre-first-token provider failure may be retried on the configured
+	 * secondary provider. Defaults to `true` (nothing has been emitted yet at the
+	 * moment the request is made); `runStreamingAssistantLoop` passes `false` once
+	 * it has executed a tool, because a retry must never be able to repeat a
+	 * side-effecting write.
+	 */
+	allowProviderFallback?: boolean;
+	/**
+	 * Serve this call directly from the configured secondary provider because an
+	 * **earlier call of the same assistant turn** already found the primary
+	 * unusable.
+	 *
+	 * Sticky provider selection for one turn, exactly as on the REST path: a turn
+	 * whose first call fell back must not re-probe the dead primary on its next
+	 * iteration. It changes nothing about the commit point — the fallback is
+	 * still only *started* before any delta, and the caller's `retrySafe` answer
+	 * still governs whether a failure may be retried on top of that. Owned by the
+	 * caller's loop, so one turn never pins another.
+	 */
+	preferFallback?: boolean;
 }
 
 export interface StreamChatResult {
@@ -47,15 +103,10 @@ export interface StreamChatResult {
 	blocks: ChatContentBlock[];
 	stopReason: string | null;
 	toolUses: ToolUseBlock[];
-}
-
-/** True when a rejection is our own cancellation rather than a provider fault. */
-export function isAbortError(err: unknown): boolean {
-	return (
-		!!err &&
-		typeof err === 'object' &&
-		((err as { name?: string }).name === 'AbortError' || (err as { code?: string }).code === 'ABORT_ERR')
-	);
+	/** Which provider served this turn: `'anthropic'` or `'llm-fallback'`. */
+	provider?: string;
+	/** True when the secondary provider served this turn. */
+	fellBack?: boolean;
 }
 
 function messageText(content: string | ChatContentBlock[]): string {
@@ -75,6 +126,39 @@ function sanitizeMessages(messages: ChatMessage[]): ChatMessage[] {
 			content: m.content.map((b) => (b.type === 'text' ? { ...b, text: redactPII(b.text) } : b)),
 		};
 	});
+}
+
+/**
+ * Maps a provider failure onto the stable `HttpError` codes the socket and the
+ * REST voice route share. A plain abort is a cancellation, not a failure, and is
+ * rethrown untouched so `session.ts` can tell a barge-in from an outage.
+ */
+function toStreamHttpError(err: unknown): unknown {
+	if (!(err instanceof ProviderRequestError)) return err;
+
+	const detail = err.message;
+	// A 402, or a `200` carrying the billing notice, is the gateway saying the
+	// account cannot pay for the next call. Classified with the same detector
+	// REST uses, so the two cannot drift.
+	if (isCreditExhausted(err.status, detail)) {
+		return new HttpError(503, AI_CREDIT_EXHAUSTED_MESSAGE, 'AI_CREDIT_EXHAUSTED');
+	}
+	if (err.kind === 'notice') {
+		return new HttpError(502, `AI provider rejected the request: ${detail.slice(0, 200)}`, 'AI_ERROR');
+	}
+	if (err.kind === 'stream') {
+		// Byte-for-byte the message the SSE reader produced before the fallback
+		// existed, so a client's error handling is unchanged.
+		return new HttpError(502, detail.slice(0, 200), 'AI_ERROR');
+	}
+	if (err.status === 401 || err.status === 403) {
+		return new HttpError(
+			503,
+			'The AI provider rejected this server’s credentials.',
+			'AI_NOT_CONFIGURED',
+		);
+	}
+	return new HttpError(502, `AI provider failed (${err.status ?? 'unknown'})`, 'AI_ERROR');
 }
 
 /**
@@ -109,167 +193,83 @@ export async function streamChatCompletion(
 		? `${options.systemPrompt}\n\n${SAFETY_SYSTEM_PROMPT_SUFFIX}`
 		: SAFETY_SYSTEM_PROMPT_SUFFIX;
 
-	const body: Record<string, unknown> = {
-		// The realtime model, not the general one: time-to-first-token is the
-		// dominant cost in a spoken turn and a faster model is what closes the
-		// gap to a Siri-class response.
-		model: options.model || cfg.realtimeModel,
-		max_tokens: options.maxTokens ?? 1024,
-		temperature: options.temperature ?? 0.7,
-		// Array-of-blocks `system` is what the REST path sends and what the
-		// gateway accepts; keep it byte-compatible.
-		system: [{ type: 'text', text: systemPrompt }],
+	// The realtime model, not the general one: time-to-first-token is the
+	// dominant cost in a spoken turn and a faster model is what closes the gap
+	// to a Siri-class response.
+	const request: LlmRequest = {
 		messages: sanitizeMessages(messages),
-		stream: true,
+		systemPrompt,
+		model: options.model || cfg.realtimeModel,
+		maxTokens: options.maxTokens ?? defaultMaxOutputTokens(),
+		temperature: options.temperature ?? 0.7,
+		tools: options.tools,
 	};
-	if (options.tools?.length) body.tools = options.tools;
 
-	const headers: Record<string, string> = {
-		'content-type': 'application/json',
-		'anthropic-version': '2023-06-01',
+	const primaryEndpoint = {
+		label: 'anthropic',
+		baseURL: cfg.baseURL,
+		apiKey: cfg.apiKey,
+		authStyle: cfg.authStyle,
+		protocol: 'anthropic' as const,
 	};
-	if (cfg.authStyle === 'bearer') headers.Authorization = `Bearer ${cfg.apiKey}`;
-	else headers['x-api-key'] = cfg.apiKey;
 
-	const controller = new AbortController();
-	const abortFromCaller = () => controller.abort();
-	if (options.signal) {
-		if (options.signal.aborted) controller.abort();
-		else options.signal.addEventListener('abort', abortFromCaller, { once: true });
-	}
-	const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+	// ── The commit point ────────────────────────────────────────────────
+	// Nothing has been emitted before the first delta, so a failure up to that
+	// point is retryable. The instant this flag flips, the turn is committed and
+	// a retry can no longer happen.
+	let committed = false;
+	const emit = (text: string): void => {
+		committed = true;
+		onTextDelta(text);
+	};
 
-	const blocks = new Map<number, ChatContentBlock>();
-	const order: number[] = [];
-	const partialJson = new Map<number, string>();
-	let content = '';
-	let model = String(body.model);
-	let inputTokens = 0;
-	let outputTokens = 0;
-	let stopReason: string | null = null;
+	const fallback = getLlmFallbackConfig(cfg.realtimeModel);
+	const allowFallback = options.allowProviderFallback !== false;
+	const cancelled = (): boolean => options.signal?.aborted === true;
 
+	let served;
 	try {
-		const response = await fetch(`${cfg.baseURL.replace(/\/+$/, '')}/v1/messages`, {
-			method: 'POST',
-			headers,
-			body: JSON.stringify(body),
-			signal: controller.signal,
+		served = await withProviderFallback<StreamChatResult>({
+			primaryProvider: 'anthropic',
+			primaryModel: request.model,
+			secrets: [cfg.apiKey, fallback?.apiKey],
+			// Sticky per turn: an iteration after the first fallback must not
+			// re-probe a primary this turn has already found unusable. This is
+			// independent of the commit point below — nothing is retried, the
+			// turn's next request is simply sent to the provider it already chose.
+			preferFallback: options.preferFallback === true,
+			isRetrySafe: () => allowFallback && !committed && !cancelled(),
+			primary: async () => {
+				const result = await streamOnEndpoint(primaryEndpoint, request, emit, options.signal);
+				return { ...result, provider: 'anthropic', fellBack: false };
+			},
+			fallback: fallback
+				? {
+						provider: FALLBACK_PROVIDER_LABEL,
+						model: fallback.model,
+						protocol: fallback.protocol,
+						call: async () => {
+							const result = await streamOnEndpoint(
+								fallback,
+								{ ...request, model: fallback.model },
+								emit,
+								options.signal,
+							);
+							return { ...result, provider: FALLBACK_PROVIDER_LABEL, fellBack: true };
+						},
+					}
+				: null,
 		});
-
-		if (!response.ok || !response.body) {
-			const detail = await response.text().catch(() => '');
-			logger.warn({ status: response.status, detail: detail.slice(0, 300) }, 'Streaming chat provider failed');
-			throw new HttpError(
-				response.status === 401 || response.status === 403 ? 503 : 502,
-				response.status === 401 || response.status === 403
-					? 'The AI provider rejected this server’s credentials.'
-					: `AI provider failed (${response.status})`,
-				response.status === 401 || response.status === 403 ? 'AI_NOT_CONFIGURED' : 'AI_ERROR',
-			);
-		}
-
-		const reader = response.body.getReader();
-		const decoder = new TextDecoder();
-		let buffer = '';
-
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			buffer += decoder.decode(value, { stream: true });
-
-			const lines = buffer.split('\n');
-			buffer = lines.pop() ?? '';
-			for (const rawLine of lines) {
-				const line = rawLine.replace(/\r$/, '');
-				if (!line.startsWith('data:')) continue;
-				const payload = line.slice(5).trim();
-				if (!payload || payload === '[DONE]') continue;
-
-				let event: any;
-				try {
-					event = JSON.parse(payload);
-				} catch {
-					continue;
-				}
-
-				switch (event.type) {
-					case 'message_start':
-						model = event.message?.model ?? model;
-						inputTokens = event.message?.usage?.input_tokens ?? inputTokens;
-						break;
-					case 'content_block_start': {
-						const index = event.index ?? order.length;
-						const block = event.content_block;
-						if (block?.type === 'text') {
-							blocks.set(index, { type: 'text', text: block.text ?? '' });
-						} else if (block?.type === 'tool_use') {
-							blocks.set(index, {
-								type: 'tool_use',
-								id: block.id,
-								name: block.name,
-								input: (block.input ?? {}) as Record<string, unknown>,
-							});
-							partialJson.set(index, '');
-						} else {
-							continue;
-						}
-						order.push(index);
-						break;
-					}
-					case 'content_block_delta': {
-						const index = event.index ?? 0;
-						const delta = event.delta;
-						if (delta?.type === 'text_delta' && delta.text) {
-							const block = blocks.get(index);
-							if (block && block.type === 'text') block.text += delta.text;
-							content += delta.text;
-							onTextDelta(delta.text);
-						} else if (delta?.type === 'input_json_delta') {
-							partialJson.set(index, (partialJson.get(index) ?? '') + (delta.partial_json ?? ''));
-						}
-						break;
-					}
-					case 'content_block_stop': {
-						const index = event.index ?? 0;
-						const block = blocks.get(index);
-						const json = partialJson.get(index);
-						if (block && block.type === 'tool_use' && json) {
-							try {
-								block.input = JSON.parse(json) as Record<string, unknown>;
-							} catch {
-								logger.warn({ index, json: json.slice(0, 200) }, 'Unparseable tool_use input');
-							}
-						}
-						break;
-					}
-					case 'message_delta':
-						stopReason = event.delta?.stop_reason ?? stopReason;
-						outputTokens = event.usage?.output_tokens ?? outputTokens;
-						break;
-					case 'error':
-						throw new HttpError(502, `AI provider error: ${event.error?.message ?? 'unknown'}`, 'AI_ERROR');
-					default:
-						break;
-				}
-			}
-		}
-	} finally {
-		clearTimeout(timeout);
-		options.signal?.removeEventListener('abort', abortFromCaller);
+	} catch (err) {
+		throw toStreamHttpError(err);
 	}
 
-	// A gateway that answers 200 with a credential/quota notice as ordinary
-	// text would otherwise have NOVA read it aloud. Same guard as the REST path.
-	if (outputTokens === 0 && looksLikeProviderNotice(content)) {
-		throw new HttpError(502, `AI provider rejected the request: ${content.slice(0, 200)}`, 'AI_ERROR');
+	if (served.fellBack) {
+		logger.info(
+			{ provider: served.provider, model: served.model, fellBack: true },
+			'Realtime voice turn served by the fallback LLM provider',
+		);
 	}
 
-	const orderedBlocks = order
-		.map((index) => blocks.get(index))
-		.filter((b): b is ChatContentBlock => !!b);
-	const toolUses: ToolUseBlock[] = orderedBlocks
-		.filter((b): b is Extract<ChatContentBlock, { type: 'tool_use' }> => b.type === 'tool_use')
-		.map((b) => ({ id: b.id, name: b.name, input: b.input }));
-
-	return { content, model, usage: { inputTokens, outputTokens }, blocks: orderedBlocks, stopReason, toolUses };
+	return served.result;
 }

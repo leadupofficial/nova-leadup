@@ -32,7 +32,9 @@ import '../features/onboarding/profile_page.dart';
 import '../features/onboarding/splash_page.dart';
 import '../features/onboarding/welcome_page.dart';
 import '../features/settings/integrations_page.dart';
+import '../features/settings/delete_account_page.dart';
 import '../features/settings/me_page.dart';
+import '../features/settings/privacy_policy_page.dart';
 import '../features/settings/wake_word_settings_page.dart';
 import '../features/tasks/tasks_page.dart';
 import 'providers.dart';
@@ -322,6 +324,25 @@ final routerProvider = Provider<GoRouter>((ref) {
                     path: 'wake-word',
                     name: 'wake-word-settings',
                     builder: (context, state) => const WakeWordSettingsPage(),
+                  ),
+                  // Store-required surfaces, both reachable from Profile:
+                  //
+                  //  * `privacy-policy` — App Review 5.1.1(i) and Play's User Data
+                  //    policy require the policy to be readable *in the app*, not only
+                  //    linked from the store listing. Renders the same text as the
+                  //    public URL and works offline.
+                  //  * `delete-account` — App Review 5.1.1(v) and Play's account
+                  //    deletion requirement: an account created in the app must be
+                  //    deletable from inside the app. Calls `DELETE /api/v1/account`.
+                  GoRoute(
+                    path: 'privacy-policy',
+                    name: 'privacy-policy',
+                    builder: (context, state) => const PrivacyPolicyPage(),
+                  ),
+                  GoRoute(
+                    path: 'delete-account',
+                    name: 'delete-account',
+                    builder: (context, state) => const DeleteAccountPage(),
                   ),
                 ],
               ),

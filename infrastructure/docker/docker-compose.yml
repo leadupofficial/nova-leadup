@@ -1,0 +1,221 @@
+# NOVA Leadup — Base Docker Compose
+# Development and local orchestration for all services.
+# WARNING: This file contains default passwords for local development only.
+# NEVER use this file in production. Use docker-compose.prod.yml instead.
+# For production overrides, use: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+ # ─── PostgreSQL ────────────────────────────────────────────────────────────
+ postgres:
+ image: postgres:16-alpine
+ container_name: nova-postgres
+ restart: unless-stopped
+ ports:
+ - "127.0.0.1:5432:5432"
+ environment:
+ POSTGRES_USER: ${POSTGRES_USER:-nova}
+ POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nova}
+ POSTGRES_DB: ${POSTGRES_DB:-nova}
+ PGDATA: /var/lib/postgresql/data/pgdata
+ volumes:
+ - pgdata:/var/lib/postgresql/data
+ - ../postgres/init:/docker-entrypoint-initdb.d:ro
+ networks:
+ - nova-internal
+ security_opt:
+ - no-new-privileges:true
+ healthcheck:
+ test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nova}"]
+ interval: 5s
+ timeout: 3s
+ retries: 5
+ start_period: 10s
+
+ # ─── Redis ─────────────────────────────────────────────────────────────────
+ redis:
+ image: redis:7-alpine
+ container_name: nova-redis
+ restart: unless-stopped
+ command: redis-server --requirepass ${REDIS_PASSWORD:-nova} --maxmemory 256mb --maxmemory-policy allkeys-lru
+ ports:
+ - "127.0.0.1:6379:6379"
+ volumes:
+ - redisdata:/data
+ networks:
+ - nova-internal
+ security_opt:
+ - no-new-privileges:true
+ healthcheck:
+ test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-nova}", "ping"]
+ interval: 5s
+ timeout: 3s
+ retries: 5
+ start_period: 5s
+
+ # ─── MinIO ─────────────────────────────────────────────────────────────────
+ minio:
+ image: minio/minio:RELEASE.2024-11-01T04-25-39Z
+ container_name: nova-minio
+ restart: unless-stopped
+ command: server /data --console-address ":9001"
+ ports:
+ - "127.0.0.1:9000:9000"
+ - "127.0.0.1:9001:9001"
+ environment:
+ MINIO_ROOT_USER: ${S3_ACCESS_KEY:-nova}
+ MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-nova-secret}
+ MINIO_DEFAULT_BUCKETS: ${S3_BUCKET:-nova-assets}
+ volumes:
+ - miniodata:/data
+ networks:
+ - nova-internal
+ healthcheck:
+ test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+ interval: 5s
+ timeout: 3s
+ retries: 5
+ start_period: 10s
+
+ # ─── API Service ───────────────────────────────────────────────────────────
+ api:
+ build:
+ context: ..
+ dockerfile: infrastructure/docker/Dockerfile
+ target: api
+ container_name: nova-api
+ restart: unless-stopped
+ ports:
+ - "127.0.0.1:3000:3000"
+ environment:
+ NODE_ENV: ${NODE_ENV:-development}
+ DATABASE_URL: postgres://${POSTGRES_USER:-nova}:${POSTGRES_PASSWORD:-nova}@postgres:5432/${POSTGRES_DB:-nova}
+ REDIS_URL: redis://:${REDIS_PASSWORD:-nova}@redis:6379
+ JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
+ JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret-change-in-production}
+ JWT_EXPIRY: ${JWT_EXPIRY:-15m}
+ JWT_REFRESH_EXPIRY: ${JWT_REFRESH_EXPIRY:-7d}
+ ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+ OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+ DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+ ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+ SARVAM_API_KEY: ${SARVAM_API_KEY:-}
+ S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+ S3_ACCESS_KEY: ${S3_ACCESS_KEY:-nova}
+ S3_SECRET_KEY: ${S3_SECRET_KEY:-nova-secret}
+ S3_BUCKET: ${S3_BUCKET:-nova-assets}
+ CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+ API_PORT: 3000
+ volumes:
+ - ./secrets:/run/secrets:ro
+ networks:
+ - nova-internal
+ - nova-public
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+ minio:
+ condition: service_healthy
+ healthcheck:
+ test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+ interval: 10s
+ timeout: 5s
+ retries: 5
+ start_period: 30s
+
+ # ─── Realtime Gateway ──────────────────────────────────────────────────────
+ realtime-gateway:
+ build:
+ context: ..
+ dockerfile: infrastructure/docker/Dockerfile
+ target: realtime-gateway
+ container_name: nova-realtime
+ restart: unless-stopped
+ ports:
+ - "127.0.0.1:3001:3001"
+ environment:
+ NODE_ENV: ${NODE_ENV:-development}
+ DATABASE_URL: postgres://${POSTGRES_USER:-nova}:${POSTGRES_PASSWORD:-nova}@postgres:5432/${POSTGRES_DB:-nova}
+ REDIS_URL: redis://:${REDIS_PASSWORD:-nova}@redis:6379
+ PORT: 3001
+ networks:
+ - nova-internal
+ - nova-public
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+ healthcheck:
+ test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+ interval: 10s
+ timeout: 5s
+ retries: 3
+ start_period: 10s
+
+ # ─── Worker ────────────────────────────────────────────────────────────────
+ worker:
+ build:
+ context: ..
+ dockerfile: infrastructure/docker/Dockerfile
+ target: worker
+ container_name: nova-worker
+ restart: unless-stopped
+ environment:
+ NODE_ENV: ${NODE_ENV:-development}
+ DATABASE_URL: postgres://${POSTGRES_USER:-nova}:${POSTGRES_PASSWORD:-nova}@postgres:5432/${POSTGRES_DB:-nova}
+ REDIS_URL: redis://:${REDIS_PASSWORD:-nova}@redis:6379
+ S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+ S3_ACCESS_KEY: ${S3_ACCESS_KEY:-nova}
+ S3_SECRET_KEY: ${S3_SECRET_KEY:-nova-secret}
+ S3_BUCKET: ${S3_BUCKET:-nova-assets}
+ ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+ OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+ networks:
+ - nova-internal
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+ deploy:
+ replicas: 2
+
+ # ─── Nginx ─────────────────────────────────────────────────────────────────
+ nginx:
+ image: nginx:1.27-alpine
+ container_name: nova-nginx
+ restart: unless-stopped
+ ports:
+ - "80:80"
+ - "443:443"
+ volumes:
+ - ../deploy/web:/usr/share/nginx/html:ro
+ - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+ - ../nginx/conf.d:/etc/nginx/conf.d:ro
+ - nginx-logs:/var/log/nginx
+ - ./certs:/etc/letsencrypt:ro
+ networks:
+ - nova-internal
+ - nova-public
+ depends_on:
+ api:
+ condition: service_healthy
+
+volumes:
+ pgdata:
+ driver: local
+ redisdata:
+ driver: local
+ miniodata:
+ driver: local
+ nginx-logs:
+ driver: local
+
+networks:
+ nova-internal:
+ driver: bridge
+ internal: true
+ nova-public:
+ driver: bridge

@@ -8,8 +8,11 @@ import type { Request, Response, NextFunction } from 'express';
 import request from 'supertest';
 import express from 'express';
 
-// Declared with var so the hoisted vi.mock() factory can assign to it
-// eslint-disable-next-line prefer-const
+// Declared with var on purpose: `vi.mock()` is hoisted above the imports, and its
+// factory assigns to this binding before a `let`/`const` declaration would have been
+// initialised (a temporal-dead-zone error). `no-var` and `prefer-const` are exactly the
+// rules this line deliberately breaks.
+// eslint-disable-next-line no-var, prefer-const
 var mockGetDbPool: ReturnType<typeof vi.fn>;
 
 // Mock the db/connection module BEFORE importing auth middleware

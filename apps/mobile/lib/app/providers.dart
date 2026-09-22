@@ -124,9 +124,39 @@ final networkServiceProvider = Provider<NetworkService>(
   ),
 );
 
-final healthServiceProvider = Provider<HealthService>(
-  (ref) => HealthService(network: ref.watch(networkServiceProvider)),
-);
+final healthServiceProvider = Provider<HealthService>((ref) {
+  return HealthService(
+    network: ref.watch(networkServiceProvider),
+  );
+});
+
+/// Dedicated Dio for health checks with a shorter 5-second timeout and a fresh
+/// BaseOptions that does not inherit the main client's 30-second timeouts or
+/// interceptors (auth token refresh would be pointless and risky for /healthz).
+final healthDioProvider = Provider<Dio>((ref) {
+  return Dio(
+    BaseOptions(
+      baseUrl: ApiConfig.baseUrl,
+      connectTimeout: const Duration(seconds: 5),
+      receiveTimeout: const Duration(seconds: 5),
+      sendTimeout: const Duration(seconds: 5),
+      headers: const <String, dynamic>{
+        'Accept': 'application/json',
+      },
+    ),
+  );
+});
+
+final healthNetworkServiceProvider = Provider<NetworkService>((ref) {
+  return NetworkService(
+    dio: ref.watch(healthDioProvider),
+    networkInfo: ref.watch(networkInfoServiceProvider),
+  );
+});
+
+final healthServiceWithTimeoutProvider = Provider<HealthService>((ref) {
+  return HealthService(network: ref.watch(healthNetworkServiceProvider));
+});
 
 /// Authentication API. Uses [authNetworkServiceProvider] so that signing in never
 /// depends on an existing (possibly expired) session.
@@ -158,27 +188,28 @@ final wakeWordPlatformProvider = Provider<WakeWordPlatform>((ref) {
 /// Reconnecting WebSocket client for real-time voice streaming
 /// (`/api/v1/voice/realtime`).
 ///
-/// The access token travels as a query parameter rather than a header: WebSocket
-/// handshakes cannot set custom headers on every platform Flutter supports, so this
-/// is the portable option.
+/// The access token is passed as an `Authorization` header rather than a query
+/// parameter. Query-string tokens appear in server logs, proxy trails, and
+/// HTTP referrer headers, so they are stripped from the URI entirely. The
+/// server side (`realtime/index.ts`) reads the bearer from either the header
+/// or the `token` query parameter, so removing the parameter does not break
+/// any deployment.
 ///
 /// The token is resolved through [VoiceStreamService.uriResolver] on every
 /// connect attempt rather than once at construction. An access token lives 15
-/// minutes, so a URI built once would leave every reconnect after that point
-/// unauthenticated — a dead socket that never recovers. Watching the auth state
+/// minutes, so a URI captured at construction time would make every reconnect
+/// after that point fail authentication forever. Watching the auth state
 /// as well means signing out disposes this service (and closes its socket)
 /// instead of leaving an authenticated connection alive.
 final voiceStreamServiceProvider = Provider<VoiceStreamService>((ref) {
   ref.watch(authStateProvider.select((state) => state.isAuthenticated));
 
   final service = VoiceStreamService(
-    uriResolver: () {
+    uriResolver: () => Uri.parse(ApiConfig.voiceWs),
+    headersResolver: () {
       final token = ref.read(authRepositoryProvider).currentToken;
-      return Uri.parse(ApiConfig.voiceWs).replace(
-        queryParameters: <String, String>{
-          if (token != null) 'token': token.accessToken,
-        },
-      );
+      if (token == null) return <String, String>{};
+      return <String, String>{'Authorization': 'Bearer ${token.accessToken}'};
     },
   );
   ref.onDispose(service.close);

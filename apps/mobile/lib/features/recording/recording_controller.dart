@@ -296,18 +296,43 @@ class RecordingController extends Notifier<RecordingState> {
     final api = ref.read(novaApiProvider);
     final language = state.language;
 
-    // The duration is saved first: even if the upload never completes, the row
-    // keeps an honest length rather than showing 00:00.
+    // Only the **duration**, and deliberately not a status.
+    //
+    // This used to send `status: 'completed'` here — before a single byte had been
+    // uploaded. The server stamps `completedAt` when it sees that, so the row claimed a
+    // finished recording while the audio still existed only in this process's memory:
+    // `MeetingRecorder.stop()` deletes the temporary file as soon as it has read it, and
+    // the clip is held in a private field. A kill during the upload — an OOM on a long
+    // meeting, the user swiping the app away — therefore lost the recording *and* left a
+    // row saying it was saved, which the summary screen then repeated back to the user as
+    // "the recording and its duration are saved".
+    //
+    // The status now only ever moves forward as things actually happen: `uploaded` when
+    // the server has the bytes (it sets that itself), then `processing`, then `completed`
+    // when the pipeline has written a transcript. Nothing is asserted before it is true.
     try {
-      await api.updateRecording(
-        id,
-        durationSeconds: elapsed,
-        status: 'completed',
-      );
+      await api.updateRecording(id, durationSeconds: elapsed);
     } on NovaApiException catch (e) {
       state = state.copyWith(
         error: 'The duration could not be saved: ${e.message}',
       );
+    }
+
+    // Ask the server's ceiling *before* spending minutes on the transfer. The
+    // call-recording import path already checked `maxUploadBytes`; the meeting path
+    // did not, so an oversized recording was only rejected by a 413 at the end of a
+    // long upload. A failed capability read leaves the ceiling unknown and the server
+    // decides — the 413 path below still handles it.
+    final ceiling = await _serverCeiling(api);
+    if (ceiling > 0 && clip.byteLength > ceiling) {
+      state = state.copyWith(
+        phase: RecordingPhase.failed,
+        error: 'This recording is ${_megabytes(clip.byteLength)} and the server '
+            'accepts up to ${_megabytes(ceiling)}. It was not uploaded; the row is '
+            'saved with its duration.',
+      );
+      await _markUploadFailed(api, id);
+      return null;
     }
 
     state = state.copyWith(
@@ -330,6 +355,9 @@ class RecordingController extends Notifier<RecordingState> {
         phase: RecordingPhase.failed,
         error: _uploadFailureMessage(e, clip.byteLength),
       );
+      // The row would otherwise sit at `recording` for ever, describing a capture that
+      // this device is no longer performing and never uploaded.
+      await _markUploadFailed(api, id);
       return null;
     }
     _pendingClip = null;
@@ -358,6 +386,36 @@ class RecordingController extends Notifier<RecordingState> {
     ref.invalidate(recordingDetailProvider(id));
     return id;
   }
+
+  /// Marks the row failed after a capture that will never be uploaded.
+  ///
+  /// Without this the row kept whatever it had — `recording`, which the status vocabulary
+  /// defines as "capture is in progress on the device" — so a recording that was never
+  /// uploaded sat there looking like one that still was, for ever. Best-effort: if this
+  /// call fails there is nothing useful left to do about it, and the user's error message
+  /// has already been set by the caller.
+  Future<void> _markUploadFailed(NovaApi api, String id) async {
+    try {
+      await api.updateRecording(id, status: 'failed');
+    } on NovaApiException {
+      // Deliberately swallowed; see above.
+    }
+  }
+
+  /// The server's upload ceiling in bytes, or 0 when it is unknown.
+  Future<int> _serverCeiling(NovaApi api) async {
+    try {
+      return (await api.getRecordingCapabilities()).maxUploadBytes;
+    } on NovaApiException {
+      return 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// `12.3 MB` — for a message a person reads, not a byte count.
+  String _megabytes(int bytes) =>
+      '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 
   String _uploadFailureMessage(NovaApiException e, int byteLength) {
     if (e.statusCode == 413) {

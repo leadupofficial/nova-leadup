@@ -15,7 +15,14 @@ platform :ios do
 
     pilot(
       api_key: api_key,
-      ipa: "../build/ios/ipa/Runner.ipa",
+      # Paths in a Fastfile are relative to the directory that contains it, which is
+      # `apps/mobile/ios/`. Flutter exports the archive to `apps/mobile/build/ios/ipa/`
+      # — two levels up. The previous `../build/ios/ipa/Runner.ipa` resolved to
+      # `apps/mobile/ios/build/ios/ipa/…` and would have failed on every upload.
+      ipa: "../../build/ios/ipa/Runner.ipa",
+      # Without this, `pilot` re-signs with whatever profile it finds first instead of
+      # the App Store export Flutter produced.
+      export_method: "app-store",
       skip_waiting_for_build_processing: false,
       distribute_external: false,
       changelog: last_git_commit[:message],

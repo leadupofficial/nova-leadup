@@ -12,14 +12,14 @@ import '../../core/voice/wake_word_service.dart' show humanizeWakeWordName;
 ///
 /// The screen exists to be honest about four things:
 ///
-///  * which classifier the device will actually listen for — read from the
+///  * which wake word the device will actually listen for — read from the
 ///    native service, never hardcoded;
 ///  * whether there is anything to choose between. Today's build installs
-///    exactly one classifier (`hey_jarvis`), so there is not, and the screen
+///    exactly one wake word (`hey_nova`), so there is not, and the screen
 ///    says so instead of drawing a one-row picker that does nothing;
-///  * what switching would take: another ONNX classifier in the app bundle,
-///    documented in `android/app/src/main/assets/wakeword/README.md`. No "Hey
-///    Nova" model exists in this repository;
+///  * what switching would take: the phrase is BPE-tokenised text, so another
+///    phrase is another keywords file listed in the app bundle, documented in
+///    `android/app/src/main/assets/wakeword/README.md` — not a trained model;
 ///  * what §13.10 records. The server stores the user's choice against their
 ///    account; it cannot change what the microphone listens for, and the screen
 ///    never implies it can.
@@ -241,7 +241,7 @@ class _ListeningCard extends StatelessWidget {
           if (selected != null) ...[
             const SizedBox(height: NovaSpace.xxs),
             Text(
-              'Classifier "$selected" · detected on device by openWakeWord',
+              'Wake word "$selected" · detected on device by sherpa-onnx',
               style: theme.bodySmall,
             ),
           ],
@@ -277,7 +277,7 @@ class _ListeningCard extends StatelessWidget {
   }
 }
 
-/// Shown when the native service reports no usable classifier or no support.
+/// Shown when the native service reports no usable wake word or no support.
 class _UnavailableCard extends ConsumerWidget {
   const _UnavailableCard({required this.wake});
 
@@ -308,7 +308,7 @@ class _UnavailableCard extends ConsumerWidget {
   }
 }
 
-/// The honest single-classifier case — which is the shipped build.
+/// The honest single-wake-word case — which is the shipped build.
 class _SingleModelCard extends StatelessWidget {
   const _SingleModelCard({
     required this.wake,
@@ -348,20 +348,20 @@ class _SingleModelCard extends StatelessWidget {
           const SizedBox(height: NovaSpace.xs),
           Text(
             only == null
-                ? 'This build installs a single on-device classifier, so there is '
+                ? 'This build installs a single on-device wake word, so there is '
                       'nothing to choose between and no picker is shown.'
-                : 'This build installs one on-device classifier, "$only". There is '
+                : 'This build installs one on-device wake word, "$only". There is '
                       'nothing to choose between, so NOVA does not show a picker whose '
                       'only option is the phrase it already uses.',
             style: theme.bodySmall,
           ),
           const SizedBox(height: NovaSpace.sm),
           Text(
-            'Switching to a different phrase — including a real "Hey Nova" — means '
-            'adding another openWakeWord classifier to the app bundle: an .onnx file '
-            'listed in android/app/src/main/assets/wakeword/models.json. No such '
-            'model exists in this repository, and this screen will not pretend one '
-            'does.',
+            'Switching to a different phrase means changing the keywords file this '
+            'build listens with: a BPE-tokenised text file listed in '
+            'android/app/src/main/assets/wakeword/models.json. The phrase is data, '
+            'not a trained model, so there is no model to export — only a file to '
+            'add and a manifest entry pointing at it.',
             style: theme.bodySmall,
           ),
           const SizedBox(height: NovaSpace.sm),
@@ -382,7 +382,7 @@ class _SingleModelCard extends StatelessWidget {
   }
 }
 
-/// The real picker, shown only when more than one classifier is installed.
+/// The real picker, shown only when more than one wake word is installed.
 class _ModelChoices extends StatelessWidget {
   const _ModelChoices({
     required this.wake,
@@ -482,7 +482,7 @@ class _AccountRecordCard extends ConsumerWidget {
           // `note`, so the screen still says it if the payload changes.
           Text(
             'This is a preference record. It does not change what your microphone '
-            'listens for — the classifier installed in the app decides that, on this '
+            'listens for — the wake word installed in the app decides that, on this '
             'device.',
             style: theme.bodySmall,
           ),
@@ -520,8 +520,8 @@ class _AccountRecordCard extends ConsumerWidget {
           const SizedBox(height: NovaSpace.xxs),
           Text(
             updatedAt == null
-                ? 'Classifier "$recorded"'
-                : 'Classifier "$recorded" · saved $updatedAt',
+                ? 'Wake word "$recorded"'
+                : 'Wake word "$recorded" · saved $updatedAt',
             style: theme.bodySmall,
           ),
           if (devicePhrase != null && devicePhrase != recorded) ...[

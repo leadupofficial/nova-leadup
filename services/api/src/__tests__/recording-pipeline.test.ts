@@ -12,6 +12,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import request from 'supertest';
+import { getTableName } from 'drizzle-orm';
 import './setup.js';
 
 import app from '../server.js';
@@ -41,6 +42,7 @@ import {
 	recordingRow,
 	resetStorageFixtures,
 	storageFlags,
+	type Row,
 } from './helpers/recording-fixtures.js';
 
 afterAll(() => setAudioStorageDriver(null));
@@ -62,6 +64,41 @@ function storeFor(overrides: Row = {}): Record<string, Row[]> {
 		transcript_segments: [],
 		recording_summaries: [],
 	};
+}
+
+/**
+ * A database whose `select(projection)` returns *only* the projected keys.
+ *
+ * `makeDb` hands back the whole row whichever columns were asked for, so a route
+ * test built on it passes even when the projection is missing a field — which is
+ * exactly the change under test for `failureReason`. This one honours the
+ * projection object's own keys, which is what a real driver returns.
+ */
+function projectingDb(recordings: Row[]): ReturnType<typeof getDb> {
+	const tables: Record<string, Row[]> = {
+		audio_recordings: recordings,
+		transcripts: [],
+		recording_summaries: [],
+		transcript_segments: [],
+	};
+	const select = (selection?: Record<string, unknown>): unknown => {
+		let rows: Row[] = [];
+		const q: Record<string, unknown> = {};
+		for (const method of ['from', 'where', 'orderBy', 'limit', 'offset']) {
+			q[method] = (table?: unknown) => {
+				if (method === 'from' && table) rows = tables[getTableName(table as never)] ?? [];
+				return q;
+			};
+		}
+		const projected = (): Row[] =>
+			selection
+				? rows.map((row) => Object.fromEntries(Object.keys(selection).map((key) => [key, row[key]])))
+				: rows;
+		q.then = (ok: unknown) => Promise.resolve(projected()).then(ok as never);
+		q.catch = (no: unknown) => Promise.resolve(projected()).then(undefined as never, no as never);
+		return q;
+	};
+	return { select } as unknown as ReturnType<typeof getDb>;
 }
 
 describe('runRecordingPipeline', () => {
@@ -128,6 +165,26 @@ describe('runRecordingPipeline', () => {
 		expect(result.failureReason).toBe('audio-unreadable');
 		expect(store.audio_recordings[0].status).toBe(RECORDING_STATUS.failed);
 		expect(store.recording_summaries).toEqual([]);
+	});
+
+	it('clears a previous failure reason when a re-run succeeds', async () => {
+		// A failed recording can be re-processed. Without clearing the column, a row
+		// that is `completed` would still carry the reason from its earlier failure —
+		// the app would show a completed recording with "why it failed".
+		const store = storeFor({ status: RECORDING_STATUS.failed, failureReason: 'audio-unreadable' });
+		objects.set(AUDIO_KEY, Buffer.from('audio-bytes'));
+		vi.mocked(getDb).mockReturnValue(makeDb(store));
+		const transcriber = vi.fn(async () => ({
+			transcript: SPOKEN,
+			confidence: 0.95,
+			language: 'en',
+			provider: 'deepgram',
+		}));
+
+		const result = await runRecordingPipeline(RECORDING_ID, USER_ID, { transcriber });
+
+		expect(result.status).toBe(RECORDING_STATUS.completed);
+		expect(store.audio_recordings[0].failureReason).toBeNull();
 	});
 
 	it('marks the recording failed when transcription throws', async () => {
@@ -290,6 +347,41 @@ describe('POST /api/v1/recordings/:id/process', () => {
 			.set(auth(OTHER_USER_ID))
 			.send({});
 		expect(res.status).toBe(404);
+	});
+});
+
+// ─── 5b. Why a recording failed reaches the client ───────────────────────────
+
+describe('GET /api/v1/recordings/:id — a failed recording', () => {
+	it('returns the reason it failed, not only the status', async () => {
+		// The reaper now writes `failure_reason`; this asserts the other half —
+		// that the column is in the projection both reads use, so the app can tell
+		// the user what actually happened instead of just "failed".
+		vi.mocked(getDb).mockReturnValue(
+			projectingDb([
+				recordingRow({
+					status: RECORDING_STATUS.failed,
+					failureReason: 'audio-missing-after-upload',
+				}),
+			]),
+		);
+
+		const res = await request(app).get(`/api/v1/recordings/${RECORDING_ID}`).set(auth());
+
+		expect(res.status).toBe(200);
+		expect(res.body.data.recording.status).toBe(RECORDING_STATUS.failed);
+		expect(res.body.data.recording.failureReason).toBe('audio-missing-after-upload');
+	});
+
+	it('does not invent a reason for a recording that completed', async () => {
+		vi.mocked(getDb).mockReturnValue(
+			projectingDb([recordingRow({ status: RECORDING_STATUS.completed, failureReason: null })]),
+		);
+
+		const res = await request(app).get(`/api/v1/recordings/${RECORDING_ID}`).set(auth());
+
+		expect(res.status).toBe(200);
+		expect(res.body.data.recording.failureReason).toBeNull();
 	});
 });
 

@@ -17,6 +17,14 @@ import 'auth_controller.dart';
 /// stated rather than faked. Email + password is the real, working path — it
 /// posts to `/api/v1/auth/register` (which takes `name`, `email`, `password`)
 /// and is the only action that submits.
+/// Minimum password length, mirroring `PASSWORD_MIN_LENGTH` in
+/// `services/api/src/schemas/index.ts`.
+///
+/// These disagreed: the app said and enforced **8** while the server required **12**, so
+/// a 9-character password passed the app's own validation and was then rejected with a
+/// raw Zod message. The server is authoritative; if it changes, change this with it.
+const int _passwordMinLength = 12;
+
 class RegisterPage extends ConsumerStatefulWidget {
   const RegisterPage({super.key});
 
@@ -128,7 +136,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   /// The real, working path, restyled onto [NovaTextField]. The validators are
   /// the previous implementation's, unchanged: email shape, the API's
-  /// `RegisterSchema` 8-character minimum (see `services/api`), and a
+  /// `RegisterSchema` minimum (see `_passwordMinLength`), and a
   /// confirmation match.
   Widget _form(BuildContext context, AuthState auth) {
     return Column(
@@ -167,7 +175,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
             hint: 'Choose a password',
             obscure: !_showPassword,
             textInputAction: TextInputAction.next,
-            helperText: 'At least 8 characters',
+            helperText: 'At least $_passwordMinLength characters',
             errorText: _passwordError,
             enabled: !auth.isSubmitting,
             onChanged: (_) => _clear(() => _passwordError = null),
@@ -202,7 +210,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   }
 
   /// The previous implementation's validators, unchanged: a required email of
-  /// the right shape, the API's `RegisterSchema` 8-character minimum, and a
+  /// the right shape, the API's `RegisterSchema` minimum, and a
   /// confirmation match. They run on submit and are written into the
   /// token-styled [NovaTextField]s.
   bool _validate() {
@@ -211,12 +219,14 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
     final emailError = email.isEmpty
         ? 'Enter your email address.'
-        : (!email.contains('@') || !email.contains('.'))
+        : !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)
         ? 'Enter a valid email address.'
         : null;
     final passwordError = password.isEmpty
         ? 'Choose a password.'
-        : (password.length < 8 ? 'Use at least 8 characters.' : null);
+        : (password.length < _passwordMinLength
+              ? 'Use at least $_passwordMinLength characters.'
+              : null);
     final confirmError = _confirm.text == password
         ? null
         : 'Passwords do not match.';

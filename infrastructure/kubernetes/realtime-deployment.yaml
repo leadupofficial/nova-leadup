@@ -1,0 +1,83 @@
+# NOVA Leadup — Kubernetes Realtime Gateway Deployment
+#
+# Re-indented: the original had every key at one space, so the pod template, container
+# ports, probes and volumes were flat siblings and the file was not valid YAML.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nova-realtime
+  namespace: nova
+  labels:
+    app: nova-realtime
+    app.kubernetes.io/name: realtime-gateway
+    app.kubernetes.io/part-of: nova
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nova-realtime
+  template:
+    metadata:
+      labels:
+        app: nova-realtime
+        app.kubernetes.io/name: realtime-gateway
+        app.kubernetes.io/part-of: nova
+        app.kubernetes.io/version: "0.1.0"
+    spec:
+      containers:
+        - name: realtime-gateway
+          image: ghcr.io/leadup-technologies/nova-realtime-gateway:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3001
+              name: ws
+            - containerPort: 9091
+              name: metrics
+          envFrom:
+            - configMapRef:
+                name: nova-config
+            - secretRef:
+                name: nova-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: ws
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: ws
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: ws
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: tmp
+          emptyDir: {}

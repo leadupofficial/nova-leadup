@@ -2,20 +2,40 @@
  * LEA-021 — Admin Organizations page
  */
 
-import { listOrganizations, type AdminOrganization } from '../../lib/api';
+import { requestListPage, type AdminOrganization } from '../../lib/api';
 
-async function getOrgs() {
- try {
- const result = await listOrganizations({ limit: 50 });
- return result;
- } catch {
- return null;
- }
-}
+import { loadPage } from '../../lib/page-data';
+import { PageError } from '../../components/PageError';
 
 export default async function OrganizationsPage() {
- const result = await getOrgs();
- const orgs: AdminOrganization[] = result ?? [];
+ const result = await loadPage<AdminOrganization>(() =>
+ requestListPage<AdminOrganization>('/admin/organizations', { pageSize: 50 }),
+ );
+ const orgs: AdminOrganization[] = result.ok ? result.rows : [];
+ // `orgs.length` is one PAGE, not the collection. The header said "N total
+ // organizations" from it, so past the first page the console under-reported the
+ // count with no sign it was truncated. `totalItems` comes from the paginated
+ // envelope; fall back to the page length only when the API did not send one.
+ const total = result.ok ? (result.totalItems ?? orgs.length) : 0;
+ const truncated = total > orgs.length;
+
+ if (!result.ok) {
+ // Failure and emptiness must never look the same: a 401 used to render
+ // the empty-state row, which reads as "you have no data".
+ return (
+ <div>
+ <div style={{ marginBottom: '1.5rem' }}>
+ <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>Organizations</h1>
+ </div>
+ <PageError
+ title="Could not load organizations"
+ message={result.message}
+ status={result.status}
+ retryHref="/organizations"
+ />
+ </div>
+ );
+ }
 
  return (
  <div>
@@ -23,7 +43,8 @@ export default async function OrganizationsPage() {
  <div>
  <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>Organizations</h1>
  <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#6b7280' }}>
- {orgs.length} total organizations
+ {total} total organization{total === 1 ? '' : 's'}
+ {truncated ? ` · showing the first ${orgs.length}` : ''}
  </p>
  </div>
  </div>

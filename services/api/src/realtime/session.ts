@@ -32,6 +32,7 @@ import { isAbortError } from './llm.js';
 import { runReply } from './reply.js';
 import { ToolApprovalBroker } from './tool-approval.js';
 import { logTurnCost, INPUT_BYTES_PER_SECOND } from './cost.js';
+import { recordSttUsage, recordTtsUsage, planRealtimeTurn } from '../services/voice-usage.js';
 import {
 	authorizeUsage,
 	recordUsage,
@@ -158,17 +159,38 @@ export class RealtimeVoiceSession {
 
 	start(): void {
 		this.socket.on('message', (data: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
-			this.touch();
-			if (isBinary) {
-				const buffer = Buffer.isBuffer(data)
-					? data
-					: Array.isArray(data)
-						? Buffer.concat(data)
-						: Buffer.from(data);
-				this.handleAudio(buffer);
-				return;
+			// **A throw in here used to kill the whole API process.**
+			//
+			// `socket.on('message', …)` is an EventEmitter listener: nothing above it
+			// catches, so a synchronous throw becomes an uncaught exception and Node
+			// exits. And this path throws by design when a provider is not configured —
+			// `createSttSession` raises `HttpError(503, 'SARVAM_API_KEY is not
+			// configured')`, reached through `handleAudio` → the STT controller. The
+			// observed result, on a deployment without the key: the first voice turn from
+			// the first user terminated the server for everybody, and the log ended with
+			//
+			//     throw new HttpError(503, 'SARVAM_API_KEY is not configured', …)
+			//     HttpError: SARVAM_API_KEY is not configured
+			//
+			// A voice feature that cannot start should tell that one user and leave the
+			// process alone, so this reports the failure on the socket and ends the
+			// session.
+			try {
+				this.touch();
+				if (isBinary) {
+					const buffer = Buffer.isBuffer(data)
+						? data
+						: Array.isArray(data)
+							? Buffer.concat(data)
+							: Buffer.from(data);
+					this.handleAudio(buffer);
+					return;
+				}
+				this.handleJson(Buffer.isBuffer(data) ? data.toString() : String(data));
+			} catch (err) {
+				this.reportError('SESSION_ERROR', err);
+				this.dispose('handler-error');
 			}
-			this.handleJson(Buffer.isBuffer(data) ? data.toString() : String(data));
 		});
 
 		this.socket.on('pong', () => {
@@ -554,19 +576,26 @@ export class RealtimeVoiceSession {
 					iterations: result.iterations,
 					tools: result.toolCalls.map((t) => `${t.name}:${t.ok ? 'ok' : 'failed'}`),
 					capped: result.capped,
+					// Which provider served the turn, so a primary-provider outage is
+					// visible in the logs rather than silently absorbed.
+					provider: result.provider ?? 'anthropic',
+					fellBack: result.fellBack === true,
 				},
 				'Realtime voice turn complete',
 			);
 
 			// Per-turn cost of the three billed legs. Logging only — synchronous,
 			// no network call, no await, so it is off the reply's critical path.
+			// `result.provider` is the provider that actually served the turn, so a
+			// fallback is visible here and the leg is priced against the provider
+			// that really billed it.
 			logTurnCost({
 				userId: this.user.id,
 				turnId,
 				language: this.language,
 				stt: sttUsage,
 				llm: {
-					provider: 'anthropic',
+					provider: result.provider ?? 'anthropic',
 					model: result.model,
 					inputTokens: result.usage.inputTokens,
 					outputTokens: result.usage.outputTokens,
@@ -577,7 +606,7 @@ export class RealtimeVoiceSession {
 			// Meter the voice minutes this turn actually consumed. Fire-and-forget:
 			// metering is off the reply's critical path and `recordUsage` never
 			// throws, so a slow or unavailable `usage_records` cannot fail a turn.
-			this.recordTurnUsage(sttUsage);
+			this.recordTurnUsage(sttUsage, result.ttsCharsByProvider);
 
 			this.remember(text, result.text);
 			this.activeTurn = null;
@@ -640,11 +669,55 @@ export class RealtimeVoiceSession {
 	 * 5–30 s and an integer minute meter would round nearly every turn to zero and
 	 * silently allow unlimited use.
 	 */
-	private recordTurnUsage(sttUsage: SttUtteranceUsage | null): void {
-		const bytes = (sttUsage?.providers ?? []).reduce((sum, entry) => sum + entry.bytes, 0);
-		const seconds = Math.round(bytes / INPUT_BYTES_PER_SECOND);
-		if (seconds <= 0) return;
-		void recordUsage(this.user.id, USAGE_METRICS.voiceSeconds, seconds);
+	/**
+	 * Meters one completed turn: voice minutes, plus the STT and TTS counters.
+	 *
+	 * The session already computed everything needed for this and then dropped most of it.
+	 * `sttUsage.providers[].bytes` gave the transcribed audio, and `ttsCharsByProvider` — built by
+	 * `realtime/reply.ts` and used for the cost log line — gave the characters handed to synthesis.
+	 * Only `voiceSeconds` was written, so the console's "STT requests" and "TTS requests" reported
+	 * zero for a deployment transcribing constantly, and the tile said so in its caveat.
+	 *
+	 * A turn is one request per leg regardless of how many sentences it contained: the client made
+	 * one voice call, and charging it one request is what the count is for.
+	 */
+	private recordTurnUsage(
+		sttUsage: SttUtteranceUsage | null,
+		ttsCharsByProvider: Record<string, number> | null,
+	): void {
+		// The decision lives in `services/voice-usage.ts` so it can be unit-tested without a
+		// socket. See `planRealtimeTurn` for why a turn is one request per leg, why a zero
+		// reading writes nothing, and how a mid-turn fallback is attributed.
+		const plan = planRealtimeTurn(
+			{
+				sttProviders: sttUsage?.providers ?? null,
+				sttProvider: sttUsage?.provider ?? null,
+				ttsCharsByProvider,
+			},
+			INPUT_BYTES_PER_SECOND,
+		);
+
+		if (plan.stt) {
+			// The existing voice-minutes meter, unchanged.
+			void recordUsage(this.user.id, USAGE_METRICS.voiceSeconds, plan.stt.seconds);
+
+			// The counters the console reads. Same audio, counted as a request and in seconds so a
+			// spend change can be explained and a retry loop can be seen.
+			recordSttUsage({
+				userId: this.user.id,
+				seconds: plan.stt.seconds,
+				provider: plan.stt.provider,
+			});
+		}
+
+		// Recorded even when the STT side produced no measurable audio — NOVA still spoke.
+		if (plan.tts) {
+			recordTtsUsage({
+				userId: this.user.id,
+				characters: plan.tts.characters,
+				provider: plan.tts.provider,
+			});
+		}
 	}
 
 	private endSpeaking(): void {

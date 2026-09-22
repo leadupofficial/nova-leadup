@@ -1,0 +1,95 @@
+# Stage 1: Install ALL workspace dependencies (prod only)
+FROM node:22-alpine AS deps
+RUN apk add --no-cache libc6-compat python3 make g++ py3-setuptools
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+ENV PYTHON=/usr/bin/python3
+WORKDIR /app
+COPY pnpm-workspace.yaml pnpm-lock.yaml turbo.json package.json ./
+COPY packages ./packages
+COPY services ./services
+RUN pnpm install --no-frozen-lockfile --prod
+
+# Stage 2: Per-service final images
+FROM node:22-alpine AS api-final
+WORKDIR /app
+COPY --from=deps /app/packages ./packages
+COPY --from=deps /app/services ./services
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/services/api/dist ./dist
+WORKDIR /app/services/api
+RUN addgroup --system app && adduser --system app
+USER app
+EXPOSE 3001
+CMD ["node", "dist/server.js"]
+
+FROM node:22-alpine AS auth-final
+WORKDIR /app
+COPY --from=deps /app/packages ./packages
+COPY --from=deps /app/services ./services
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/services/auth/dist ./dist
+WORKDIR /app/services/auth
+RUN addgroup --system app && adduser --system app
+USER app
+EXPOSE 3003
+CMD ["node", "dist/index.js"]
+
+FROM node:22-alpine AS admin-final
+WORKDIR /app
+COPY --from=deps /app/packages ./packages
+COPY --from=deps /app/services ./services
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/services/admin/dist ./dist
+WORKDIR /app/services/admin
+RUN addgroup --system app && adduser --system app
+USER app
+EXPOSE 3004
+CMD ["node", "dist/index.js"]
+
+FROM node:22-alpine AS integration-final
+WORKDIR /app
+COPY --from=deps /app/packages ./packages
+COPY --from=deps /app/services ./services
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/services/integration-service/dist ./dist
+WORKDIR /app/services/integration-service
+RUN addgroup --system app && adduser --system app
+USER app
+EXPOSE 3007
+CMD ["node", "dist/index.js"]
+
+FROM node:22-alpine AS notification-final
+WORKDIR /app
+COPY --from=deps /app/packages ./packages
+COPY --from=deps /app/services ./services
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/services/notification-service/dist ./dist
+WORKDIR /app/services/notification-service
+RUN addgroup --system app && adduser --system app
+USER app
+EXPOSE 3006
+CMD ["node", "dist/server.js"]
+
+FROM node:22-alpine AS realtime-final
+WORKDIR /app
+COPY --from=deps /app/packages ./packages
+COPY --from=deps /app/services ./services
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/services/realtime-gateway/dist ./dist
+WORKDIR /app/services/realtime-gateway
+RUN addgroup --system app && adduser --system app
+USER app
+EXPOSE 3002
+CMD ["node", "dist/server.js"]
+
+FROM node:22-alpine AS workflow-final
+WORKDIR /app
+COPY --from=deps /app/packages ./packages
+COPY --from=deps /app/services ./services
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/services/workflow-engine/dist ./dist
+WORKDIR /app/services/workflow-engine
+RUN addgroup --system app && adduser --system app
+USER app
+EXPOSE 3010
+CMD ["node", "dist/index.js"]

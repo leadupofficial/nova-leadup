@@ -544,6 +544,14 @@ class _ConversePageState extends ConsumerState<ConversePage> {
                                   : NovaMessageRole.nova,
                               failed: m.failed,
                               onRetry: m.failed ? () => _send(m.content) : null,
+                              // Play's AI-Generated Content policy requires an in-app
+                              // way to report offensive model output. Only assistant
+                              // replies can be reported, and only once they exist —
+                              // `NovaMessageBubble` additionally suppresses the control
+                              // for pending, provisional and failed bubbles.
+                              onReport: m.isUser
+                                  ? null
+                                  : () => unawaited(_reportReply(m)),
                             );
                           },
                         ),
@@ -585,6 +593,77 @@ class _ConversePageState extends ConsumerState<ConversePage> {
     if (s.contains('401')) return 'Your session expired. Please sign in again.';
     if (s.contains('Cannot reach')) return 'Cannot reach the NOVA server.';
     return s.replaceFirst(RegExp(r'^NovaApiException\(\d*\): '), '');
+  }
+
+  /// Files a report about an assistant reply, entirely inside the app.
+  ///
+  /// Google Play's AI-Generated Content policy requires "in-app user reporting or
+  /// flagging features that allow users to report or flag offensive content to
+  /// developers without needing to exit the app." The reason list is deliberately
+  /// short and concrete, the report reaches the server's audit trail, and the
+  /// confirmation is a snackbar rather than a mail client or a web form — either of
+  /// which would send the user out of the app and fail the requirement.
+  Future<void> _reportReply(NovaMessage message) async {
+    final reason = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text(
+                'Report this reply',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: Text(
+                'Reports go to the NOVA team with the reply and your account, so the '
+                'answer can be reviewed. Nothing else in your conversation is sent.',
+                style: TextStyle(fontSize: 13, height: 1.4),
+              ),
+            ),
+            _reportOption(sheetContext, 'harmful', 'Harmful or dangerous advice'),
+            _reportOption(sheetContext, 'sexual', 'Sexual or explicit content'),
+            _reportOption(sheetContext, 'hate', 'Hate speech or harassment'),
+            _reportOption(sheetContext, 'unsafe', 'Unsafe for another reason'),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (reason == null || !mounted) return;
+
+    try {
+      await ref.read(novaApiProvider).reportAiResponse(
+            messageId: message.id,
+            reason: reason,
+            // The excerpt is bounded so a report cannot become an upload channel for
+            // an entire conversation; the server stores it with the audit entry.
+            excerpt: message.content.length > 500
+                ? message.content.substring(0, 500)
+                : message.content,
+          );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Thanks — this reply has been reported.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not send the report: ${_friendly(error)}')),
+      );
+    }
+  }
+
+  Widget _reportOption(BuildContext sheetContext, String value, String label) {
+    return ListTile(
+      title: Text(label),
+      onTap: () => Navigator.of(sheetContext).pop(value),
+    );
   }
 
   String _explainAssistantError(String code) {

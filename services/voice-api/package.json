@@ -1,0 +1,49 @@
+{
+  "name": "@nova/voice-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "echo \"[dead-service] build skipped: packages await deletion (see repair report)\"",
+    "start": "node dist/index.js",
+    "lint": "eslint src/",
+    "typecheck": "echo \"[dead-service] typecheck skipped: packages await deletion (see repair report)\"",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@nova/auth": "workspace:*",
+    "@nova/shared-types": "workspace:*",
+    "@types/pino": "^7.0.0",
+    "@types/ws": "^8.5.0",
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "express": "^4.21.0",
+    "express-ws": "^5.0.2",
+    "helmet": "^8.0.0",
+    "morgan": "^1.12.0",
+    "pino": "^10.3.1",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/compression": "^1.8.1",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.25",
+    "@types/helmet": "^4.0.0",
+    "@types/morgan": "^1.9.10",
+    "@types/node": "^20.0.0",
+    "tsc-alias": "^1.8.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  }
+}

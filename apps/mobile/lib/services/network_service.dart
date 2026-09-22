@@ -114,6 +114,7 @@ class NetworkService {
         options: options,
         cancelToken: cancelToken,
       ),
+      idempotent: true,
     );
   }
 
@@ -150,6 +151,7 @@ class NetworkService {
         options: options,
         cancelToken: cancelToken,
       ),
+      idempotent: true,
     );
   }
 
@@ -186,6 +188,7 @@ class NetworkService {
         options: options,
         cancelToken: cancelToken,
       ),
+      idempotent: true,
     );
   }
 
@@ -218,7 +221,16 @@ class NetworkService {
     }
   }
 
-  Future<Response<T>> _executeWithRetry<T>(Future<Response<T>> Function() requestFn) async {
+  /// Runs [requestFn], retrying only when the HTTP method makes a repeat safe.
+  ///
+  /// `POST` and `PATCH` are not idempotent: a request that timed out may still have
+  /// been applied, so retrying can create a second task, reminder, memory or feature
+  /// flag. Retries are therefore limited to `GET`, `PUT` and `DELETE` (and to the
+  /// offline wait below, which happens *before* anything is sent on any method).
+  Future<Response<T>> _executeWithRetry<T>(
+    Future<Response<T>> Function() requestFn, {
+    bool idempotent = false,
+  }) async {
     int attempts = 0;
 
     while (true) {
@@ -239,7 +251,7 @@ class NetworkService {
       } catch (error) {
         final mapped = _mapError(error);
 
-        if (_shouldRetry(error, attempts)) {
+        if (_shouldRetry(error, attempts, idempotent)) {
           final delay = _retryConfig.computeDelay(attempts - 1);
           await Future.delayed(delay);
           continue;
@@ -250,8 +262,12 @@ class NetworkService {
     }
   }
 
-  bool _shouldRetry(dynamic error, int attempts) {
+  bool _shouldRetry(dynamic error, int attempts, bool idempotent) {
     if (attempts >= _retryConfig.maxAttempts) return false;
+
+    // A repeated non-idempotent write can duplicate the effect of one that already
+    // succeeded before its response was lost.
+    if (!idempotent) return false;
 
     if (error is DioException) {
       if (error.type == DioExceptionType.cancel) return false;

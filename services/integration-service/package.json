@@ -1,10 +1,11 @@
 {
   "name": "@nova/integration-service",
   "version": "0.1.0",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx watch src/index.ts",
     "build": "tsc && tsc-alias -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

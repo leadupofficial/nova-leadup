@@ -32,6 +32,7 @@ import {
 	renderGroundedBriefing,
 	toBriefingSpeech,
 } from '../services/briefing.js';
+import { minutesToWords } from '../services/briefing-speech.js';
 
 /** 08:00 in Asia/Kolkata, so the greeting is deterministic. */
 const NOW = new Date('2026-09-18T02:30:00.000Z');
@@ -309,5 +310,41 @@ describe('GET /api/v1/briefing', () => {
 			.get('/api/v1/briefing?language=x')
 			.set('Authorization', `Bearer ${token}`);
 		expect(res.status).toBe(400);
+	});
+});
+
+describe('minutesToWords — every minute of the hour', () => {
+	// The exhaustive table is the point. This function renders a *spoken* clock
+	// time, and it used to derive 10–19 from `NUMBER_WORDS` with an `e` prefix,
+	// which produced "een" for 10 minutes, "ewelve" for 12, and a **TypeError for
+	// 13–19** — the last of which propagated out of `renderGroundedBriefing` and
+	// failed the whole briefing route. It survived a test suite because the only
+	// test that reached it built a reminder relative to "now", so it failed only
+	// when the suite ran between :10 and :19, and was twice dismissed as a
+	// time-dependent flake. Enumerating all sixty minutes is what makes that
+	// impossible: there is no wall clock left for the defect to hide behind.
+	const EXPECTED = [
+		'', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+		'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+		'seventeen', 'eighteen', 'nineteen',
+		'twenty', 'twenty one', 'twenty two', 'twenty three', 'twenty four',
+		'twenty five', 'twenty six', 'twenty seven', 'twenty eight', 'twenty nine',
+		'thirty', 'thirty one', 'thirty two', 'thirty three', 'thirty four',
+		'thirty five', 'thirty six', 'thirty seven', 'thirty eight', 'thirty nine',
+		'forty', 'forty one', 'forty two', 'forty three', 'forty four', 'forty five',
+		'forty six', 'forty seven', 'forty eight', 'forty nine',
+		'fifty', 'fifty one', 'fifty two', 'fifty three', 'fifty four', 'fifty five',
+		'fifty six', 'fifty seven', 'fifty eight', 'fifty nine',
+	];
+
+	it('spells all sixty minutes, and throws for none of them', () => {
+		const actual = Array.from({ length: 60 }, (_, m) => minutesToWords(m));
+		expect(actual).toEqual(EXPECTED);
+	});
+
+	it('never returns a digit, because the result is handed to speech synthesis', () => {
+		for (let m = 0; m < 60; m++) {
+			expect(minutesToWords(m)).not.toMatch(/[0-9]/);
+		}
 	});
 });

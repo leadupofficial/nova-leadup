@@ -747,8 +747,14 @@ router.get(
 					),
 				);
 
+			// NOTE: this is a flat list-price estimate, not a billed figure — there is no
+			// per-provider rate table in the schema. It is deliberately NOT rounded to a
+			// whole dollar: `Math.round(tokens * 0.00002)` returned an integer, so every
+			// tenant under 50k tokens rendered as `$0.00` in the console and the Cost card
+			// read as "free" rather than "nearly nothing". Four decimal places keep
+			// sub-cent spend visible without implying more precision than the rate has.
 			const costPerToken = 0.00002;
-			const totalCost = Math.round(totalTokens * costPerToken);
+			const totalCost = Math.round(totalTokens * costPerToken * 10000) / 10000;
 
 			res.json({
 				success: true,
@@ -806,13 +812,15 @@ router.get(
 				userRows.forEach((u) => userMap.set(u.id, u.email ?? u.name ?? 'unknown'));
 			}
 
+			// Same flat estimate and the same reason for not rounding to a whole dollar as
+			// the summary above.
 			const costPerToken = 0.00002;
 			const data = rows.map((r) => ({
 				userId: r.userId,
 				email: userMap.get(r.userId) ?? 'unknown',
 				calls: Number(r.calls),
 				tokens: Number(r.tokens),
-				cost: Math.round(Number(r.tokens) * costPerToken),
+				cost: Math.round(Number(r.tokens) * costPerToken * 10000) / 10000,
 			}));
 
 			res.json({ success: true, data });

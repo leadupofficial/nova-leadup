@@ -1,5 +1,10 @@
 #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
-#include: "Flutter/Generated.xcconfig"
+// `#include:` is not xcconfig syntax — the colon makes the directive unparseable, so
+// FLUTTER_ROOT was never defined and the Run Script phase expanded to
+// `/packages/flutter_tools/bin/xcode_backend.sh`. The path was also wrong: includes
+// resolve relative to this file's own directory, so `Flutter/Generated.xcconfig`
+// pointed at `ios/Flutter/Flutter/Generated.xcconfig`. Matches the stock template.
+#include "Generated.xcconfig"
 FLUTTER_BUILD_MODE=debug
 FLUTTER_BUILD_NAME=1.0.0
 FLUTTER_BUILD_NUMBER=1

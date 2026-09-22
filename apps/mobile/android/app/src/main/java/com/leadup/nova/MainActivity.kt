@@ -7,10 +7,15 @@ import io.flutter.embedding.engine.FlutterEngine
 /**
  * NOVA's single Android Activity, hosted by the Flutter v2 embedding.
  *
- * Extends [FlutterFragmentActivity] rather than plain `FlutterActivity` because the
- * `local_auth` plugin requires the foreground Activity to be an
- * `androidx.fragment.app.FragmentActivity` in order to show the biometric prompt.
- * With plain `FlutterActivity`, `authenticate()` fails at runtime.
+ * Extends [FlutterFragmentActivity] rather than plain `FlutterActivity` so the
+ * foreground Activity is an `androidx.fragment.app.FragmentActivity`. That is what
+ * `ACTION_OPEN_DOCUMENT_TREE` (the call-recording folder picker) needs in order to
+ * deliver its result through `onActivityResult` on every supported API level.
+ *
+ * This comment previously said `local_auth` required it. `local_auth` is **not** a
+ * dependency of this app — `pubspec.yaml` has no biometric package and the manifest
+ * declares no `USE_BIOMETRIC` — so that reason was wrong, even though
+ * `FlutterFragmentActivity` remains the right base class for the picker.
  *
  * This class previously extended `ReactActivity` as a leftover from the earlier
  * Expo/React Native implementation. That leftover made Flutter's tooling classify the
@@ -67,6 +72,15 @@ class MainActivity : FlutterFragmentActivity() {
             this,
             applicationContext,
         )
+
+        // Exposes this app's own notification settings screen to Dart
+        // (lib/features/reminders/reminder_notifications.dart). A denied
+        // POST_NOTIFICATIONS makes Android discard every reminder silently, so the
+        // warning the reconciler now raises has to lead somewhere the user can act.
+        NovaNotificationSettings.registerChannels(
+            flutterEngine.dartExecutor.binaryMessenger,
+            applicationContext,
+        )
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -78,5 +92,21 @@ class MainActivity : FlutterFragmentActivity() {
         if (!consumed) {
             super.onActivityResult(requestCode, resultCode, data)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // While the app is on screen, a wake-word detection is handled inside the app.
+        // While it is not, `WakeWordService` posts a notification instead, because Dart
+        // deliberately does not open a conversation in the background. This is the only
+        // signal the service has for "on screen", so it is kept current on every resume.
+        WakeWordService.setAppInForeground(true)
+    }
+
+    override fun onPause() {
+        // Set before `super` so the service never sees a resumed Activity once the
+        // framework has started tearing the foreground state down.
+        WakeWordService.setAppInForeground(false)
+        super.onPause()
     }
 }

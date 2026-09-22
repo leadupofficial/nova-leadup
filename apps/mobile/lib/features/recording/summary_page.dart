@@ -191,10 +191,15 @@ class _SummaryPageState extends ConsumerState<SummaryPage> {
             icon: Icons.volume_off_rounded,
             tone: NovaStateTone.accent,
             title: 'No speech was detected',
+            // Says only what this screen can know. It used to promise "the recording and
+            // its duration are saved", which was true of the row and not necessarily of
+            // the audio — the detail response carries no field saying whether the bytes
+            // reached storage, so this was asserting something it could not check. The
+            // premature `status: 'completed'` that made the claim reachable at all is
+            // fixed in `recording_controller.dart`; the wording no longer depends on it.
             message:
                 'Nothing in this recording produced a transcript or a summary, '
-                'so there is nothing to show. The recording and its duration '
-                'are saved.',
+                'so there is nothing to show. Its duration is saved.',
           ),
         ] else ...[
           if (d.summary != null && !d.summary!.isEmpty) ...[

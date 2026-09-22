@@ -6,12 +6,22 @@
  * `/conversations` also back this router. Nothing is stored in the auth
  * `sessions` table, which holds refresh tokens, not chat turns.
  *
- * Assistant replies are generated with `services/ai.js#chatCompletion` and use
+ * Assistant replies are generated with the same grounded, tool-bearing loop as
+ * `/conversations/:id/messages` and `/voice/chat` (`runAssistantToolLoop`) and
  * the same graceful degradation as `/conversations/:id/messages`: if the
  * provider is unavailable the user's turn is still persisted and the response
  * carries `assistantMessage: null` plus a machine-readable `assistantError`
  * instead of a 5xx.
+ *
+ * This route used to call `chatCompletion` directly with no `tools` and the
+ * bare persona prompt. Asked to set a reminder it truthfully answered that it
+ * could not, and pointed the user at Siri — NOVA denying a capability the
+ * server beside it already had. The Flutter client does not use this route (it
+ * posts to `/conversations/:id/messages`), but it is still mounted and still
+ * exercised by `scripts/verify-privacy-gates.py`, so it is repaired rather than
+ * removed.
  */
+import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { getDb } from '../db/connection.js';
@@ -20,8 +30,10 @@ import { eq, and, asc, desc } from 'drizzle-orm';
 import { HttpError } from '../middleware/error-handler.js';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
+import { getPrivacyPreferences } from '../services/privacy-preferences.js';
 import { logger } from '../utils/logger.js';
-import { chatCompletion } from '../services/ai.js';
+import { buildUserContext, composeSystemPrompt } from '../services/user-context.js';
+import { ASSISTANT_TOOLS_PROMPT, runAssistantToolLoop } from '../services/assistant-tools.js';
 import {
 	HISTORY_MESSAGE_LIMIT,
 	NOVA_SYSTEM_PROMPT,
@@ -29,6 +41,10 @@ import {
 	toChatMessages,
 	type AssistantError,
 } from '../services/assistant.js';
+// The shared output-token ceiling: a reasoning model bills its
+// `reasoning_content` against this same budget, so the turn-producing
+// routes must not each pick their own number (see `services/ai.ts`).
+import { defaultMaxOutputTokens } from '../services/ai.js';
 
 const router: ReturnType<typeof Router> = Router();
 
@@ -91,13 +107,23 @@ router.post('/message', authenticate, validate(ChatMessageSchema), async (req: A
 		const sessionId = body.sessionId;
 		const now = new Date();
 
+		// "Save conversations" in Profile → Privacy controls. With it off, the turn is
+		// answered but never written. That is what the switch means and it is also its
+		// cost: there is no stored history to read back, so the assistant loses
+		// multi-turn context. `GET /history/:sessionId` already answers
+		// `{ messages: [] }` for a session with no rows, so the client needs no special
+		// case — it simply sees an empty thread next time.
+		const prefs = await getPrivacyPreferences(db, userId);
+
 		let [conversation] = await db.select().from(conversations)
 			.where(and(eq(conversations.id, sessionId), eq(conversations.userId, userId)))
 			.limit(1);
 
 		if (!conversation) {
 			// Distinguish "session does not exist" from "belongs to someone else"
-			// without leaking the latter: a row owned by another user is a 404.
+			// without leaking the latter: a row owned by another user is a 404. This
+			// check runs even when nothing will be stored, so another user's session id
+			// cannot be used as anonymous scratch space.
 			const [foreign] = await db.select().from(conversations)
 				.where(eq(conversations.id, sessionId))
 				.limit(1);
@@ -105,55 +131,108 @@ router.post('/message', authenticate, validate(ChatMessageSchema), async (req: A
 				throw new HttpError(404, 'Chat session not found', 'NOT_FOUND');
 			}
 
-			[conversation] = await db.insert(conversations).values({
-				id: sessionId,
-				userId,
-				title: body.content.slice(0, 100),
-				mode: 'text',
-				metadata: body.metadata ?? {},
-				createdAt: now,
-				updatedAt: now,
-			}).returning();
+			if (prefs.saveConversations) {
+				[conversation] = await db.insert(conversations).values({
+					id: sessionId,
+					userId,
+					title: body.content.slice(0, 100),
+					mode: 'text',
+					metadata: body.metadata ?? {},
+					createdAt: now,
+					updatedAt: now,
+				}).returning();
 
-			logger.info({ sessionId, userId }, 'Chat session created');
+				logger.info({ sessionId, userId }, 'Chat session created');
+			}
 		}
 
-		const [userMessage]: ConversationMessage[] = await db.insert(conversationMessages).values({
-			conversationId: sessionId,
-			role: 'user',
-			content: body.content,
-			createdAt: now,
-		}).returning();
+		// With persistence off, the user turn is an in-memory object. `id` is a real
+		// UUID so the response shape is unchanged and the client can key a list row on
+		// it; it simply resolves to nothing on the server.
+		let userMessage: ConversationMessage;
+		if (prefs.saveConversations) {
+			[userMessage] = await db.insert(conversationMessages).values({
+				conversationId: sessionId,
+				role: 'user',
+				content: body.content,
+				createdAt: now,
+			}).returning();
+		} else {
+			userMessage = {
+				id: randomUUID(),
+				conversationId: sessionId,
+				role: 'user',
+				content: body.content,
+				createdAt: now,
+			} as ConversationMessage;
+		}
 
 		let assistantMessage: ConversationMessage | null = null;
 		let assistantError: AssistantError | null = null;
 
 		try {
-			const history = await db
-				.select({ role: conversationMessages.role, content: conversationMessages.content })
-				.from(conversationMessages)
-				.where(eq(conversationMessages.conversationId, sessionId))
-				.orderBy(desc(conversationMessages.createdAt))
-				.limit(HISTORY_MESSAGE_LIMIT);
+			// Only the stored thread is read. With "Save conversations" off there is
+			// nothing to read, so the turn is answered without context — and the reply
+			// says so is not the server's job here; the client shows the switch state.
+			const history = prefs.saveConversations
+				? await db
+						.select({ role: conversationMessages.role, content: conversationMessages.content })
+						.from(conversationMessages)
+						.where(eq(conversationMessages.conversationId, sessionId))
+						.orderBy(desc(conversationMessages.createdAt))
+						.limit(HISTORY_MESSAGE_LIMIT)
+				: [];
 
 			history.reverse();
 
-			const completion = await chatCompletion(toChatMessages(history), {
-				systemPrompt: NOVA_SYSTEM_PROMPT,
-				maxTokens: 1024,
+			// Ground the reply the same way `/voice/chat` and
+			// `/conversations/:id/messages` do, and offer the same write tools.
+			// Without them this route could only tell the user NOVA had no way to
+			// set a reminder. The tools run as the *authenticated* user; the model
+			// is given no way to name one.
+			//
+			// The user's own turn is passed so the memory block is ranked *against
+			// what they just asked*. The ranking lives in `user-context.ts` but is
+			// unreachable unless a caller supplies the turn, and a caller that
+			// forgets leaves the feature as dead as the broken vector query it
+			// replaced — which is the exact failure this change exists to end.
+			const context = await buildUserContext(userId, {}, undefined, { userTurn: body.content });
+
+			// Timed so the console can report AI latency; nothing recorded it before.
+			const modelCallStartedAt = Date.now();
+			const completion = await runAssistantToolLoop(userId, toChatMessages(history), {
+				systemPrompt: composeSystemPrompt({
+					basePrompt: NOVA_SYSTEM_PROMPT,
+					context: context.text,
+					capabilities: ASSISTANT_TOOLS_PROMPT,
+				}),
+				maxTokens: defaultMaxOutputTokens(),
 				temperature: 0.7,
 			});
 
-			[assistantMessage] = await db.insert(conversationMessages).values({
-				conversationId: sessionId,
-				role: 'assistant',
-				content: completion.content,
-				model: completion.model,
-				tokenUsage: completion.usage,
-				createdAt: new Date(),
-			}).returning();
+			if (prefs.saveConversations) {
+				[assistantMessage] = await db.insert(conversationMessages).values({
+					conversationId: sessionId,
+					role: 'assistant',
+					content: completion.content,
+					model: completion.model,
+					tokenUsage: completion.usage,
+					durationMs: Date.now() - modelCallStartedAt,
+					createdAt: new Date(),
+				}).returning();
 
-			await db.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, sessionId));
+				await db.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, sessionId));
+			} else {
+				assistantMessage = {
+					id: randomUUID(),
+					conversationId: sessionId,
+					role: 'assistant',
+					content: completion.content,
+					model: completion.model,
+					tokenUsage: completion.usage,
+					createdAt: new Date(),
+				} as ConversationMessage;
+			}
 
 			logger.info({ sessionId, userId, model: completion.model }, 'Chat reply generated');
 		} catch (aiErr) {

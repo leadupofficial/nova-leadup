@@ -1,0 +1,29 @@
+{
+ "cli": {
+ "version": ">= 5.2.0"
+ },
+ "build": {
+ "internal": {
+ "distribution": "internal",
+ "android": {
+ "buildType": "app-bundle",
+ "gradleCommand": ":app:bundleRelease"
+ },
+ "ios": {
+ "simulator": true
+ }
+ },
+ "production": {
+ "distribution": "store",
+ "android": {
+ "buildType": "app-bundle",
+ "gradleCommand": ":app:bundleRelease",
+ "googleServicesFile": "./google-services.json"
+ },
+ "ios": {
+ "buildConfiguration": "Release",
+ "googleServicesFile": "./GoogleService-Info.plist"
+ }
+ }
+ }
+}

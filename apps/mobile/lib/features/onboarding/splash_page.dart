@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:dio/dio.dart';
 
 import '../../app/providers.dart';
 import '../../core/theme/nova_theme.dart';
@@ -74,19 +75,43 @@ final splashReadinessProvider = FutureProvider<SplashReadiness>((ref) async {
         await ref.read(authStateProvider.notifier).handleRefreshFailure();
         authenticated = false;
       }
+      // Any other status — 5xx, or no status at all because the server could not be
+      // reached — keeps the session and continues to the app. It is handled here rather
+      // than left to fall through because this clause used to be the *only* catch: a
+      // failure that was not an `AuthException` escaped the provider entirely.
+    } catch (error) {
+      // **Nothing may escape this provider.**
+      //
+      // It used to: only `AuthException` was caught, so a raw socket error, a timeout, or
+      // anything thrown by `saveSession` propagated and left `splashReadinessProvider` in
+      // an **error** state. `_SplashPageState.build` reads `readiness.asData?.value` and
+      // has no error branch, so `resolved` stayed null, navigation never ran, and the app
+      // sat on the splash animation for ever — no crash, no message, no way out, while
+      // something underneath spun the CPU. That is the "blank screen" state observed on
+      // the device.
+      //
+      // A splash that cannot resolve still has to resolve to *something*. Falling through
+      // to the signed-out destination is the honest answer: the user reaches a screen
+      // they can act on rather than a hung animation.
+      debugPrint('[Splash] readiness could not refresh the session: $error');
+      authenticated = false;
     }
   }
 
   HealthCheckResult? health;
   try {
+    final cancelToken = CancelToken();
     // `HealthService.check` never throws; the budget only bounds how long a dead
-    // network can hold the splash open.
-    health = await ref
-        .read(healthServiceProvider)
-        .check()
-        .timeout(const Duration(seconds: 6));
+    // network can hold the splash open. The dedicated health client (5 s timeout
+    // plus CancelToken) guarantees a hung endpoint cannot stall startup.
+    final result = await ref
+        .read(healthServiceWithTimeoutProvider)
+        .check(cancelToken: cancelToken);
+    health = result;
+  } on DioException catch (_) {
+    // Cancelled or unreachable: `health` stays null and the row says so.
   } catch (_) {
-    // Unreachable, refused or timed out: `health` stays null and the row says so.
+    // Any other failure is treated the same — show "Slow connection — continuing".
   }
 
   final done = onboarding.getStatus() == OnboardingStatus.complete;
@@ -172,6 +197,16 @@ class _SplashPageState extends ConsumerState<SplashPage> {
   Widget build(BuildContext context) {
     final readiness = ref.watch(splashReadinessProvider);
     final resolved = readiness.asData?.value;
+
+    // A last resort, so a provider error can never present as an unexplained hang.
+    // The provider above is written not to throw; this is what happens if it ever does.
+    if (readiness.hasError && !_reported) {
+      _reported = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        context.go('/login');
+      });
+    }
 
     if (resolved != null && !_reported) {
       _reported = true;

@@ -80,7 +80,28 @@ class _DeviceControlPageState extends ConsumerState<DeviceControlPage> {
         ],
       ),
       refresh: ref.read(deviceControlProvider.notifier).refreshStatus,
-      child: Column(
+      // Every capability on this screen is Android-only: opening another app by
+      // package name, changing screen brightness, toggling Do Not Disturb and
+      // opening system panels all go through Android intents and Android's special
+      // app-access screens. The controller already refused to *act* on iOS, but the
+      // page still rendered the whole console — disclosure card, action cards, grant
+      // buttons — so an iOS reviewer saw a feature set the app cannot deliver, which
+      // is what App Review Guideline 2.3.1(a) is about.
+      //
+      // The gate is deliberately after `status` resolves: while the status is still
+      // loading, showing the console is harmless, and `isSupported` is false until it
+      // is known.
+      child: (status != null && !state.isSupported)
+          ? const NovaStateView(
+              icon: Icons.phone_android_rounded,
+              title: 'Device control is Android only',
+              message:
+                  'Opening other apps, changing the screen brightness, toggling Do Not '
+                  'Disturb and opening system panels rely on Android system APIs. There '
+                  'is nothing to configure on this device, and NOVA never gains control '
+                  'of your phone.',
+            )
+          : Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           DeviceBusyLine(busy: state.busy),

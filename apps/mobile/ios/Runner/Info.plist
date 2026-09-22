@@ -6,8 +6,13 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<!--
+	  Was "Nova Tmpl" — a template leftover that would have shown on the home
+	  screen and on the App Store listing while Android says "NOVA". The two
+	  stores must agree on the product name.
+	-->
 	<key>CFBundleDisplayName</key>
-	<string>Nova Tmpl</string>
+	<string>NOVA</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -26,22 +31,39 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>FirebaseApp</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<!--
+	  Exempt. Every cryptographic operation is one the OS provides: TLS via
+	  URLSession and the platform HTTP stack, and Keychain storage of tokens via
+	  `flutter_secure_storage` (Security.framework / CryptoKit). The app implements
+	  no cipher, no key exchange and no proprietary protocol of its own, so it is
+	  exempt from the export-compliance question and answers it once, here, rather
+	  than on every upload.
+
+	  This previously said "Standard HTTPS/TLS only". That was inaccurate — the
+	  app also uses the Keychain — and the conclusion it supports is the same, but
+	  an understated answer is still the wrong one to leave in the file a reviewer
+	  reads.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>NOVA uses Bluetooth to connect to headsets and earbuds for hands-free voice interaction.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>NOVA needs camera access to take photos and scan documents.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>NOVA uses local network for wake word detection.</string>
+	<!--
+	  The only privacy-sensitive API this app actually uses.
+
+	  Removed before the first submission: NSBluetoothAlwaysUsageDescription,
+	  NSCameraUsageDescription, NSLocalNetworkUsageDescription,
+	  NSPhotoLibraryAddUsageDescription, NSPhotoLibraryUsageDescription and
+	  NSSpeechRecognitionUsageDescription. Nothing in lib/ or pubspec.yaml uses
+	  Bluetooth, the camera, the photo library, Bonjour/local-network discovery or
+	  on-device speech recognition (transcription is server-side; the call-recording
+	  import uses the Files picker), and permission_handler was never configured to
+	  request them. Purpose strings for capabilities an app does not have invite the
+	  App Review question "where is this used?" and contradict the privacy
+	  questionnaire, which must list only what is actually collected.
+	-->
 	<key>NSMicrophoneUsageDescription</key>
-	<string>NOVA needs microphone access to hear your voice and have conversations with you.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>NOVA needs permission to save photos to your library.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>NOVA needs access to your photo library to save and retrieve photos.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>NOVA uses speech recognition to understand what you say.</string>
+	<string>NOVA listens only while you are talking to it, or while you have started a recording. Audio is sent to NOVA's server to be transcribed and answered.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -65,11 +87,18 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!--
+	  `audio` keeps a meeting recording alive when the screen locks, which is the
+	  documented purpose of the mode and is visible to the user while it happens.
+
+	  Removed: `processing` (it requires BGTaskSchedulerPermittedIdentifiers and a
+	  registered BGProcessingTask; neither exists, so declaring it is a misuse of the
+	  background-modes entitlement) and `remote-notification` (firebase_messaging is
+	  not a dependency, so the app never receives a silent push).
+	-->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
-		<string>processing</string>
-		<string>remote-notification</string>
 	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>

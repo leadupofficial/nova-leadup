@@ -1,6 +1,13 @@
 'use client';
 
 /**
+ * Placeholder row widths, in percent. Fixed values rather than `Math.random()`
+ * because a render must be pure: random widths changed on every re-render, so the
+ * skeleton visibly flickered and React's purity rule flagged it as a bug.
+ */
+const PLACEHOLDER_WIDTHS = [92, 71, 84, 63, 78, 88, 67, 95];
+
+/**
  * Skeleton loader for table rows.
  */
 export function TableRowSkeleton({ columns = 4 }: { columns?: number }) {
@@ -13,7 +20,7 @@ export function TableRowSkeleton({ columns = 4 }: { columns?: number }) {
 							height: '0.85rem',
 							background: '#e5e7eb',
 							borderRadius: '4px',
-							width: `${60 + Math.random() * 40}%`,
+							width: `${PLACEHOLDER_WIDTHS[i % PLACEHOLDER_WIDTHS.length]}%`,
 							animation: 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
 						}}
 					/>

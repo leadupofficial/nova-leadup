@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive icon. Both the square and the round variant are `<adaptive-icon>`; the
+  launcher applies the mask. `ic_launcher_round.xml` previously held a hand-written
+  <vector> drawing a plain white circle, which is what shipped as a placeholder: on a
+  round-masked launcher the app showed a white disc instead of its mark.
+
+  The foreground is a transparent PNG holding only the waveform glyph, inset to the
+  66% safe zone so no launcher mask clips it.
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@color/iconBackground"/>
-    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
 </adaptive-icon>

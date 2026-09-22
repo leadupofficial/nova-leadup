@@ -26,8 +26,11 @@ export function validateRegistration(data: {
 
  if (!data.password) {
  errors.push('Password is required');
- } else if (data.password.length < 8) {
- errors.push('Password must be at least 8 characters');
+ } else if (data.password.length < 12) {
+ // Kept in step with `PASSWORD_MIN_LENGTH` in `schemas/index.ts`. This helper is not
+ // imported anywhere today, but a third, weaker rule sitting in the tree is a trap for
+ // whoever wires it up next.
+ errors.push('Password must be at least 12 characters');
  } else if (!hasUpperCase(data.password)) {
  errors.push('Password must contain at least one uppercase letter');
  } else if (!hasLowerCase(data.password)) {

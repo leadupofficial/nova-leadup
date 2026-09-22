@@ -19,26 +19,17 @@ import { validate } from '../middleware/validate.js';
 import {
 	ActivityListQuerySchema,
 	parseCursorPagination,
-	decodeCursor,
-	encodeCursor,
+
 } from '../schemas/index.js';
+import { decodeKeysetCursor, encodeKeysetCursor, keysetWhere } from '../utils/pagination.js';
 
 const router: ReturnType<typeof Router> = Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function parseCursor(raw: string): string {
-	let id: string;
-	try {
-		id = decodeCursor(raw);
-	} catch {
-		throw new HttpError(400, 'Invalid cursor', 'INVALID_CURSOR');
-	}
-	if (!UUID_RE.test(id)) {
-		throw new HttpError(400, 'Invalid cursor', 'INVALID_CURSOR');
-	}
-	return id;
-}
+// The single-id cursor helper that lived here is gone: `decodeKeysetCursor` validates
+// the uuid as part of decoding, so a second validator would be a place for the two to
+// disagree. `UUID_RE` is still used by the `:id` route parameter checks below.
 
 /**
  * Neutralise LIKE metacharacters in user input. The value is still bound as a
@@ -64,11 +55,18 @@ router.get('/', authenticate, validate(ActivityListQuerySchema, 'query'), async 
 		if (q.action) whereClauses.push(ilike(auditLogs.action, `%${escapeLike(q.action)}%`));
 		if (q.outcome) whereClauses.push(eq(auditLogs.outcome, q.outcome));
 
+		const cursorColumn = auditLogs.id;
 		if (q.cursor) {
-			const decoded = parseCursor(q.cursor);
-			whereClauses.push(q.direction === 'backward'
-				? lt(auditLogs.id, decoded)
-				: gt(auditLogs.id, decoded));
+			// Keyset on `(occurred_at, id)` — see the same fix in tasks.ts. This one at
+			// least validated the uuid, which is why a malformed cursor answered 400 here
+			// while tasks and reminders answered 500; the pagination itself was still wrong.
+			let cursor;
+			try {
+				cursor = decodeKeysetCursor(q.cursor);
+			} catch {
+				throw new HttpError(400, 'Invalid cursor', 'INVALID_CURSOR');
+			}
+			whereClauses.push(keysetWhere(auditLogs.occurredAt, cursorColumn, cursor, q.direction));
 		}
 
 		const where = and(...whereClauses);
@@ -86,16 +84,16 @@ router.get('/', authenticate, validate(ActivityListQuerySchema, 'query'), async 
 
 		const hasMore = rows.length > q.limit;
 		const pageData = hasMore ? rows.slice(0, q.limit) : rows;
-		const lastId = pageData[pageData.length - 1]?.id;
-		const firstId = pageData[0]?.id;
+		const last = pageData[pageData.length - 1];
+		const first = pageData[0];
 
 		res.status(200).json({
 			success: true,
 			data: {
 				activity: pageData,
 				pagination: {
-					nextCursor: hasMore ? encodeCursor(lastId) : null,
-					prevCursor: firstId ? encodeCursor(firstId) : null,
+					nextCursor: hasMore && last ? encodeKeysetCursor(last.occurredAt, last.id) : null,
+					prevCursor: first ? encodeKeysetCursor(first.occurredAt, first.id) : null,
 					hasMore,
 					limit: q.limit,
 					total,

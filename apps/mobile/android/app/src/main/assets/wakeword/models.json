@@ -1,10 +1,10 @@
 {
-  "_comment": "Installed wake-word classifiers. Add or remove entries here to change which wake words NOVA listens for - no Kotlin changes required. 'asset' is a path relative to android/app/src/main/assets/. Entries whose asset file is missing are skipped at runtime with a warning, and their names are reported to Dart through the 'availability' method on the nova/wake_word channel.",
+  "_comment": "Installed wake words. With the sherpa-onnx engine a wake word is a **keywords file** (BPE-tokenised text), not a trained classifier, so the phrase can be changed here without training anything. 'asset' is a path relative to android/app/src/main/assets/. Entries whose asset is missing are skipped at runtime and reported to Dart through the 'availability' method on the nova/wake_word channel.",
   "models": [
     {
-      "name": "hey_jarvis",
-      "asset": "wakeword/hey_jarvis_v0.1.onnx",
-      "threshold": 0.5
+      "name": "hey_nova",
+      "asset": "wakeword/kws/keywords.txt",
+      "threshold": 0.25
     }
   ]
 }

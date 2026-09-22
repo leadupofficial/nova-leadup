@@ -5,7 +5,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { getDb } from '../db/connection.js';
 import { memories } from '@nova/database';
-import { eq, desc, and, sql, gt, lt, asc, ilike, or } from 'drizzle-orm';
+import { eq, desc, and, sql, gt, lt, asc } from 'drizzle-orm';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
@@ -16,10 +16,12 @@ import {
 	MemorySearchSchema,
 	MemoryListQuerySchema,
 	parseCursorPagination,
-	decodeCursor,
-	encodeCursor,
 	type CursorPaginationInput,
 } from '../schemas/index.js';
+import { decodeKeysetCursor, encodeKeysetCursor, keysetWhere } from '../utils/pagination.js';
+// One domain function owns "save a memory" and "search memories". The route used to
+// do both itself, which is what made `createMemory`'s embedding hook unreachable.
+import { createMemory, memoryContentMatches } from '../services/memory.js';
 
 const router: ReturnType<typeof Router> = Router();
 
@@ -27,7 +29,15 @@ const router: ReturnType<typeof Router> = Router();
 
 router.get('/', authenticate, validate(MemoryListQuerySchema, 'query'), async (req: AuthenticatedRequest, res, next) => {
 	try {
-		const q = parseCursorPagination(req) as z.infer<typeof MemoryListQuerySchema>;
+		// `validatedQuery`, not `parseCursorPagination`. The schema-validated object holds
+		// the filters this route declares; `parseCursorPagination` in `schemas/index.ts`
+		// reads `req.query` directly and returns only `cursor`/`limit`/`direction`, so
+		// `category`, `visibility` and `status` were accepted and then silently discarded —
+		// `GET /memories?category=contact` returned every category.
+		const validatedQuery = (req as unknown as Record<string, unknown>).validatedQuery as
+			| z.infer<typeof MemoryListQuerySchema>
+			| undefined;
+		const q = validatedQuery ?? (parseCursorPagination(req) as z.infer<typeof MemoryListQuerySchema>);
 		const db = getDb();
 		const userId = req.user!.id;
 
@@ -36,16 +46,29 @@ router.get('/', authenticate, validate(MemoryListQuerySchema, 'query'), async (r
 		if (q.visibility) whereClauses.push(eq(memories.visibility, q.visibility));
 		if (q.status) whereClauses.push(eq(memories.status, q.status));
 
-		const where = and(...whereClauses);
-		const cursorColumn = memories.id;
+		// `?search=` was documented by the mobile client and silently dropped by
+		// this schema — zod strips unknown keys — so the app's memory search box
+		// returned the whole unfiltered list. The list owns the filter now, and the
+		// term is escaped so `%`/`_` are literal characters rather than wildcards.
+		const searchTerm = q.search?.trim();
+		if (searchTerm) whereClauses.push(memoryContentMatches(searchTerm));
 
+		// The cursor clause has to be pushed **before** `where` is built. It used to be
+		// pushed after, so `and(...whereClauses)` had already been evaluated without it
+		// and the cursor was ignored entirely: page two came back identical to page one,
+		// and a client following `nextCursor` looped forever.
+		const cursorColumn = memories.id;
 		if (q.cursor) {
-			const decoded = decodeCursor(q.cursor);
-			const cursorWhere = q.direction === 'backward'
-				? lt(cursorColumn, decoded)
-				: gt(cursorColumn, decoded);
-			whereClauses.push(cursorWhere);
+			let cursor;
+			try {
+				cursor = decodeKeysetCursor(q.cursor);
+			} catch {
+				throw new HttpError(400, 'Invalid cursor', 'INVALID_CURSOR');
+			}
+			whereClauses.push(keysetWhere(memories.createdAt, cursorColumn, cursor, q.direction));
 		}
+
+		const where = and(...whereClauses);
 
 		const [countRow] = await db.select({ count: sql<number>`count(*)` })
 			.from(memories)
@@ -60,16 +83,16 @@ router.get('/', authenticate, validate(MemoryListQuerySchema, 'query'), async (r
 
 		const hasMore = rows.length > q.limit;
 		const pageData = hasMore ? rows.slice(0, q.limit) : rows;
-		const lastId = pageData[pageData.length - 1]?.id;
-		const firstId = pageData[0]?.id;
+		const last = pageData[pageData.length - 1];
+		const first = pageData[0];
 
 		res.status(200).json({
 			success: true,
 			data: {
 				memories: pageData,
 				pagination: {
-					nextCursor: hasMore ? encodeCursor(lastId) : null,
-					prevCursor: firstId ? encodeCursor(firstId) : null,
+					nextCursor: hasMore && last ? encodeKeysetCursor(last.createdAt, last.id) : null,
+					prevCursor: first ? encodeKeysetCursor(first.createdAt, first.id) : null,
 					hasMore,
 					limit: q.limit,
 					total,
@@ -82,25 +105,26 @@ router.get('/', authenticate, validate(MemoryListQuerySchema, 'query'), async (r
 router.post('/', authenticate, validate(CreateMemorySchema), async (req: AuthenticatedRequest, res, next) => {
 	try {
 		const body = (req as any).validatedBody as z.infer<typeof CreateMemorySchema>;
-		const db = getDb();
 		const userId = req.user!.id;
-		const now = new Date();
 
-		const [memory] = await db.insert(memories).values({
+		// Routed through the domain service rather than inserting here. This route
+		// wrote its own row, so `createMemory` — the only caller of `storeEmbedding`
+		// — was unreachable dead code on the app's real write path, and no memory
+		// ever got an embedding. `createMemory` also owns the "Save memories"
+		// privacy check, so the duplicate check that used to live here is gone
+		// rather than merely moved; it throws the same 409/MEMORY_SAVING_DISABLED.
+		const memory = await createMemory({
 			userId,
-			content: body.content,
 			category: body.category,
+			content: body.content,
 			sourceType: body.sourceType,
 			visibility: body.visibility,
 			sensitivity: body.sensitivity,
 			importance: body.importance,
 			confidence: body.confidence,
-			sourceIds: body.sourceIds ?? [],
-			normalizedFacts: body.normalizedFacts ?? {},
-			status: 'proposed',
-			createdAt: now,
-			updatedAt: now,
-		}).returning();
+			sourceIds: body.sourceIds,
+			normalizedFacts: body.normalizedFacts,
+		});
 
 		logger.info({ memoryId: memory.id, userId, category: body.category }, 'Memory created');
 		res.status(201).json({ success: true, data: memory });
@@ -113,10 +137,19 @@ router.get('/search', authenticate, validate(MemorySearchSchema, 'query'), async
 		const db = getDb();
 		const userId = req.user!.id;
 
-		const searchTerm = `%${q.query}%`;
+		// The term is trimmed, rejected when empty, and escaped before it becomes a
+		// pattern. `%${q.query}%` passed the raw value through, so `?query=%`
+		// matched every memory the user owned (an unbounded sequential scan whose
+		// result set had nothing to do with the search) and `?query=_` matched any
+		// single character.
+		const searchTerm = q.query.trim();
+		if (!searchTerm) {
+			throw new HttpError(400, 'The search query must contain at least one non-whitespace character', 'INVALID_SEARCH_TERM');
+		}
+
 		const whereClauses = [
 			eq(memories.userId, userId),
-			or(ilike(memories.content, searchTerm)),
+			memoryContentMatches(searchTerm),
 		];
 		if (q.category) whereClauses.push(eq(memories.category, q.category));
 		if (q.visibility) whereClauses.push(eq(memories.visibility, q.visibility));

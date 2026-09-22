@@ -234,18 +234,26 @@ class _CompanionPageState extends ConsumerState<CompanionPage> {
       // and onboarding runs *before* sign-in, so on a fresh install the save
       // failed with "Missing or invalid authorization header" and the companion
       // the user had just configured was silently thrown away.
-      await ref
-          .read(onboardingServiceProvider)
-          .savePendingPersona(persona.toJson());
+      final onboarding = ref.read(onboardingServiceProvider);
+      await onboarding.savePendingPersona(persona.toJson());
+      var pushed = false;
       try {
         await ref.read(novaMutationsProvider).savePersona(persona);
+        pushed = true;
       } catch (e) {
-        // Not fatal: the choice is stored and will be pushed after sign-in, so
-        // onboarding continues rather than trapping the user on this screen.
+        // Not fatal: the choice stays stored and `PendingPersonaFlush` pushes it on the
+        // first authenticated launch, so onboarding continues rather than trapping the
+        // user on this screen.
         debugPrint('[Companion] persona save deferred until sign-in: $e');
       }
       if (!mounted) return;
-      await ref.read(onboardingServiceProvider).clearPendingPersona();
+      // Cleared ONLY when the server accepted it. This line used to run
+      // unconditionally, immediately after a failed push, so the companion the user had
+      // just configured — and which the copy above promises to push after sign-in — was
+      // deleted on the spot. Nothing re-pushed it, because there was nothing left.
+      if (pushed) {
+        await onboarding.clearPendingPersona();
+      }
       if (!mounted) return;
       await _advance(context, ref, save: false);
     } catch (e) {

@@ -28,6 +28,7 @@ class NovaMessageBubble extends StatelessWidget {
     this.provisional = false,
     this.label,
     this.onRetry,
+    this.onReport,
   });
 
   final String text;
@@ -42,6 +43,14 @@ class NovaMessageBubble extends StatelessWidget {
   final String? label;
 
   final VoidCallback? onRetry;
+
+  /// Files a report about this reply. Rendered only on committed assistant messages,
+  /// and only when set.
+  ///
+  /// Google Play's AI-Generated Content policy requires apps that generate content
+  /// with AI to provide in-app reporting of offensive output without making the user
+  /// leave the app. This is that control.
+  final VoidCallback? onReport;
 
   @override
   Widget build(BuildContext context) {
@@ -152,6 +161,33 @@ class NovaMessageBubble extends StatelessWidget {
                   ),
                 ],
               ],
+            ),
+          ],
+          // Reporting an assistant reply. Kept off provisional and failed bubbles:
+          // there is no finished answer to report in either case.
+          if (onReport != null && !isUser && !provisional && !pending && !failed) ...[
+            const SizedBox(height: 4),
+            Semantics(
+              button: true,
+              label: 'Report this reply',
+              child: GestureDetector(
+                onTap: onReport,
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.flag_outlined, size: 13, color: c.muted),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Report',
+                        style: NovaTheme.msgLabel(c).copyWith(color: c.muted),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ],
         ],

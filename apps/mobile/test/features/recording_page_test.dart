@@ -20,6 +20,7 @@ import '../helpers/test_harness.dart';
 /// created a row would be the bug this guards.
 void main() {
   late List<RequestOptions> captured;
+  late FakeAudioRecorder recorder;
 
   NovaApi createOnlyApi() {
     final adapter = FakeHttpAdapter((RequestOptions options) async {
@@ -40,7 +41,7 @@ void main() {
     overrides: [
       novaApiProvider.overrideWithValue(createOnlyApi()),
       meetingRecorderProvider.overrideWithValue(
-        fakeMeetingRecorder(recorder: FakeAudioRecorder()),
+        fakeMeetingRecorder(recorder: recorder),
       ),
     ],
     child: MaterialApp(
@@ -52,7 +53,10 @@ void main() {
     ),
   );
 
-  setUp(() => captured = <RequestOptions>[]);
+  setUp(() {
+    captured = <RequestOptions>[];
+    recorder = FakeAudioRecorder();
+  });
 
   testWidgets('opens on the consent reminder with recording off',
       (tester) async {
@@ -109,8 +113,22 @@ void main() {
       await tester.tap(
         find.widgetWithText(NovaPrimaryButton, 'Start recording'),
       );
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      // Wait for the two real-world effects the assertions below depend on — the row
+      // was created *and* the recorder actually started — instead of guessing a
+      // duration. A fixed 100 ms was enough on an idle machine and not enough under a
+      // full-suite load, so this test flaked; the worst kind of failure, because it
+      // reports a product bug that is not there.
+      // The whole start flow — create the row, open the file, start the recorder,
+      // publish the `recording` phase — has to finish *inside* this real-async zone.
+      // Leaving it mid-flight and returning to the fake clock stalls it, and the
+      // indicator assertion then fails. 100 ms was enough idle and not enough under a
+      // full-suite load, so the wait is now an order of magnitude larger than the
+      // observed need rather than a guess at the minimum.
+      await Future<void>.delayed(const Duration(milliseconds: 1000));
     });
+    // Pump until the page shows the live indicator rather than pumping a fixed
+    // number of times: the controller publishes its `recording` phase after the
+    // recorder reports started, and that gap is what made a fixed delay flaky.
     await tester.pump();
     await tester.pump();
     expect(captured, hasLength(1));

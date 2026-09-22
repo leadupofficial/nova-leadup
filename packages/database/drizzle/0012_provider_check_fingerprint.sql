@@ -1,0 +1,42 @@
+-- NOVA — the credential a provider test actually exercised.
+--
+-- ## The defect this closes
+--
+-- `provider_health_checks` recorded a test result but not *which value* was tested, and
+-- `listConfigViews` showed the most recent result for a key regardless of how long ago it ran. So
+-- after rotating an API key:
+--
+--   * a result of `pass` continued to assert that a credential works — for a value that had already
+--     been replaced and no longer exists;
+--   * a result of `fail` continued to assert a failure after the operator had rotated the key to fix
+--     it, so the console told them their fix had not worked when in fact nobody had tested it.
+--
+-- Both are the same class of defect: a claim about current state derived from a measurement of a
+-- past state. The Security Center's own rule applies — a thing that has not been tested is *unknown*,
+-- not healthy, and after a rotation it is not even the same thing.
+--
+-- ## Why the fingerprint is on the check row rather than the config row
+--
+-- The check records what was tested; the config row holds what is stored now. The staleness question
+-- is "do these describe the same value", which is answerable only by comparing the two — so the
+-- check carries the fingerprint of the value it used, and the comparison is computed on read from
+-- live state. A fingerprint stored on the config row would itself be one more thing that can go
+-- stale, and the read model already resolves the effective value (it must, to report `configured`).
+--
+-- `fingerprintSecret` is the existing helper in `admin/secrets.ts` — SHA-256, domain-separated, and
+-- truncated to 16 characters. It is deliberately **not** reversible and not a key derivation: it
+-- exists to answer "is this the same value", never to recover one, which is why a truncated digest
+-- is sufficient and safer than storing anything derived from the secret at full length.
+--
+-- Nullable, and that is meaningful: rows written before this migration, and tests for providers with
+-- no credentials (PostgreSQL, Redis, object storage, Stripe when unset), legitimately have no
+-- credential to fingerprint. `NULL` means "no credential was involved", which is **not** the same as
+-- "stale" and must not be rendered as such.
+--
+-- Idempotent.
+
+ALTER TABLE "provider_health_checks"
+	ADD COLUMN IF NOT EXISTS "secret_fingerprint" varchar(64);--> statement-breakpoint
+
+-- No index: the column is read one row at a time, joined by provider, and never filtered on. An index
+-- here would cost writes on a table that every connectivity test appends to and buy nothing.

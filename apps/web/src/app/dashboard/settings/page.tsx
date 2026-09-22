@@ -228,7 +228,7 @@ export default function SettingsScreen() {
  />
  <Toggle
  label="Wake Word"
- description="Say 'Hey NOVA' to activate"
+ description="On-device listening is set up in the mobile app"
  enabled={wakeWordEnabled}
  onToggle={() => setWakeWordEnabled(!wakeWordEnabled)}
  />
@@ -297,12 +297,24 @@ export default function SettingsScreen() {
  <ChevronRight size={16} className="text-slate-600" />
  </div>
  </Link>
- <Toggle
- label="Private Mode"
- description="Don't store conversation data"
- enabled={false}
- onToggle={() => {}}
- />
+ {/* The "Private Mode" toggle was removed rather than wired.
+     It rendered with `enabled={false}` and `onToggle={() => {}}`, so the switch
+     could never move, and its description promised "Don't store conversation
+     data" — a privacy control that did nothing. `apps/web` has no API client and
+     no auth, so there is nothing to persist it to; a control that cannot be
+     honoured is worse than no control. Wire it to `PUT /api/v1/settings/privacy`
+     (`savePrivacy`) when this app gets a session, and restore the switch with it. */}
+ <Link href="/dashboard/privacy" className="block">
+ <div className="flex items-center justify-between py-1">
+ <div>
+ <p className="text-sm text-slate-300">Privacy levels</p>
+ <p className="text-xs text-slate-500">
+ Set from the mobile app — this preview cannot store them
+ </p>
+ </div>
+ <ChevronRight size={16} className="text-slate-600" />
+ </div>
+ </Link>
  </div>
  </GlassPanel>
 

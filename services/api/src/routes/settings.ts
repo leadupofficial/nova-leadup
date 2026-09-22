@@ -4,6 +4,7 @@
 import { Router, NextFunction } from 'express';
 import { z } from 'zod';
 import { getDb } from '../db/connection.js';
+import { processingUnsupported } from '../services/privacy-preferences.js';
 import { users, privacyPreferences, personas, avatars, companionConfigs, organizations, featureFlags,
 } from '@nova/database';
 import { eq, and, desc, like, ilike, sql, type SQL } from 'drizzle-orm';
@@ -146,10 +147,14 @@ router.patch('/profile', authenticate, validate(UpdateProfileSchema), async (req
 
 router.get('/preferences', authenticate, async (req: AuthenticatedRequest, res, next: NextFunction) => {
 	try {
-		// Reached with raw SQL on purpose: `notification_preferences` was added
-		// directly to the database, and @nova/database's dist cannot be rebuilt
-		// cleanly (pre-existing type errors in lead.repository.ts), so importing
-		// the drizzle table would resolve to undefined at runtime.
+		// The table is `notificationPreferences` in `@nova/database`'s schema. This
+		// handler still reaches it with raw SQL rather than the Drizzle table because
+		// it selects a flat column projection (`push, email, sms, in_app, theme,
+		// font_size`) and the insert is an upsert with COALESCE; both are clearer as
+		// SQL. It is no longer a workaround: the table is in the canonical schema and
+		// has a migration (`drizzle/0003_steady_archangel.sql`), so a freshly migrated
+		// database has it. It previously 500'd with `42P01` on a clean database
+		// because schema.ts and the migrations had drifted.
 		const result = await getDb().execute(
 			sql`SELECT push, email, sms, in_app, theme, font_size, updated_at
 			    FROM notification_preferences WHERE user_id = ${req.user!.id} LIMIT 1`,
@@ -276,6 +281,19 @@ router.patch('/privacy', authenticate, validate(PrivacyPrefsSchema), async (req:
 		const body = (req as any).validatedBody as z.infer<typeof PrivacyPrefsSchema>;
 		const db = getDb();
 		const now = new Date();
+
+		// Two of these switches cannot be honoured by this deployment, and accepting
+		// them would be worse than refusing: "On-device processing" claims the audio
+		// never leaves the phone and "Cloud processing: off" claims the same, while
+		// every turn is still sent to a provider. Refusing keeps the stored preference
+		// truthful, and the app presents both as unavailable to match.
+		const unsupported = processingUnsupported({
+			...(body.cloudProcessing !== undefined ? { cloudProcessing: body.cloudProcessing } : {}),
+			...(body.localProcessing !== undefined ? { localProcessing: body.localProcessing } : {}),
+		});
+		if (unsupported) {
+			throw new HttpError(409, unsupported.message, unsupported.code);
+		}
 
 		const [prefs] = await db.select().from(privacyPreferences).where(eq(privacyPreferences.userId, req.user!.id)).limit(1);
 

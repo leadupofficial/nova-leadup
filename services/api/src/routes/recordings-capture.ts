@@ -19,7 +19,7 @@ import express, { Router } from 'express';
 import { z } from 'zod';
 import { getDb } from '../db/connection.js';
 import { audioRecordings } from '@nova/database';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, notInArray } from 'drizzle-orm';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
@@ -43,7 +43,7 @@ import {
 	RECORDING_STATUS,
 	enqueueRecordingProcessing,
 } from '../services/recording-pipeline.js';
-import { parseRecordingId } from './recordings-shared.js';
+import { parseRecordingId, toClientRecording } from './recordings-shared.js';
 
 const router: ReturnType<typeof Router> = Router();
 
@@ -178,7 +178,10 @@ router.post(
 			res.status(200).json({
 				success: true,
 				data: {
-					recording: updated ?? existing,
+					// Projected, not the raw row: `returning()` hands back every column,
+					// including `storageKey` and `tenantId`. The `storage` envelope below
+					// is the deliberate part of this contract; the extra columns were not.
+					recording: toClientRecording(updated ?? existing),
 					storage: {
 						objectStorage: true,
 						key: stored.key,
@@ -240,13 +243,34 @@ router.post(
 			}
 
 			const now = new Date();
+			// **Terminal statuses are never downgraded.** This wrote `processing`
+			// unconditionally, before it knew whether the pipeline would actually run —
+			// and `runRecordingPipeline` drops a run whose recording is already in its
+			// `inFlight` set. So a second `POST /:id/process` arriving while the first run
+			// was finishing could overwrite `completed` with `processing` and then be
+			// dropped, leaving the row **permanently** at `processing` with the transcript
+			// and summary already written. Nothing recovers it: the retention sweep never
+			// reads `status`. Reproduced by holding the first run inside `deleteAudio`
+			// while the route's UPDATE ran.
+			//
+			// The guard is the `WHERE`: a recording that has already finished is left
+			// alone, so the dropped duplicate is a no-op rather than a corruption.
 			await db.update(audioRecordings)
 				.set({
 					status: RECORDING_STATUS.processing,
 					...(body.language ? { language: body.language } : {}),
 					updatedAt: now,
 				})
-				.where(and(eq(audioRecordings.id, id), eq(audioRecordings.userId, userId)));
+				.where(
+					and(
+						eq(audioRecordings.id, id),
+						eq(audioRecordings.userId, userId),
+						notInArray(audioRecordings.status, [
+							RECORDING_STATUS.completed,
+							RECORDING_STATUS.failed,
+						]),
+					),
+				);
 
 			// Fire-and-forget. `enqueueRecordingProcessing` never rejects, and the
 			// status it needs is already committed, so the client sees

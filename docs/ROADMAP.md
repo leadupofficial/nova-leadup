@@ -35,6 +35,34 @@ alone. Anything marked **measured** was verified by running it, not read from co
 
 **14 of 33 Flutter deps and 3 server deps are dead.**
 
+> **Correction, verified 2026-09-19 (evening).** This table describes the repository as
+> the audit found it, and the work it called for has since landed. Read the table as
+> history, not as current state:
+>
+> - **`NotificationListener`** is a real `NovaNotificationListenerService`
+>   (`NotificationListenerService`, 294 lines), declared in the manifest with
+>   `BIND_NOTIFICATION_LISTENER_SERVICE`.
+> - **`pino`/`pino-pretty`** are used: `services/api/src/utils/logger.ts` is a pino
+>   logger that emits JSON and redacts secrets. The hand-rolled `console.log` wrapper is
+>   gone.
+> - **`rive`** is gone from `pubspec.yaml`; the avatar is a `CustomPainter`
+>   (`nova_avatar_rig.dart`).
+> - **`drift` + `sqlite3_flutter_libs`** are gone. So are `intl`, the five codegen
+>   packages, and `uuid`, `sensors_plus`, `local_auth`, `equatable`,
+>   `package_info_plus`, `path` and `cupertino_icons`.
+> - The app now declares **20 runtime dependencies** — `flutter_riverpod`, `go_router`,
+>   `dio`, `path_provider`, `flutter_secure_storage`, `audio_session`, `just_audio`,
+>   `record`, `flutter_tts`, `permission_handler`, `flutter_local_notifications`,
+>   `timezone`, `connectivity_plus`, `shared_preferences`, `web_socket_channel`,
+>   `firebase_core`, `firebase_crashlytics`, `firebase_analytics`, plus the Flutter SDK
+>   — with no dead entries found. `web_socket_channel` was promoted from a transitive
+>   dependency because the app now imports it directly.
+>
+> The last row of the working table, **semantic memory**, is also wrong: pgvector and
+> `packages/memory` exist, but `hasEmbeddingsForUser()` returns `false` and no embedding
+> provider is configured, so only the text-search fallback runs. See
+> [`REQUIREMENTS_VERIFICATION.md`](./REQUIREMENTS_VERIFICATION.md#earlier-findings-and-where-each-one-stands-now).
+
 ---
 
 ## 2. Repository sprawl

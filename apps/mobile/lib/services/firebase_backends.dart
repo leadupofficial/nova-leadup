@@ -30,19 +30,33 @@ class FirebaseActivation {
   /// True once [initialize] has succeeded.
   static bool get isReady => _ready;
 
+  /// Bounds each step below.
+  ///
+  /// The contract above says a failure must not stop startup — but "failure" was
+  /// read as "throws", and the actual on-device defect was a *hang*:
+  /// `Firebase.initializeApp()` neither completed nor threw, so neither the success
+  /// log nor the failure log was ever printed, nothing returned, and `runApp` was
+  /// never reached. A hang is now a failure too, and it degrades to the console
+  /// backends exactly like a throw does.
+  static const Duration stepTimeout = Duration(seconds: 5);
+
   static Future<FirebaseBackends?> initialize() async {
     try {
       if (Firebase.apps.isEmpty) {
         // No options are passed on purpose: on Android the values come from
         // android/app/google-services.json via the com.google.gms.google-services
         // Gradle plugin. Only web/desktop would need explicit FirebaseOptions.
-        await Firebase.initializeApp();
+        await Firebase.initializeApp().timeout(stepTimeout);
       }
 
       // Crashlytics must be told to collect; the Android manifest meta-data only sets
       // the default for debug builds.
-      await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(!kDebugMode);
-      await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(!kDebugMode);
+      await FirebaseCrashlytics.instance
+          .setCrashlyticsCollectionEnabled(!kDebugMode)
+          .timeout(stepTimeout);
+      await FirebaseAnalytics.instance
+          .setAnalyticsCollectionEnabled(!kDebugMode)
+          .timeout(stepTimeout);
 
       _ready = true;
       debugPrint('[Firebase] initialised (project ${Firebase.app().options.projectId})');
@@ -54,8 +68,8 @@ class FirebaseActivation {
     } catch (error, stackTrace) {
       _ready = false;
       debugPrint(
-        '[Firebase] initialisation failed; continuing with the console backends. '
-        '$error\n$stackTrace',
+        '[Firebase] initialisation failed or timed out; continuing with the console '
+        'backends. $error\n$stackTrace',
       );
       return null;
     }

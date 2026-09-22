@@ -1,6 +1,6 @@
 import 'dart:async';
+import '../auth/auth_controller.dart';
 
-import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -37,6 +37,18 @@ typedef ConsentOutcome = Map<String, bool>;
 /// [_ConsentPageState._bootstrap] resolves `.future` from `initState`, before
 /// `build` installs the `ref.watch` subscription.
 final consentHistoryProvider = FutureProvider<List<NovaConsentRecord>>((ref) {
+  // Onboarding runs **before** sign-in, so on a fresh install there is no token and
+  // `GET /consent` answers 401. That surfaced as the very first screen a user sees
+  // reading "Could not load your saved choices. Pull to retry." — and, because
+  // [_ConsentPageState._bootstrap] resolves `.future` from `initState`, it retried in a
+  // loop against the API. Found by running the app on a physical device rather than an
+  // emulator that had already been signed in.
+  //
+  // With no session there are no prior records to fetch, so this is not a fallback that
+  // hides a failure: it is the correct answer.
+  if (!ref.watch(authStateProvider).isAuthenticated) {
+    return Future<List<NovaConsentRecord>>.value(const <NovaConsentRecord>[]);
+  }
   return ref.watch(novaApiProvider).listConsent();
 });
 
@@ -45,7 +57,7 @@ final consentHistoryProvider = FutureProvider<List<NovaConsentRecord>>((ref) {
 @immutable
 class _RowSpec {
   const _RowSpec(this.purpose, this.emoji, this.title, this.description,
-      {this.permissions = const <Permission>[], this.canPromptOs = true});
+      {this.permissions = const <Permission>[], this.acknowledgeOnly = false});
 
   final String purpose;
   final String emoji;
@@ -53,26 +65,38 @@ class _RowSpec {
   final String description;
   final List<Permission> permissions;
 
-  /// False when this build must not raise the system dialog for [permissions].
-  final bool canPromptOs;
+  /// True for a disclosure the user can only accept, because there is no useful
+  /// "no": the row describes how a feature they are turning on actually works.
+  /// Such a row renders no "Not now" button, so it never offers a refusal the app
+  /// would ignore.
+  final bool acknowledgeOnly;
 
   bool get isDevice => permissions.isNotEmpty;
 }
 
-/// Android's manifest declares no `READ_CONTACTS`/`READ_CALENDAR` and iOS's
-/// `Info.plist` has no contacts/calendar usage description — both pre-existing
-/// files outside this screen's scope. On Android the request is still issued (the
-/// OS answers "denied" for an undeclared permission); on iOS it would terminate
-/// the process, so there the row only reads the status.
-bool get _canPromptContacts => defaultTargetPlatform != TargetPlatform.iOS;
-
+/// The categories this step asks about, in the order the export lists them.
+///
+/// Two rows were removed and one added before the first store submission:
+///
+///  * **Contacts & Calendar** is gone. Neither platform declares the permission —
+///    Android's manifest has no `READ_CONTACTS`/`READ_CALENDAR` and `Info.plist` has
+///    no usage description — so the OS could never grant it. Keeping the row told a
+///    reviewer the capability exists when it does not.
+///  * **AI processing** is new. App Review Guideline 5.1.2(i) (and Play's Data safety
+///    rules) require the app to disclose that personal data is shared with third-party
+///    AI providers, name them, and obtain explicit permission first. This is that
+///    disclosure, and the answer is written to the consent ledger under
+///    `ai_processing`.
 final List<_RowSpec> _rows = <_RowSpec>[
-  const _RowSpec('microphone', '🎙', 'Microphone', 'Needed to hear you during conversations. Always visible while active.', permissions: <Permission>[Permission.microphone]),
+  const _RowSpec('microphone', '🎙', 'Microphone',
+      'Needed to hear you during conversations. While NOVA is listening the microphone stays open and Android or iOS shows its own indicator. Your audio is sent to our server to be transcribed and answered — it is not processed only on this device.',
+      permissions: <Permission>[Permission.microphone]),
   const _RowSpec('notifications', '🔔', 'Notifications', 'Deliver reminders and alerts you create.', permissions: <Permission>[Permission.notification]),
   const _RowSpec('recording', '⏺', 'Recording', 'Off by default. You decide when to record a meeting.'),
   const _RowSpec('memory', '🧠', 'Memory', 'Save approved facts for future conversations.'),
-  _RowSpec('contacts_calendar', '📅', 'Contacts & Calendar', 'Optional. Connect only when you want help scheduling.',
-      permissions: const <Permission>[Permission.contacts, Permission.calendarFullAccess], canPromptOs: _canPromptContacts),
+  const _RowSpec('ai_processing', '✨', 'AI processing',
+      'NOVA answers using contracted AI providers — Sarvam AI and Deepgram for speech-to-text, ElevenLabs for voice, and Anthropic for the replies. Your voice, transcripts and messages are sent to them only to produce the answer you asked for, and are not used to train their models. This is required for NOVA to respond; if you would rather not, use the app without conversations.',
+      acknowledgeOnly: true),
 ];
 
 class _ConsentPageState extends ConsumerState<ConsentPage> {
@@ -169,12 +193,15 @@ class _ConsentPageState extends ConsumerState<ConsentPage> {
         return;
       }
       // Already blocked: re-asking is a no-op, so Settings is the only way back.
-      if (row.canPromptOs && _device[row.purpose] == NovaPermissionStatus.permanentlyDenied) {
+      if (_device[row.purpose] == NovaPermissionStatus.permanentlyDenied) {
         await service.openSettings();
         return;
       }
-      // `check` where this build must not raise the dialog ([_canPromptContacts]).
-      final status = row.canPromptOs ? await _requestStatus(service, row) : await _readStatus(service, row);
+      // Every device row here maps to a permission this build genuinely declares, so
+      // the OS dialog is always the right call. (`canPromptOs`/`_readStatus`-only
+      // rendering was removed with the Contacts & Calendar row, which was the one row
+      // that could not be asked for.)
+      final status = await _requestStatus(service, row);
       if (!mounted) return;
       setState(() => _device[row.purpose] = status);
       final granted = status == NovaPermissionStatus.granted;
@@ -256,7 +283,6 @@ class _ConsentPageState extends ConsumerState<ConsentPage> {
     if (error != null) return (error, c.danger, false);
     if (_busy[row.purpose] ?? false) return (row.isDevice ? 'Asking the system…' : 'Saving your choice…', c.muted, false);
     if (row.isDevice && status == null && _checkingDevice) return ('Checking device access…', c.muted, false);
-    if (row.isDevice && !row.canPromptOs && status == NovaPermissionStatus.notDetermined) return ('This build cannot ask the system for this permission.', c.warning, false);
     return switch (status) {
       NovaPermissionStatus.denied || NovaPermissionStatus.restricted => ('The system did not grant this. You can allow it later.', c.muted, false),
       NovaPermissionStatus.permanentlyDenied => ('Blocked by the system. Tap to open Settings.', c.danger, true),
@@ -351,10 +377,14 @@ class _ConsentPageState extends ConsumerState<ConsentPage> {
           const SizedBox(height: NovaSpace.sm),
           Row(children: <Widget>[
             _PillButton(label: granted ? 'Allowed' : 'Allow', primary: true, onTap: busy || granted ? null : () => _allow(row)),
-            const SizedBox(width: 10),
-            // A granted OS permission can only be revoked in the system settings;
-            // an in-app setting can still be declined here.
-            _PillButton(label: 'Not now', primary: false, onTap: busy || (row.isDevice && granted) ? null : () => _notNow(row)),
+            // An acknowledgement row has no meaningful refusal, so it renders no
+            // second button rather than one that would be ignored.
+            if (!row.acknowledgeOnly) ...<Widget>[
+              const SizedBox(width: 10),
+              // A granted OS permission can only be revoked in the system settings;
+              // an in-app setting can still be declined here.
+              _PillButton(label: 'Not now', primary: false, onTap: busy || (row.isDevice && granted) ? null : () => _notNow(row)),
+            ],
           ]),
           if (caption != null) ...<Widget>[
             const SizedBox(height: NovaSpace.xs),
@@ -424,7 +454,7 @@ class _ConsentPageState extends ConsumerState<ConsentPage> {
           child: Text('Choose what NOVA can access', style: text.displayLarge?.copyWith(fontSize: 34, height: 1.1, letterSpacing: -1.02)),
         ),
         const SizedBox(height: NovaSpace.sm),
-        Text('Every permission is purpose-specific. You can change these later in Privacy Center.',
+        Text('Every permission is purpose-specific. You can change these later in Profile → Privacy controls.',
             style: text.bodyLarge?.copyWith(color: c.muted, height: 1.5)),
         // `.sub` margin-bottom: 28px.
         const SizedBox(height: NovaSpace.lg + NovaSpace.xxs),

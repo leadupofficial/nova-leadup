@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive-icon background: the same indigo -> cyan gradient the legacy
+  `ic_launcher.png` is drawn with, so the icon looks identical on launchers that
+  use the adaptive form and those that fall back to the bitmap.
+
+  It replaced a flat `@color/iconBackground` (#6366F1), which was also off-brand:
+  the app's accent token is #5778DF (see lib/core/theme/nova_tokens.dart).
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="315"
+        android:startColor="#5778DF"
+        android:endColor="#3BCFCF"
+        android:type="linear" />
+</shape>

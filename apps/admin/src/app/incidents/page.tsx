@@ -2,16 +2,7 @@
  * LEA-021 — Admin Incidents page
  */
 
-import { listIncidents, resolveIncident, type AdminIncident } from '../../lib/api';
-
-async function getIncidents() {
- try {
- const result = await listIncidents();
- return result;
- } catch {
- return null;
- }
-}
+import { requestListPage, type AdminIncident } from '../../lib/api';
 
 const SEVERITY_COLORS: Record<string, { bg: string; color: string; border: string }> = {
  critical: { bg: '#fef2f2', color: '#dc2626', border: '#fecaca' },
@@ -20,9 +11,43 @@ const SEVERITY_COLORS: Record<string, { bg: string; color: string; border: strin
  info: { bg: '#eff6ff', color: '#2563eb', border: '#bfdbfe' },
 };
 
-export default async function IncidentsPage() {
- const result = await getIncidents();
- const incidents: AdminIncident[] = result ?? [];
+import { loadPage } from '../../lib/page-data';
+import { PageError } from '../../components/PageError';
+import { resolveIncidentAction } from './actions';
+
+export default async function IncidentsPage({
+ searchParams,
+}: {
+ searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+ const resolvedParams = await searchParams;
+ const errorMessage = typeof resolvedParams.error === 'string' ? resolvedParams.error : '';
+ const okMessage = typeof resolvedParams.ok === 'string' ? resolvedParams.ok : '';
+ const result = await loadPage<AdminIncident>(() =>
+ requestListPage<AdminIncident>('/admin/incidents', { pageSize: 50 }),
+ );
+ const incidents: AdminIncident[] = result.ok ? result.rows : [];
+ // The header counts are over the loaded page. `totalItems` is what the API says the
+ // table holds, so the difference can be stated rather than hidden.
+ const total = result.ok ? (result.totalItems ?? incidents.length) : 0;
+
+ if (!result.ok) {
+ // Failure and emptiness must never look the same: a 401 used to render
+ // the empty-state row, which reads as "you have no data".
+ return (
+ <div>
+ <div style={{ marginBottom: '1.5rem' }}>
+ <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>Incidents</h1>
+ </div>
+ <PageError
+ title="Could not load incidents"
+ message={result.message}
+ status={result.status}
+ retryHref="/incidents"
+ />
+ </div>
+ );
+ }
 
  return (
  <div>
@@ -31,6 +56,10 @@ export default async function IncidentsPage() {
  <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>Incidents</h1>
  <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#6b7280' }}>
  {incidents.filter((i) => !i.resolved).length} open · {incidents.filter((i) => i.resolved).length} resolved
+ {/* These counts are over the loaded page, not the whole table. Saying "on this
+ page" is the difference between a real total and a number that silently stops
+ growing once there is more than one page of incidents. */}
+ {total > incidents.length ? ` · showing the first ${incidents.length} of ${total}` : ''}
  </p>
  </div>
  <span style={{
@@ -45,6 +74,17 @@ export default async function IncidentsPage() {
  System Status
  </span>
  </div>
+
+ {errorMessage ? (
+ <div role="alert" style={{ margin: '0 0 1rem', padding: '0.75rem 1rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#7f1d1d', fontSize: '0.85rem' }}>
+ {errorMessage}
+ </div>
+ ) : null}
+ {okMessage ? (
+ <div role="status" style={{ margin: '0 0 1rem', padding: '0.75rem 1rem', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', color: '#065f46', fontSize: '0.85rem' }}>
+ Incident {okMessage}.
+ </div>
+ ) : null}
 
  <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
@@ -105,7 +145,8 @@ export default async function IncidentsPage() {
  </td>
  <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>
  {!incident.resolved && (
- <form action={`/incidents/${incident.id}/resolve`} method="post">
+ <form action={resolveIncidentAction}>
+ <input type="hidden" name="id" value={incident.id} />
  <button
  type="submit"
  style={{

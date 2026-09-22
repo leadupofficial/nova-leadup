@@ -14,6 +14,9 @@
 import { getDb } from '../db/connection.js';
 import { tasks, reminders, memories } from '@nova/database';
 import { and, asc, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { rankMemoriesForTurn, type MemoryRankingMode } from './memory.js';
+import { nextOccurrence, parseRepeatRule, describeRepeatRule } from './reminder-recurrence.js';
+import type { EmbeddingResult } from './ai.js';
 
 export interface UserContextLimits {
 	maxTasks: number;
@@ -33,6 +36,41 @@ const DEFAULT_LIMITS: UserContextLimits = {
 	maxChars: 4000,
 };
 
+/**
+ * How the memory section was ordered on this call.
+ *
+ * `importance` is the pre-existing behaviour: the top rows by importance. It is
+ * also what a relevance ranking falls back to, and when it does the
+ * `degradedReason` travels with it — a ranking that quietly stopped ranking reads
+ * to the user as "NOVA ignored what I told it", which is exactly the bug the
+ * relevance path exists to fix.
+ */
+export interface MemoryRetrievalInfo {
+	mode: MemoryRankingMode;
+	/** Set when a relevance ranking was wanted but could not run. */
+	degradedReason?: string;
+}
+
+/**
+ * The turn-specific input, separate from `UserContextLimits` because none of it is
+ * a limit: `limits` bounds how much is rendered, this changes *which* memories are
+ * chosen.
+ */
+export interface UserContextOptions {
+	/**
+	 * The user's message for this turn. Absent on a caller that has no turn — the
+	 * briefing sweep and the follow-up engine, which snapshot the user's data on a
+	 * schedule — and that path keeps the importance ordering byte-for-byte.
+	 */
+	userTurn?: string;
+	/**
+	 * The embedder the relevance ranking uses. Defaults to the platform provider;
+	 * exposed so a test (or a deployment with its own provider) can drive the
+	 * ranking without changing the process environment.
+	 */
+	embed?: (text: string) => Promise<EmbeddingResult>;
+}
+
 function truncate(value: string, max: number): string {
 	const flat = value.replace(/\s+/g, ' ').trim();
 	return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
@@ -44,6 +82,31 @@ function truncate(value: string, max: number): string {
  * "tomorrow" mean the same thing to NOVA as they do to the user.
  */
 export const USER_TIMEZONE = 'Asia/Kolkata';
+
+/**
+ * How far back an undismissed reminder stays in the grounding snapshot.
+ *
+ * Bounded so a year-old reminder does not nag on every turn, but wide enough
+ * that "yesterday" and "last week" are still visible. The previous bound was
+ * one day, which silently hid everything older from both the model and the
+ * briefing.
+ */
+export const REMINDER_LOOKBACK_DAYS = 30;
+
+/**
+ * The handle the model uses to name one row to a tool.
+ *
+ * Without this the grounding block listed titles and times but no ids, so the
+ * management tools (`update_reminder`, `cancel_reminder`, `complete_task`,
+ * `reopen_task`) had nothing to target: the model was told to "use the id from
+ * the list" and the list did not contain one. The full id is emitted rather
+ * than a prefix because it is the value the executor matches on, and a prefix
+ * would only work through fuzzy matching — which is how the wrong row gets
+ * edited.
+ */
+function idTag(id: string): string {
+	return `[id: ${id}]`;
+}
 
 function formatWhen(date: Date | null): string {
 	if (!date) return 'no time set';
@@ -80,7 +143,7 @@ function formatNow(date: Date): string {
 }
 
 /** `YYYY-MM-DD` as it is in the user's timezone (not UTC). */
-function isoDateInUserZone(date: Date): string {
+export function isoDateInUserZone(date: Date): string {
 	const parts = new Intl.DateTimeFormat('en-CA', {
 		timeZone: USER_TIMEZONE,
 		year: 'numeric',
@@ -98,6 +161,17 @@ export interface TaskFact {
 	status: string;
 	/** Coerced to null so an absent column reads as "no due date", not undefined. */
 	dueAt: Date | null;
+	/**
+	 * When the row was created and when it was finished, present so a caller that
+	 * must reason about *age* rather than *deadline* can — the follow-up engine asks
+	 * "has this been pending well past the point it was written down?".
+	 *
+	 * Optional because a fact assembled by hand (a test, a replay) may not carry
+	 * them; an absent value means "unknown", and the rules that read them decline to
+	 * fire rather than guessing.
+	 */
+	createdAt?: Date | null;
+	completedAt?: Date | null;
 }
 
 /** One undismissed reminder inside the grounding window. */
@@ -105,6 +179,26 @@ export interface ReminderFact {
 	id: string;
 	title: string;
 	triggerAt: Date;
+	/**
+	 * Optional for the same reason as [TaskFact.createdAt]. The query already
+	 * excludes dismissed reminders, so this is only ever `true` for a fact assembled
+	 * outside `buildUserContext` — and the caller that must not name a dismissed
+	 * reminder checks it anyway.
+	 */
+	dismissed?: boolean;
+	/**
+	 * The stored recurrence, or null/absent for a one-shot reminder.
+	 *
+	 * Needed here because **the stored `triggerAt` of a recurring reminder goes
+	 * stale the moment it first fires**: nothing server-side advances it — the
+	 * phone repeats the alarm itself — so a monthly reminder that fired last month
+	 * still reads as a row in the past forever. Without the rule the grounding
+	 * block told the model a perfectly live recurring reminder had already been
+	 * missed, and never showed it the rule at all. See [resolvedReminderAt].
+	 */
+	repeatRule?: string | null;
+	/** The reminder's own IANA zone, used to resolve the next occurrence. */
+	timezone?: string;
 }
 
 export interface MemoryFact {
@@ -149,6 +243,13 @@ export interface UserContext {
 	now: Date;
 	/** The structured view of the same rows, for callers that must reason. */
 	facts: UserContextFacts;
+	/**
+	 * How the memory section was ordered, and why not by relevance if it was not.
+	 * Reported rather than inferred from the rendered text: "twelve memories by
+	 * importance" and "twelve memories ranked against this turn" look identical in
+	 * the prompt, and only one of them is honest when no provider is configured.
+	 */
+	memoryRetrieval: MemoryRetrievalInfo;
 }
 
 function emptyFacts(): UserContextFacts {
@@ -192,28 +293,86 @@ export function classifyFacts(
 	// still in the future is the next one. A reminder that fired earlier today
 	// is not "next" — it is something that was missed, which is exactly what
 	// `pastReminders` is for.
-	facts.upcomingReminders = facts.reminders.filter((r) => r.triggerAt.getTime() > now.getTime());
-	facts.pastReminders = facts.reminders.filter((r) => r.triggerAt.getTime() <= now.getTime());
+	//
+	// A *recurring* reminder is the exception, and it is why this partitions on
+	// [resolvedReminderAt] rather than on `triggerAt`. Its stored time is the first
+	// occurrence and the phone repeats it from there, so the raw column is in the
+	// past for every occurrence after the first: classifying on it put a live
+	// weekly reminder permanently in `pastReminders`, where the briefing counts it
+	// as missed and the assistant describes it as overdue.
+	facts.upcomingReminders = facts.reminders.filter((r) => resolvedReminderAt(r, now).getTime() > now.getTime());
+	facts.pastReminders = facts.reminders.filter((r) => resolvedReminderAt(r, now).getTime() <= now.getTime());
 	facts.nextReminder = facts.upcomingReminders[0] ?? null;
 	return facts;
+}
+
+/**
+ * When this reminder is actually next due.
+ *
+ * For a one-shot reminder that is the stored `triggerAt`, unchanged. For a
+ * recurring one whose stored time has already passed, it is the next occurrence
+ * of the rule, resolved in the reminder's own zone.
+ *
+ * Never throws and never guesses: a rule this module cannot parse, an occurrence
+ * that cannot be computed, or an invalid zone all fall back to the stored time,
+ * so a bad rule costs the model a stale timestamp rather than the whole grounding
+ * block. The reminder still appears, which matters more than the timestamp being
+ * perfect.
+ */
+export function resolvedReminderAt(
+	fact: Pick<ReminderFact, 'triggerAt' | 'repeatRule' | 'timezone'>,
+	now: Date,
+): Date {
+	const stored = fact.triggerAt;
+	if (!fact.repeatRule || stored.getTime() > now.getTime()) return stored;
+	try {
+		const parsed = parseRepeatRule(fact.repeatRule);
+		if (!parsed.ok) return stored;
+		return nextOccurrence(parsed.rule, stored, now, fact.timezone || USER_TIMEZONE);
+	} catch {
+		return stored;
+	}
+}
+
+/** `(every Monday)` and friends, or '' when the reminder does not repeat. */
+function recurrenceSuffix(fact: Pick<ReminderFact, 'repeatRule'>): string {
+	if (!fact.repeatRule) return '';
+	try {
+		const parsed = parseRepeatRule(fact.repeatRule);
+		return parsed.ok ? ` (repeats ${describeRepeatRule(parsed.rule)})` : '';
+	} catch {
+		return '';
+	}
 }
 
 /**
  * Builds the grounding block. Never throws: a failure to read one section
  * degrades that section to a note rather than breaking the user's chat turn —
  * losing grounding is bad, losing the reply is worse.
+ *
+ * `now` is the instant the snapshot is classified against and the instant the prompt
+ * header states. It is a parameter rather than a `new Date()` inside the function
+ * because a caller that already holds a settled "now" — the follow-up engine, which
+ * is handed one so a sweep can be replayed or backfilled — must not classify against
+ * a *different* clock than the one it reasons with. When the two disagree, a task can
+ * be overdue to the classifier and not yet due to the caller, and a rule silently
+ * stops firing.
  */
 export async function buildUserContext(
 	userId: string,
-	limits: Partial<UserContextLimits> = {}
+	limits: Partial<UserContextLimits> = {},
+	now: Date = new Date(),
+	options: UserContextOptions = {},
 ): Promise<UserContext> {
 	const l: UserContextLimits = { ...DEFAULT_LIMITS, ...limits };
 	const db = getDb();
-	const now = new Date();
 
 	const counts = { tasks: 0, reminders: 0, memories: 0 };
 	const sections: string[] = [];
 	const facts = emptyFacts();
+	// "importance" until a relevance ranking actually runs. A caller with no turn
+	// gets today's ordering and no degradation claim, because none was attempted.
+	let memoryRetrieval: MemoryRetrievalInfo = { mode: 'importance' };
 	// The three reads are independent, so they run together. Sequentially they
 	// sat directly in the latency path of every spoken turn — this runs before
 	// the model is even called — and three round trips where one would do is
@@ -224,7 +383,14 @@ export async function buildUserContext(
 				// `tasks` has no priority column — CreateTaskSchema accepts one, but
 				// the table does not store it, so selecting it would be a lie.
 				const rows = await db
-					.select({ id: tasks.id, title: tasks.title, status: tasks.status, dueAt: tasks.dueAt })
+					.select({
+						id: tasks.id,
+						title: tasks.title,
+						status: tasks.status,
+						dueAt: tasks.dueAt,
+						createdAt: tasks.createdAt,
+						completedAt: tasks.completedAt,
+					})
 					.from(tasks)
 					.where(and(eq(tasks.userId, userId), inArray(tasks.status, ['pending', 'in_progress'])))
 					.orderBy(asc(tasks.dueAt), desc(tasks.createdAt))
@@ -235,13 +401,15 @@ export async function buildUserContext(
 					title: t.title,
 					status: t.status,
 					dueAt: t.dueAt ?? null,
+					createdAt: t.createdAt ?? null,
+					completedAt: t.completedAt ?? null,
 				}));
 				if (!rows.length) return null;
 				return `Open tasks:\n${rows
 					.map((t) => {
 						const due = t.dueAt ? ` (due ${formatWhen(t.dueAt)})` : ' (no due date)';
 						const state = t.status === 'in_progress' ? 'in progress' : 'pending';
-						return `- ${truncate(t.title, l.maxCharsPerItem)} — ${state}${due}`;
+						return `- ${truncate(t.title, l.maxCharsPerItem)} — ${state}${due} ${idTag(t.id)}`;
 					})
 					.join('\n')}`;
 			} catch {
@@ -250,24 +418,67 @@ export async function buildUserContext(
 		})(),
 		(async () => {
 			try {
-				// Only reminders that have not been dismissed and are not in the past
-				// by more than a day, so the block stays about what is coming up.
-				const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+				// Reminders are read from a *bounded* window, wide enough that
+				// yesterday's and last week's items are still visible. It used to be
+				// 24 hours, which made anything overdue by more than a day invisible
+				// to the assistant and to the briefing: with reminders 1 and 2 days
+				// overdue in the database, "What is overdue?" answered "none of your
+				// reminders are overdue" and the briefing reported `missedReminders:
+				// 0`. An overdue reminder is exactly the thing a proactive assistant
+				// exists to surface, so the window is 30 days — still bounded, so a
+				// year-old reminder is history rather than a permanent nag.
+				//
+				// Ordered *descending* on purpose. The window and the limit together
+				// decide what survives: ascending would spend the budget on the oldest
+				// backlog and drop today's item, which is backwards. Because the whole
+				// rendered block is also truncated at `maxChars`, least-recent items
+				// are dropped before recent ones.
+				const since = new Date(now.getTime() - REMINDER_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 				const rows = await db
-					.select({ id: reminders.id, title: reminders.title, triggerAt: reminders.triggerAt, dismissed: reminders.dismissed })
+					.select({
+						id: reminders.id,
+						title: reminders.title,
+						triggerAt: reminders.triggerAt,
+						dismissed: reminders.dismissed,
+						repeatRule: reminders.repeatRule,
+						timezone: reminders.timezone,
+					})
 					.from(reminders)
 					.where(and(eq(reminders.userId, userId), eq(reminders.dismissed, false), gte(reminders.triggerAt, since)))
-					.orderBy(asc(reminders.triggerAt))
+					.orderBy(desc(reminders.triggerAt))
 					.limit(l.maxReminders);
 				counts.reminders = rows.length;
 				facts.reminders = rows.map((r) => ({
 					id: r.id,
 					title: r.title,
 					triggerAt: r.triggerAt,
+					dismissed: r.dismissed ?? false,
+					repeatRule: r.repeatRule ?? null,
+					timezone: r.timezone ?? undefined,
 				}));
 				if (!rows.length) return null;
-				return `Upcoming reminders:\n${rows
-					.map((r) => `- ${formatWhen(r.triggerAt)} — ${truncate(r.title, l.maxCharsPerItem)}`)
+				// Rendered oldest-first so the list still reads as a timeline, even
+				// though the query selected newest-first. The heading names overdue
+				// items too: since the window widened, an item whose time has passed
+				// is a missed reminder — the most important thing in this block — and
+				// calling the whole section "Upcoming" told the model to ignore it.
+				// Rendered at the effective time, so a recurring reminder is named at
+				// the occurrence the user will actually be reminded on rather than at
+				// the first one it ever had, and the rule is stated so the model knows
+				// it comes back.
+				const chronological = [...rows].sort(
+					(a, b) =>
+						resolvedReminderAt({ triggerAt: a.triggerAt, repeatRule: a.repeatRule, timezone: a.timezone ?? undefined }, now).getTime() -
+						resolvedReminderAt({ triggerAt: b.triggerAt, repeatRule: b.repeatRule, timezone: b.timezone ?? undefined }, now).getTime(),
+				);
+				return `Reminders (overdue ones are missed and still not dismissed):\n${chronological
+					.map((r) => {
+						const at = resolvedReminderAt(
+							{ triggerAt: r.triggerAt, repeatRule: r.repeatRule, timezone: r.timezone ?? undefined },
+							now,
+						);
+						return `- ${formatWhen(at)} — ${truncate(r.title, l.maxCharsPerItem)}${recurrenceSuffix(r)} ${idTag(r.id)}`;
+					})
 					.join('\n')}`;
 			} catch {
 				return 'Upcoming reminders: unavailable right now.';
@@ -275,6 +486,35 @@ export async function buildUserContext(
 		})(),
 		(async () => {
 			try {
+				// A turn was supplied, so the memories are chosen by relevance to it
+				// rather than by importance alone. `rankMemoriesForTurn` does not throw
+				// when the ranking itself cannot run: it hands back today's ordering
+				// plus the reason, so this section still renders and the caller can see
+				// that no relevance was applied instead of mistaking the fallback for a
+				// ranking.
+				const turn = options.userTurn?.trim();
+				if (turn) {
+					const ranked = await rankMemoriesForTurn(userId, turn, l.maxMemories, options.embed);
+					memoryRetrieval = ranked.degradedReason
+						? { mode: ranked.mode, degradedReason: ranked.degradedReason }
+						: { mode: ranked.mode };
+					counts.memories = ranked.memories.length;
+					facts.memories = ranked.memories.map((m) => ({
+						id: m.id,
+						category: m.category,
+						content: m.content,
+						importance: m.importance ?? null,
+					}));
+					if (!ranked.memories.length) return null;
+					return `Things you remember about the user:\n${ranked.memories
+						.map((m) => `- [${m.category}] ${truncate(m.content, l.maxCharsPerItem)}`)
+						.join('\n')}`;
+				}
+
+				// No turn to rank against — a briefing sweep. This stays exactly as it
+				// was: the top rows by importance, and nothing about the ranking path
+				// is consulted.
+				//
 				// `memories` has no deletedAt; it is archived through `status`. New
 				// memories default to 'proposed', so this is the right filter rather
 				// than demanding 'approved'.
@@ -307,19 +547,25 @@ export async function buildUserContext(
 
 	classifyFacts(facts, now);
 
-	if (!sections.length) {
-		return { text: '', counts, now, facts };
-	}
-
+	// The header is *not* a fact about the user and it is not conditional on
+	// there being something to say. It is the only place the model is told what
+	// "now" is, so it is emitted even when every section is empty.
+	//
+	// It used to sit below an early `return { text: '' }` for the no-rows case,
+	// which meant a brand-new account was grounded in nothing at all. Asked to
+	// "remind me tomorrow", the model had no year to anchor on, resolved it to a
+	// 2025 date, and had every `create_reminder` refused as "in the past" — the
+	// loop then burned all three iterations and the reply contradicted itself.
 	const header =
 		`What you know about this user right now (current time: ${formatNow(now)}, ` +
 		`today's date is ${isoDateInUserZone(now)} in ${USER_TIMEZONE}):`;
 
-	let text = `${header}\n\n${sections.join('\n\n')}`;
-	if (!counts.tasks && !counts.reminders && !counts.memories) {
-		text +=
-			'\n\nThey currently have no open tasks, no upcoming reminders and nothing saved to memory.';
-	} else {
+	const body = sections.length
+		? sections.join('\n\n')
+		: 'They currently have no open tasks, no upcoming reminders and nothing saved to memory.';
+
+	let text = `${header}\n\n${body}`;
+	if (sections.length) {
 		text +=
 			'\n\nUse this when they ask what they have coming up or want to be reminded of something. ' +
 			'Never claim you cannot see their tasks, reminders or memories — they are listed above. ' +
@@ -330,7 +576,7 @@ export async function buildUserContext(
 		text = `${text.slice(0, l.maxChars - 1)}…`;
 	}
 
-	return { text, counts, now, facts };
+	return { text, counts, now, facts, memoryRetrieval };
 }
 
 /**
@@ -402,6 +648,49 @@ export function composeSystemPrompt(options: {
 	// recent framing before it answers.
 	if (options.capabilities) {
 		parts.push(options.capabilities);
+	}
+
+	// Very last, and said a second time on purpose.
+	//
+	// The language clause above already states the user's language, and on a
+	// spoken turn a model reads it and then drops it exactly where it matters
+	// most: the three-word acknowledgement after a tool call. Measured through the
+	// live voice route on claude-haiku-4-5 — a Tanglish reminder request was
+	// answered *"Done. I've set a reminder for you to call the client tomorrow at
+	// nine in the morning."* in English, while that same session's non-tool turns
+	// came back in Tamil script. The user asked in Tamil and was answered in
+	// English by the one reply that confirms what happened, so the instruction is
+	// restated here, after the capability framing, as the model's final read.
+	// A one-script rule, and only because the failure is measured rather than
+	// theoretical. Scanning every reply the spoken route produced across five
+	// models, one of them put **55 letters from other writing systems inside a
+	// Tamil answer** — 51 Malayalam, 2 Devanagari, 1 Bengali and one CJK
+	// ideograph (U+51E0), in sentences a Tamil user would hear read aloud. The
+	// four other models produced none. Asking in the model's own terms is the only
+	// cheap remedy: there is no deterministic repair, because a Malayalam letter
+	// standing in for a Tamil one cannot be mapped back to what was meant.
+	//
+	// Placed *before* the language check below, which says "following the language
+	// and script rules above" and so has to stay last.
+	if (options.spoken && options.language && options.language !== 'en' && options.language !== 'auto') {
+		parts.push(
+			'Use one writing system for the whole reply. If you are writing in Tamil, ' +
+				'every Tamil word must be in Tamil script — do not substitute letters from ' +
+				'Malayalam, Devanagari, Bengali, Telugu, Kannada or Chinese, and do not ' +
+				'switch a word into another script part-way through. English words stay in ' +
+				'Latin script, as above. If you cannot recall a word\'s spelling in the ' +
+				'right script, use the English word instead.'
+		);
+	}
+
+	if (options.spoken && options.language && options.language !== 'auto') {
+		const name = options.languageName ?? options.language;
+		parts.push(
+			`Language check for every reply of this turn: write in ${name}, following ` +
+				'the language and script rules above. This includes a short ' +
+				'acknowledgement that you have just performed an action — a one-line ' +
+				'"done" must be in the same language as the request, not in plain English.'
+		);
 	}
 
 	return parts.join('\n\n');

@@ -1,54 +1,73 @@
 import type { Request, Response, NextFunction } from 'express';
-import { z } from 'zod';
 
+/**
+ * The context `authenticateJwt` (from `@nova/auth`) attaches to the request.
+ *
+ * This interface used to describe a `req.admin` object produced by a local
+ * `authenticateAdmin` middleware that decoded the bearer token as base64 JSON with no
+ * signature check. That middleware is deleted — real tokens are verified by
+ * `authenticateJwt`, which attaches `req.auth`.
+ */
 export interface AdminContext {
- adminId: string;
- permissions: string[];
- role: string;
+	userId: string;
+	permissions: string[];
+	role: string;
 }
 
-export async function authenticateAdmin(req: Request, _res: Response, next: NextFunction): Promise<void> {
- const authHeader = req.headers.authorization;
- if (!authHeader?.startsWith('Bearer ')) {
- return next(createError(401, 'Missing authorization token'));
- }
- try {
- const decoded = JSON.parse(Buffer.from(authHeader.slice(7), 'base64').toString());
- const ctx: AdminContext = { adminId: decoded.sub, permissions: decoded.permissions ?? [], role: decoded.role ?? 'admin' };
- (req as unknown as { admin: AdminContext }).admin = ctx;
- next();
- } catch {
- next(createError(401, 'Invalid token'));
- }
-}
-
+/**
+ * Permission gate.
+ *
+ * It read `req.admin`, which nothing sets — `authenticateJwt` sets `req.auth` — so it
+ * could never pass and would have 403'd every request it guarded. Nothing guarded by
+ * it ever shipped, but a helper that cannot succeed is a trap for the next person.
+ */
 export function requirePermission(permission: string) {
- return (req: Request, res: Response, next: NextFunction): void => {
- const ctx = (req as unknown as { admin?: AdminContext }).admin;
- if (!ctx || !ctx.permissions.includes(permission)) {
- return next(createError(403, `Missing permission: ${permission}`));
- }
- next();
- };
+	return (req: Request, _res: Response, next: NextFunction): void => {
+		const ctx = (req as unknown as { auth?: AdminContext }).auth;
+		if (!ctx || !ctx.permissions.includes(permission)) {
+			return next(createError(403, `Missing permission: ${permission}`));
+		}
+		next();
+	};
 }
 
+/**
+ * RFC 7807 error responses.
+ *
+ * The service previously had no error handler mounted at all, so failures came back as
+ * Express's default **HTML** page with the raw driver message in a `<pre>` — a pg error
+ * leaked table and column names to the caller. An `HttpError` carries a message we chose
+ * to show; anything else is an internal failure, so it is logged in full and reported
+ * generically.
+ */
 export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction): void {
- console.error('[admin] error:', err);
- res.status(err instanceof HttpError ? err.status : 500).json({
- type: 'https://api.nova.leadup.in/problems/server-error',
- title: err.message || 'Internal Server Error',
- status: err instanceof HttpError ? err.status : 500,
- detail: err.message,
- });
+	// `@nova/auth`'s middleware forwards its own `AuthHttpError`, which carries
+	// `statusCode` rather than this package's `HttpError.status`. Without handling it,
+	// a role denial (a real 403) was reported as a 500 "unexpected error" — the exact
+	// opposite of useful when debugging an authorization rule.
+	const authStatus = (err as { statusCode?: number }).statusCode;
+	const status = err instanceof HttpError ? err.status : typeof authStatus === 'number' ? authStatus : 500;
+	const clientError = status < 500;
+
+	console.error('[admin] error:', err);
+
+	res.status(status).json({
+		type: clientError
+			? 'https://api.nova.leadup.in/problems/request-error'
+			: 'https://api.nova.leadup.in/problems/server-error',
+		title: clientError ? err.message : 'Internal Server Error',
+		status,
+		detail: clientError ? err.message : 'An unexpected error occurred.',
+	});
 }
 
 export class HttpError extends Error {
- constructor(public status: number, message: string) {
- super(message);
- this.name = 'HttpError';
- }
+	constructor(public status: number, message: string) {
+		super(message);
+		this.name = 'HttpError';
+	}
 }
 
 export function createError(status: number, message: string): HttpError {
- return new HttpError(status, message);
+	return new HttpError(status, message);
 }

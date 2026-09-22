@@ -68,6 +68,12 @@
 | `packages/config` | `@nova/config` | Shared TS/ESLint/Prettier config |
 | `packages/ui` | `@nova/ui` | UI components (React) |
 
+> **Correction, verified 2026-09-19.** `@nova/types` and `@nova/policy` are no longer
+> broken, so the two **BROKEN** markers above are stale. `@nova/types` now declares the
+> `@nova/config` package its `tsconfig.json` extends, and `@nova/policy` declares
+> `ioredis`, which `src/rate-limiter.ts` imports. `pnpm run typecheck --force` completes
+> **31 of 31** tasks, and `pnpm run build --force` completes **27 of 27**.
+
 ### Infrastructure
 
 | Component | Technology |

@@ -5,13 +5,16 @@ import 'package:go_router/go_router.dart';
 import '../../app/providers.dart';
 import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
+import '../../core/voice/voice_realtime_controller.dart';
 import '../../core/voice/wake_word_controller.dart';
 import '../../services/health_service.dart';
 import '../auth/auth_controller.dart';
+import '../reminders/notifications_blocked_notice.dart';
+import '../reminders/reminder_sync.dart';
 
 /// Re-checks backend reachability. Invalidated by the refresh action below.
 final backendHealthProvider = FutureProvider<HealthCheckResult>(
-  (ref) => ref.watch(healthServiceProvider).check(),
+  (ref) => ref.watch(healthServiceWithTimeoutProvider).check(),
 );
 
 /// Home dashboard — a port of the export's `home/home.html`.
@@ -30,6 +33,10 @@ final backendHealthProvider = FutureProvider<HealthCheckResult>(
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
+  /// "Today's Overview" — the three stat cards. Public so the layout test can
+  /// assert this row and the floating overlay's sentence do not overlap.
+  static const Key overviewRowKey = Key('home-overview-row');
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final c = context.nova;
@@ -40,6 +47,12 @@ class HomePage extends ConsumerWidget {
     final overview = ref.watch(homeOverviewProvider);
     // The saved avatar appearance; the defaults hold until it resolves.
     final avatarPrefs = ref.watch(avatarPrefsProvider).asData?.value;
+    // Whether a voice turn is actually in flight. This — not the wake word being
+    // armed — is what may spend a continuous frame budget on this screen. The
+    // armed state is permanent by design (that is the product), so treating it as
+    // "live" pinned a core and rendered 61 fps on an idle Home screen (measured
+    // on the OnePlus 9R at ~113 % of one core).
+    final turnActive = ref.watch(voiceRealtimeProvider).isTurnActive;
 
     final name = auth.user?.displayName ?? 'there';
 
@@ -89,6 +102,9 @@ class HomePage extends ConsumerWidget {
             ),
             statusLabel: _statusLabel(avatar, wakeWord),
             statusTone: _statusTone(avatar, health, c),
+            // The expression still says what the wake word is doing (the status
+            // pill); only the motion is tied to a real turn.
+            animate: turnActive,
             onTap: () => context.go('/converse'),
           ),
           const SizedBox(height: 20),
@@ -101,9 +117,9 @@ class HomePage extends ConsumerWidget {
           const SizedBox(height: 14),
           Center(
             child: Text(
-              // The phrase comes from the installed classifier the native
-              // service reports, never from a hardcoded product name: this
-              // build listens for `hey_jarvis`.
+              // The phrase comes from the installed wake word the native service
+              // reports, never from a hardcoded product name: this build listens
+              // for `hey_nova`.
               _wakeWordLine(wakeWord),
               style: Theme.of(context).textTheme.bodySmall,
             ),
@@ -123,6 +139,9 @@ class HomePage extends ConsumerWidget {
               onAction: () => ref.invalidate(homeOverviewProvider),
             ),
             data: (data) => Row(
+              // The handle the layout test uses to prove the floating overlay's
+              // sentence no longer lands on these cards.
+              key: HomePage.overviewRowKey,
               children: [
                 Expanded(
                   child: NovaStatCard(
@@ -158,6 +177,10 @@ class HomePage extends ConsumerWidget {
           Text('Status', style: NovaTheme.sectionHeading(c)),
           const SizedBox(height: 12),
           _StatusCard(wakeWord: wakeWord),
+          // A denied POST_NOTIFICATIONS means every reminder the reconciler arms
+          // is discarded by Android at post time. Nothing else on this screen would
+          // say so — the reconciler still reports `scheduled: N`.
+          const _NotificationsStatusCard(),
           const SizedBox(height: 12),
           _BackendCard(health: health),
         ],
@@ -217,7 +240,7 @@ class HomePage extends ConsumerWidget {
 
   /// The line under "Tap to talk".
   ///
-  /// When the native service reports no installed classifier there is no phrase
+  /// When the native service reports no installed wake word there is no phrase
   /// to name, so this says listening is off rather than advertising one.
   String _wakeWordLine(WakeWordState wakeWord) {
     final phrase = wakeWord.phrase;
@@ -351,6 +374,9 @@ class _StatusCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final c = context.nova;
     final controller = ref.read(wakeWordStateProvider.notifier);
+    // The row below is a *status* row: while the wake word is merely armed (its
+    // normal state) it must not drive 60 fps. It waves only during a real turn.
+    final turnActive = ref.watch(voiceRealtimeProvider).isTurnActive;
     final availability = wakeWord.availability;
     final supported = availability?.available ?? false;
 
@@ -386,9 +412,16 @@ class _StatusCard extends ConsumerWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            availability == null
-                ? 'Checking availability…'
-                : availability.userMessage,
+            // What the wake word is doing *now*. `availability.userMessage` describes
+            // availability only — it cannot see the user's toggle or the native
+            // service — so on its own it announced "Listening for <model>" on a device
+            // where the wake word had never been switched on. `statusMessage` keeps the
+            // native reason for a real failure and names the phrase humanised, the way
+            // every other surface does.
+            wakeWord.statusMessage,
+            // Keyed so a test can read this row without depending on how many other
+            // surfaces happen to show the same phrase.
+            key: const Key('wake-word-status'),
             style: Theme.of(context).textTheme.bodySmall,
           ),
           if (wakeWord.listening) ...[
@@ -399,7 +432,10 @@ class _StatusCard extends ConsumerWidget {
                   bars: 4,
                   height: 14,
                   color: c.success,
-                  animate: true,
+                  // A status row, not a live meter: while the wake word is merely
+                  // armed this must not render 60 fps. It still waves during a
+                  // real turn.
+                  animate: turnActive,
                 ),
                 const SizedBox(width: 10),
                 Text(
@@ -437,6 +473,36 @@ class _StatusCard extends ConsumerWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// "Your reminders cannot reach you" — the reminders half of the Status card.
+///
+/// This is the same warning the reminders screen shows
+/// ([NotificationsBlockedNotice]), rendered here because Home is where the user
+/// looks when a reminder did not arrive. It is driven by the reconcile result —
+/// what the last pass actually read from the OS — so both surfaces tell one
+/// story from one source, and a pass that has not run yet says nothing rather
+/// than guessing.
+///
+/// Nothing is shown on iOS (`osPermissionGranted` answers `true` there, so the
+/// result can never be blocked), nor when the OS is posting notifications
+/// normally. An earlier version of this defect had *no copy anywhere* that named
+/// the blocked permission; the point of the card is that it is impossible to miss
+/// and says which switch fixes it.
+class _NotificationsStatusCard extends ConsumerWidget {
+  const _NotificationsStatusCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final result = ref.watch(reminderSyncProvider).lastResult;
+    if (result == null || !result.notificationsBlocked) {
+      return const SizedBox.shrink();
+    }
+    return const NotificationsBlockedNotice(
+      title: 'Reminders cannot reach you',
+      margin: EdgeInsets.only(top: 12),
     );
   }
 }

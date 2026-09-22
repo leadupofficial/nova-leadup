@@ -23,7 +23,11 @@ import 'auth_controller.dart';
 ///    email + password stays the primary, fully working form.
 /// 2. The design's `.social-row` (Google / Apple) has no implementation behind
 ///    it, so it is not drawn at all rather than drawn dead. The `.sso-notice`
-///    is kept, because it is informational only.
+///    ("Enterprise SSO available for org domains") is removed for the same reason:
+///    there is no SAML/OIDC endpoint and no org-domain routing, so claiming SSO
+///    exists is a misrepresentation under App Review 2.3.1(a). An earlier version of
+///    this comment said it was "kept, because it is informational only", which
+///    contradicted both the removal and the guideline.
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
 
@@ -121,8 +125,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 _emailPasswordForm(context, auth),
                 const SizedBox(height: NovaSpace.lg),
                 _phoneSection(context),
-                const SizedBox(height: NovaSpace.lg),
-                _ssoNotice(context),
               ],
             ),
           ),
@@ -211,7 +213,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
     final emailError = email.isEmpty
         ? 'Enter your email address.'
-        : (!email.contains('@') || !email.contains('.'))
+        : !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)
         ? 'Enter a valid email address.'
         : null;
     final passwordError = password.isEmpty ? 'Enter your password.' : null;
@@ -275,25 +277,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     );
   }
 
-  /// `.sso-notice` — informational only, so it renders as the design's dashed
-  /// card without pretending to be a button.
-  Widget _ssoNotice(BuildContext context) {
-    final c = context.nova;
-    return Container(
-      padding: const EdgeInsets.all(NovaSpace.sm),
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: NovaRadius.rControl,
-        border: Border.all(color: c.border),
-      ),
-      child: Text(
-        'Enterprise SSO available for org domains · ask your admin',
-        textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.bodySmall!.copyWith(color: c.muted),
-      ),
-    );
-  }
+  // The export's `.sso-notice` ("Enterprise SSO available for org domains · ask your
+  // admin") is deliberately **not rendered and not kept**. No SSO exists — there is no
+  // SAML/OIDC endpoint and no org-domain routing — and the only sign-in path is email
+  // + password against `/api/v1/auth/login`. Advertising a capability the app does not
+  // have is a misrepresentation under App Review Guideline 2.3.1(a) and Play's
+  // Deceptive Behavior policy, so the card was removed rather than reworded. Re-add it
+  // only with the integration behind it.
 
   void _clearEmailError(String _) {
     if (_emailError != null) setState(() => _emailError = null);

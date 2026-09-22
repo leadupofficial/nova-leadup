@@ -7,7 +7,13 @@ import '../../core/theme/nova_theme.dart';
 import '../../services/analytics_service.dart';
 import 'onboarding_service.dart';
 
-/// Collects the user's display name and an optional emergency contact.
+/// Collects the user's display name.
+///
+/// It used to also collect an emergency contact (a third party's name, phone and
+/// relationship). Nothing in the app ever read that back, so the screen promised an
+/// escalation path that does not exist and stored someone else's phone number without
+/// the privacy policy mentioning it. The fields are gone; a value stored by an older
+/// build is carried through untouched rather than silently deleted.
 class ProfilePage extends ConsumerStatefulWidget {
   const ProfilePage({super.key});
 
@@ -17,9 +23,10 @@ class ProfilePage extends ConsumerStatefulWidget {
 
 class _ProfilePageState extends ConsumerState<ProfilePage> {
   late final TextEditingController _name;
-  late final TextEditingController _contactName;
-  late final TextEditingController _contactPhone;
-  late final TextEditingController _contactRelationship;
+
+  /// Contacts already stored on this device, preserved verbatim. Empty for anyone
+  /// who onboarded after the fields were removed.
+  List<EmergencyContact> _existingContacts = const <EmergencyContact>[];
 
   bool _saving = false;
   String? _error;
@@ -28,22 +35,13 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   void initState() {
     super.initState();
     final existing = ref.read(onboardingServiceProvider).getProfile();
-    final contact = existing?.emergencyContacts.isNotEmpty == true
-        ? existing!.emergencyContacts.first
-        : null;
-
+    _existingContacts = existing?.emergencyContacts ?? const <EmergencyContact>[];
     _name = TextEditingController(text: existing?.name ?? '');
-    _contactName = TextEditingController(text: contact?.name ?? '');
-    _contactPhone = TextEditingController(text: contact?.phoneNumber ?? '');
-    _contactRelationship = TextEditingController(text: contact?.relationship ?? '');
   }
 
   @override
   void dispose() {
     _name.dispose();
-    _contactName.dispose();
-    _contactPhone.dispose();
-    _contactRelationship.dispose();
     super.dispose();
   }
 
@@ -54,34 +52,18 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       return;
     }
 
-    final contactName = _contactName.text.trim();
-    final contactPhone = _contactPhone.text.trim();
-    if (contactName.isNotEmpty && contactPhone.isEmpty) {
-      setState(() => _error = 'Add a phone number for the emergency contact, or clear the name.');
-      return;
-    }
-
     setState(() {
       _saving = true;
       _error = null;
     });
 
     final onboarding = ref.read(onboardingServiceProvider);
-    final contacts = contactName.isEmpty
-        ? const <EmergencyContact>[]
-        : <EmergencyContact>[
-            EmergencyContact(
-              name: contactName,
-              phoneNumber: contactPhone,
-              relationship: _contactRelationship.text.trim().isEmpty
-                  ? null
-                  : _contactRelationship.text.trim(),
-            ),
-          ];
 
     try {
       await onboarding.saveProfile(
-        ProfileFormData(name: name, emergencyContacts: contacts),
+        // The stored contacts are passed straight back: this screen can no longer
+        // change them, and dropping them would destroy data the user did enter.
+        ProfileFormData(name: name, emergencyContacts: _existingContacts),
       );
       await onboarding.setCurrentStep(OnboardingStep.companion);
       await ref.read(analyticsServiceProvider).logEvent(
@@ -127,49 +109,17 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 border: OutlineInputBorder(),
               ),
             ),
+            // The "Emergency contact" block (name / phone / relationship) was removed
+            // here. It collected a *third party's* name and phone number, stored them
+            // on the device, and nothing in the app ever read them back — no call, no
+            // message, no escalation path. The copy promised "NOVA can reach them if
+            // you ask for help", which no code implemented, and the number was never
+            // mentioned in the privacy policy. That is a false capability claim
+            // (Play Deceptive Behavior; App Review 2.3.1(a)) on top of an undisclosed
+            // collection of someone else's personal data. `ProfileFormData` keeps the
+            // field so previously stored values still round-trip; nothing new is
+            // collected. Re-add the UI together with the escalation flow behind it.
             const SizedBox(height: 32),
-            Text(
-              'Emergency contact',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Optional. NOVA can reach them if you ask for help.',
-              style: TextStyle(color: NovaTheme.onSurfaceVariant, fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _contactName,
-              textInputAction: TextInputAction.next,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: 'Contact name',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _contactPhone,
-              keyboardType: TextInputType.phone,
-              textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(
-                labelText: 'Phone number',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _contactRelationship,
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _continue(),
-              decoration: const InputDecoration(
-                labelText: 'Relationship (optional)',
-                hintText: 'Sister, friend, doctor...',
-                border: OutlineInputBorder(),
-              ),
-            ),
             if (_error != null) ...[
               const SizedBox(height: 16),
               Text(

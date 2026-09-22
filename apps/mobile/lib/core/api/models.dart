@@ -217,6 +217,140 @@ class NovaSendResult {
 
 // ─── Reminders ────────────────────────────────────────────────────────────────
 
+/// How often a reminder repeats, as `reminders.repeat_rule` spells it.
+enum NovaRepeatFrequency { daily, weekly, monthly }
+
+/// The server's `repeat_rule`, read back into the three things the phone needs:
+/// how often, how far apart, and on which day.
+///
+/// The stored form is a subset of an iCalendar RRULE, defined once on the server
+/// in `services/api/src/services/reminder-recurrence.ts` — `FREQ=DAILY`,
+/// `FREQ=WEEKLY;BYDAY=MO`, `FREQ=MONTHLY;BYMONTHDAY=15`, each optionally with
+/// `INTERVAL=n`. This parser is deliberately as strict as that one and answers
+/// `null` rather than guessing: a rule this build does not understand leaves the
+/// reminder armed once at its trigger, which is a reminder that fires exactly as
+/// it did before repeating existed, instead of one that fires at the wrong time.
+///
+/// `weekday` is Dart's own numbering (`DateTime.monday` … `DateTime.sunday`), so
+/// it can be compared with `DateTime.weekday` directly.
+@immutable
+class NovaRepeatRule {
+  const NovaRepeatRule({
+    required this.frequency,
+    this.interval = 1,
+    this.weekday,
+    this.dayOfMonth,
+  });
+
+  final NovaRepeatFrequency frequency;
+
+  /// Every [interval] days, weeks or months. Always at least 1.
+  final int interval;
+
+  /// For [NovaRepeatFrequency.weekly]: `DateTime.monday` … `DateTime.sunday`.
+  final int? weekday;
+
+  /// For [NovaRepeatFrequency.monthly]: 1–31.
+  final int? dayOfMonth;
+
+  /// Mirrors `MAX_REPEAT_INTERVAL` in the server module.
+  static const int maxInterval = 52;
+
+  /// Mirrors `MAX_REPEAT_RULE_LENGTH` in the server module.
+  static const int maxLength = 120;
+
+  static const Map<String, int> _weekdays = <String, int>{
+    'MO': DateTime.monday,
+    'TU': DateTime.tuesday,
+    'WE': DateTime.wednesday,
+    'TH': DateTime.thursday,
+    'FR': DateTime.friday,
+    'SA': DateTime.saturday,
+    'SU': DateTime.sunday,
+  };
+
+  static const Map<int, String> _weekdayCodes = <int, String>{
+    DateTime.monday: 'MO',
+    DateTime.tuesday: 'TU',
+    DateTime.wednesday: 'WE',
+    DateTime.thursday: 'TH',
+    DateTime.friday: 'FR',
+    DateTime.saturday: 'SA',
+    DateTime.sunday: 'SU',
+  };
+
+  /// Parses the server's spelling, or answers null.
+  static NovaRepeatRule? tryParse(Object? raw) {
+    if (raw is! String) return null;
+    final text = raw.trim();
+    if (text.isEmpty || text.length > maxLength) return null;
+
+    final parts = <String, String>{};
+    for (final chunk in text.split(';')) {
+      final part = chunk.trim();
+      final equals = part.indexOf('=');
+      if (equals < 0) return null;
+      final key = part.substring(0, equals).trim().toUpperCase();
+      if (key.isEmpty || parts.containsKey(key)) return null;
+      parts[key] = part.substring(equals + 1).trim();
+    }
+
+    const allowed = <String>{'FREQ', 'INTERVAL', 'BYDAY', 'BYMONTHDAY'};
+    if (!parts.keys.every(allowed.contains)) return null;
+
+    final frequency = switch (parts['FREQ']?.toUpperCase()) {
+      'DAILY' => NovaRepeatFrequency.daily,
+      'WEEKLY' => NovaRepeatFrequency.weekly,
+      'MONTHLY' => NovaRepeatFrequency.monthly,
+      _ => null,
+    };
+    if (frequency == null) return null;
+
+    var interval = 1;
+    final rawInterval = parts['INTERVAL'];
+    if (rawInterval != null) {
+      interval = int.tryParse(rawInterval) ?? 0;
+      if (interval < 1 || interval > maxInterval) return null;
+    }
+
+    final byDay = parts['BYDAY'];
+    final byMonthDay = parts['BYMONTHDAY'];
+
+    switch (frequency) {
+      case NovaRepeatFrequency.daily:
+        if (byDay != null || byMonthDay != null) return null;
+        return NovaRepeatRule(frequency: frequency, interval: interval);
+      case NovaRepeatFrequency.weekly:
+        if (byMonthDay != null || byDay == null) return null;
+        final weekday = _weekdays[byDay.toUpperCase()];
+        if (weekday == null) return null;
+        return NovaRepeatRule(
+          frequency: frequency,
+          interval: interval,
+          weekday: weekday,
+        );
+      case NovaRepeatFrequency.monthly:
+        if (byDay != null || byMonthDay == null) return null;
+        final day = int.tryParse(byMonthDay);
+        if (day == null || day < 1 || day > 31) return null;
+        return NovaRepeatRule(
+          frequency: frequency,
+          interval: interval,
+          dayOfMonth: day,
+        );
+    }
+  }
+
+  /// The canonical spelling, as the server stores it.
+  String get value {
+    final parts = <String>['FREQ=${frequency.name.toUpperCase()}'];
+    if (interval > 1) parts.add('INTERVAL=$interval');
+    if (weekday != null) parts.add('BYDAY=${_weekdayCodes[weekday]}');
+    if (dayOfMonth != null) parts.add('BYMONTHDAY=$dayOfMonth');
+    return parts.join(';');
+  }
+}
+
 class NovaReminder {
   const NovaReminder({
     required this.id,
@@ -224,6 +358,7 @@ class NovaReminder {
     this.remindAt,
     this.dismissed = false,
     this.createdAt,
+    this.repeatRule,
   });
 
   final String id;
@@ -240,6 +375,13 @@ class NovaReminder {
 
   final DateTime? createdAt;
 
+  /// The server's `repeat_rule`, when the reminder repeats.
+  ///
+  /// It used not to be read at all, which is why a reminder could be stored as
+  /// "every Monday" and still reach the phone as a one-shot: this field is the
+  /// only path from the column to the scheduler.
+  final NovaRepeatRule? repeatRule;
+
   factory NovaReminder.fromJson(Map<String, dynamic> j) => NovaReminder(
     id: (j['id'] ?? '').toString(),
     title: (j['title'] ?? '').toString(),
@@ -250,7 +392,47 @@ class NovaReminder {
     ),
     dismissed: _parseBool(j['dismissed']),
     createdAt: _parseDate(j['createdAt'] ?? j['created_at']),
+    repeatRule: NovaRepeatRule.tryParse(j['repeatRule'] ?? j['repeat_rule']),
   );
+}
+
+/// One page of `GET /api/v1/reminders`, as the server paginates it.
+///
+/// The route is cursor-paginated (`pagination.nextCursor` / `prevCursor`, a
+/// `hasMore` flag and a `total`) over `(created_at, id)`. Treating the first page
+/// as the whole list is what made a user with 51+ reminders lose the alarms for
+/// reminders 51 and beyond on every sync.
+@immutable
+class NovaReminderPage {
+  const NovaReminderPage({
+    required this.reminders,
+    required this.nextCursor,
+    required this.hasMore,
+  });
+
+  final List<NovaReminder> reminders;
+
+  /// The cursor to pass back as `cursor` for the next page. Null when there is none.
+  final String? nextCursor;
+
+  /// Whether the server says more reminders exist beyond this page.
+  final bool hasMore;
+}
+
+/// Every reminder the account has, and whether that really is every one.
+///
+/// [complete] is the important half. It is `false` when pagination stopped before
+/// the server ran out of pages — a page failed to load, the cursor stopped
+/// advancing, or the page bound was reached. Callers must treat an incomplete list
+/// as "not the whole truth": it is safe to *schedule* from it and never safe to
+/// cancel anything on the strength of it, because a reminder that is merely on a
+/// page nobody fetched is not a reminder that was deleted.
+@immutable
+class NovaReminderList {
+  const NovaReminderList({required this.reminders, required this.complete});
+
+  final List<NovaReminder> reminders;
+  final bool complete;
 }
 
 /// The assistant's avatar appearance (`GET/POST /api/v1/settings/avatars`).
@@ -1065,6 +1247,47 @@ class NovaConsentRecord {
     consentedAt: _parseDate(j['consentedAt']),
     revokedAt: _parseDate(j['revokedAt']),
   );
+}
+
+// ─── Account deletion ─────────────────────────────────────────────────────────
+
+/// What `DELETE /api/v1/account` will remove, read from
+/// `GET /api/v1/account/deletion-preview`.
+///
+/// Deliberately partial: everything else (tasks, reminders, memories, conversations,
+/// transcripts, sessions, devices) cascades from the user row, so the server reports
+/// the two collections a user can recognise plus the retention statement, rather than
+/// counts that would drift from the schema.
+class NovaDeletionPreview {
+  const NovaDeletionPreview({
+    required this.email,
+    required this.recordings,
+    required this.consentRecords,
+    required this.retentionPeriod,
+    this.requiresPassword = true,
+  });
+
+  final String email;
+  final int recordings;
+  final int consentRecords;
+  final String retentionPeriod;
+
+  /// Whether the account has a password at all. `users.password_hash` is nullable, so
+  /// an account created through a phone/OAuth path would otherwise be asked for a
+  /// password it never set and the delete button could never be enabled. Defaults to
+  /// `true` so a preview that failed to load errs toward the safer prompt.
+  final bool requiresPassword;
+
+  factory NovaDeletionPreview.fromJson(Map<String, dynamic> j) =>
+      NovaDeletionPreview(
+        email: (j['email'] ?? '').toString(),
+        recordings: _parseInt(j['recordings']),
+        consentRecords: _parseInt(j['consentRecords']),
+        retentionPeriod: (j['retentionPeriod'] ?? '').toString(),
+        requiresPassword: j.containsKey('requiresPassword')
+            ? _parseBool(j['requiresPassword'])
+            : true,
+      );
 }
 
 // ─── Daily briefing ───────────────────────────────────────────────────────────

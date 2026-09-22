@@ -1,5 +1,7 @@
 import pino from 'pino';
 
+import { getLogSink } from './log-sink.js';
+
 /**
  * The application logger.
  *
@@ -49,6 +51,23 @@ const redactedPaths = [
 	'headers["set-cookie"]',
 ];
 
+/**
+ * Where the log lines go.
+ *
+ * `multistream` writes each line to stdout **and** to the durable sink. The order matters: pino
+ * applies `redact` and serialises once, then hands the *same final line* to every stream, so the
+ * sink can never see an object the redactor has not already cleaned — which is the property that
+ * makes a second destination safe to add at all.
+ */
+const streams: pino.StreamEntry[] = [{ stream: process.stdout }];
+
+// The sink is only attached when it can actually write somewhere. Without a database there is
+// nothing to store to, and opening a timer to buffer rows that can never be flushed would be a leak
+// dressed as a feature.
+if (process.env.DATABASE_URL || process.env.NODE_ENV !== 'test') {
+	streams.push({ stream: getLogSink() });
+}
+
 export const logger = pino({
 	level: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'development' ? 'debug' : 'info'),
 	redact: { paths: redactedPaths, censor: '[redacted]' },
@@ -60,7 +79,7 @@ export const logger = pino({
 		// `level` as a word, so a pipeline can filter without knowing pino's numbers.
 		level: (label) => ({ level: label }),
 	},
-});
+}, pino.multistream(streams));
 
 /** Which redaction paths are active. Exported so a test can assert they are applied. */
 export const LOGGER_REDACTED_PATHS = redactedPaths;

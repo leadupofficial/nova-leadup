@@ -175,8 +175,23 @@ void main() {
       fail('expected a PATCH of the recording row');
     }
     final patchBody = patch.data as Map<String, dynamic>;
-    expect(patchBody['status'], 'completed');
     expect(patchBody.containsKey('durationSeconds'), isTrue);
+    // **No status on this call, and that is the assertion, not an omission.**
+    //
+    // This test used to require `status: 'completed'` here — it encoded the bug. The
+    // PATCH happens before the upload, the server stamps `completedAt` on seeing
+    // `completed`, and the audio at that moment exists only in this process's memory
+    // (`MeetingRecorder.stop()` has already deleted the temporary file). A kill during
+    // the upload therefore lost the recording and left a row claiming it was saved, which
+    // the summary screen repeated to the user.
+    //
+    // The status now only moves as things actually happen: `uploaded` when the server has
+    // the bytes, then `processing`, then `completed` from the pipeline.
+    expect(
+      patchBody.containsKey('status'),
+      isFalse,
+      reason: 'a recording must not be called completed before its audio has been sent',
+    );
 
     final upload = requestFor('/audio');
     expect(upload, isNotNull);
@@ -296,5 +311,27 @@ void main() {
 
     expect(controller.state.phase, RecordingPhase.consent);
     expect(controller.state.consentAcknowledged, isFalse);
+  });
+
+  test('a recording that never uploaded is not left looking in progress', () async {
+    // The row used to keep `recording` — which the vocabulary defines as "capture is in
+    // progress on the device" — so a capture that failed to upload sat there for ever
+    // describing work this device is no longer doing. It is marked `failed` instead.
+    final container = containerFor(recordingAdapter(uploadStatus: 503));
+    final controller = container.read(recordingControllerProvider.notifier);
+    controller.acknowledgeConsent(true);
+    await controller.start();
+
+    await controller.stop();
+
+    final failurePatch = captured
+        .where((r) => r.method == 'PATCH' && r.path.contains('/recordings/rec-1'))
+        .map((r) => r.data as Map<String, dynamic>)
+        .where((body) => body['status'] == 'failed');
+    expect(
+      failurePatch,
+      isNotEmpty,
+      reason: 'the row must not stay at `recording` after an upload that will not happen',
+    );
   });
 }

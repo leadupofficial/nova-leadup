@@ -238,6 +238,52 @@ void main() {
     expect(find.text('Read aloud'), findsNothing);
   });
 
+  testWidgets('renders an Android-only notice instead of the console off Android',
+      (tester) async {
+    // App Review 2.3.1(a). The platform reports `unsupported` on iOS
+    // (`UnsupportedNotificationAssistantPlatform`), but the page used to render
+    // every step anyway: the access card with its "Manage in Android Settings"
+    // button, the master toggle and a live-looking inbox. A reviewer on an iPhone
+    // then saw a feature set the build cannot deliver.
+    useTallSurface(tester);
+    final deps = await createTestDependencies();
+    addTearDown(deps.dispose);
+    final platform = FakeNotificationAssistantPlatform(supported: false);
+    addTearDown(platform.dispose);
+
+    await pumpPage(tester, deps, platform: platform);
+
+    expect(find.text('Notification assistant is Android only'), findsOneWidget);
+    expect(find.textContaining('iOS does not provide'), findsOneWidget);
+
+    // None of the console may render.
+    expect(find.text('STEP 1 \u00b7 NOTIFICATION ACCESS'), findsNothing);
+    expect(find.text('STEP 2 \u00b7 TURN IT ON'), findsNothing);
+    expect(find.text('RULES'), findsNothing);
+    expect(find.text('APPS ALLOWED'), findsNothing);
+    expect(find.textContaining('Android Settings'), findsNothing);
+    expect(find.text('ON'), findsNothing);
+    expect(find.text('OFF'), findsNothing);
+  });
+
+  testWidgets('still renders the console where the platform supports it',
+      (tester) async {
+    // The gate must key on the platform's answer, not on the build target, or it
+    // would hide a working feature on Android.
+    useTallSurface(tester);
+    final deps = await createTestDependencies();
+    addTearDown(deps.dispose);
+    final platform = FakeNotificationAssistantPlatform(supported: true);
+    addTearDown(platform.dispose);
+
+    await pumpPage(tester, deps, platform: platform);
+
+    expect(find.text('Notification assistant is Android only'), findsNothing);
+    // `NovaSectionHeader` upper-cases its title.
+    expect(find.text('STEP 1 \u00b7 NOTIFICATION ACCESS'), findsOneWidget);
+    expect(find.text('STEP 2 \u00b7 TURN IT ON'), findsOneWidget);
+  });
+
   testWidgets('renders in the light theme as well as the dark one',
       (tester) async {
     // The blueprint requires "dark-first ... and a light theme for

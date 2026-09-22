@@ -24,6 +24,7 @@ import { verifyAccessToken } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error-handler.js';
 import { REALTIME_PATH } from './protocol.js';
 import { RealtimeVoiceSession } from './session.js';
+import { registerRealtimeSession, unregisterRealtimeSession } from './registry.js';
 
 /** Refuse an upgrade the way an HTTP endpoint would, instead of accepting then closing. */
 function rejectUpgrade(socket: Duplex, status: number, message: string): void {
@@ -58,43 +59,7 @@ export function attachRealtimeVoice(server: Server): WebSocketServer {
 	const wss = new WebSocketServer({ noServer: true, maxPayload: 1_048_576 });
 
 	server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-		let url: URL;
-		try {
-			url = new URL(req.url ?? '/', 'http://localhost');
-		} catch {
-			socket.destroy();
-			return;
-		}
-
-		if (url.pathname !== REALTIME_PATH) {
-			// This service owns no other upgraded endpoint; leaving the socket
-			// open would park it until the client times out.
-			socket.destroy();
-			return;
-		}
-
-		const token = extractToken(req, url);
-		if (!token) {
-			logger.warn({ path: url.pathname }, 'Realtime voice upgrade rejected: no access token');
-			rejectUpgrade(socket, 401, 'Unauthorized');
-			return;
-		}
-
-		let user: { id: string; email: string; role: string };
-		try {
-			user = verifyAccessToken(token);
-		} catch (err) {
-			const statusCode = err instanceof HttpError ? err.statusCode : 401;
-			logger.warn({ err, path: url.pathname }, 'Realtime voice upgrade rejected: invalid token');
-			if (statusCode >= 500) rejectUpgrade(socket, 500, 'Internal Server Error');
-			else rejectUpgrade(socket, 401, 'Unauthorized');
-			return;
-		}
-
-		wss.handleUpgrade(req, socket, head, (ws) => {
-			const session = new RealtimeVoiceSession(ws, user);
-			session.start();
-		});
+		void handleUpgrade(req, socket, head, wss);
 	});
 
 	logger.info(
@@ -104,5 +69,96 @@ export function attachRealtimeVoice(server: Server): WebSocketServer {
 	return wss;
 }
 
+/**
+ * Upgrade handling, including the realtime/voice kill switches.
+ *
+ * Extracted and made async so it can consult the operator controls before accepting.
+ * A switch that refuses is answered with `503` and a machine-readable body rather
+ * than a silent socket close, so the client can distinguish "NOVA is offline for
+ * maintenance" from "your connection dropped" and show the right message.
+ *
+ * The kill switch is checked **before** the token is verified for the same reason a
+ * load balancer sheds traffic before it reaches the app: when voice is disabled,
+ * every arriving socket is refused identically and cheaply.
+ */
+async function handleUpgrade(
+	req: IncomingMessage,
+	socket: Duplex,
+	head: Buffer,
+	wss: WebSocketServer,
+): Promise<void> {
+	let url: URL;
+	try {
+		url = new URL(req.url ?? '/', 'http://localhost');
+	} catch {
+		socket.destroy();
+		return;
+	}
+
+	if (url.pathname !== REALTIME_PATH) {
+		// This service owns no other upgraded endpoint; leaving the socket
+		// open would park it until the client times out.
+		socket.destroy();
+		return;
+	}
+
+	// Operator kill switches. Imported lazily so the realtime module does not add a
+	// database import to the WebSocket path for deployments that never mount it.
+	try {
+		const { getRuntimeControls } = await import('../admin/control.js');
+		const controls = await getRuntimeControls();
+		if (!controls.realtimeEnabled) {
+			logger.warn({ path: url.pathname }, 'Realtime voice upgrade rejected: realtime disabled by operator');
+			rejectUpgrade(socket, 503, 'Realtime transport is disabled');
+			return;
+		}
+		if (!controls.voiceEnabled) {
+			logger.warn({ path: url.pathname }, 'Realtime voice upgrade rejected: voice disabled by operator');
+			rejectUpgrade(socket, 503, 'Voice is disabled');
+			return;
+		}
+	} catch (error) {
+		// A control lookup failure must not take voice down; log and continue.
+		logger.error({ err: error }, 'Could not read operator controls before accepting realtime upgrade');
+	}
+
+	const token = extractToken(req, url);
+	if (!token) {
+		logger.warn({ path: url.pathname }, 'Realtime voice upgrade rejected: no access token');
+		rejectUpgrade(socket, 401, 'Unauthorized');
+		return;
+	}
+
+	let user: { id: string; email: string; role: string };
+	try {
+		user = verifyAccessToken(token);
+	} catch (err) {
+		const statusCode = err instanceof HttpError ? err.statusCode : 401;
+		logger.warn({ err, path: url.pathname }, 'Realtime voice upgrade rejected: invalid token');
+		if (statusCode >= 500) rejectUpgrade(socket, 500, 'Internal Server Error');
+		else rejectUpgrade(socket, 401, 'Unauthorized');
+		return;
+	}
+
+	const sessionId = registerRealtimeSession({ userId: user.id, email: user.email, role: user.role });
+
+	wss.handleUpgrade(req, socket, head, (ws) => {
+		const session = new RealtimeVoiceSession(ws, user);
+		// The registry entry is released on close, however the socket ends —
+		// including an abrupt client disappearance, which is the common case on
+		// mobile. Without this the console's "active connections" would climb and
+		// never fall.
+		ws.once('close', () => unregisterRealtimeSession(sessionId));
+		session.start();
+	});
+}
+
 export { RealtimeVoiceSession } from './session.js';
+export {
+	getActiveRealtimeSessionCount,
+	getActiveRealtimeUserCount,
+	snapshotRealtimeSessions,
+	realtimeSessionsForUser,
+	closeRealtimeSessionsForUser,
+} from './registry.js';
 export { REALTIME_PATH } from './protocol.js';

@@ -52,7 +52,49 @@ const defaultSelectResults: Record<string, any[]> = {
 	memoryEmbeddings: [{ id: 'emb-1', memoryId: 'mem-1', embedding: null, metadata: {}, createdAt: new Date() }],
 	tasks: [{ id: 'task-1', userId: 'user-1', title: 'test task', status: 'pending', metadata: {}, createdAt: new Date(), updatedAt: new Date() }],
 	organizations: [{ id: 'org-1' }],
+	// The privacy switches. Present so `getPrivacyPreferences` can be exercised at all:
+	// without a row it falls back to `PRIVACY_DEFAULTS` (everything on) and every gated
+	// route runs with saving enabled, which made the gates structurally untestable — a
+	// future edit could delete one and the suite would stay green.
+	// The mock returns rows verbatim and ignores the `select({...})` projection, so
+	// these keys are the *destructured* names `getPrivacyPreferences` reads, not the
+	// snake_case column names. A fixture keyed only by column name silently yields
+	// `undefined` for every field, which `?? PRIVACY_DEFAULTS` turns back into "all
+	// saving on" — a test would then pass while asserting nothing.
+	privacy_preferences: [
+		{
+			id: 'prefs-1',
+			userId: 'user-1',
+			saveConversations: true,
+			saveRecordings: true,
+			saveTranscripts: true,
+			saveMemories: true,
+			autoDeleteRecordingsDays: 30,
+			autoDeleteTranscriptsDays: 7,
+			cloudProcessing: true,
+			localProcessing: false,
+		},
+	],
 };
+
+/** The row the mock returns for `privacy_preferences`. */
+const DEFAULT_PRIVACY_ROW = { ...defaultSelectResults.privacy_preferences[0] };
+
+/**
+ * Overrides the privacy row this suite's database mock returns.
+ *
+ * `getPrivacyPreferences` reads these columns, so a test can turn a switch off and
+ * assert the route refuses to write — which is the only way the gates can be covered
+ * without a real database. Pass `null` to simulate a user who has never opened Privacy
+ * controls (no row), and `setPrivacyPreferencesRow()` with no argument to restore the
+ * defaults.
+ */
+export function setPrivacyPreferencesRow(
+	partial: Record<string, unknown> | null = DEFAULT_PRIVACY_ROW,
+): void {
+	defaultSelectResults.privacy_preferences =
+		partial === null ? [] : [{ ...DEFAULT_PRIVACY_ROW, ...partial }];
+}
 
 /**
  * Drizzle-shaped in-memory query builder.
@@ -176,7 +218,25 @@ vi.mock('../db/connection', () => {
 		// builder ignores `where`, so a test that needs an empty result (e.g. an
 		// ownership-mismatch 404) cannot express it otherwise.
 		getDb: vi.fn(() => db),
-		getDbPool: () => ({ query: async () => ({ rows: [], rowCount: 0 }) }),
+		/**
+		 * The pool answers the account-state query `authenticate` makes before every route.
+		 *
+		 * `authenticate` checks that the token's subject is a real, enabled account, on a raw pool
+		 * query rather than through `getDb()` — see the comment in `middleware/auth.ts` for why
+		 * that distinction matters to this suite. Without an answer here every authenticated
+		 * request would be refused as `ACCOUNT_DISABLED`, and the route under test would never
+		 * run. Matching the projection rather than the table keeps this from interfering with the
+		 * admin routes, which also read `users` but select many columns or a count.
+		 */
+		getDbPool: () => ({
+			query: async (sql: unknown) => {
+				const text = typeof sql === 'string' ? sql : String((sql as { text?: string })?.text ?? '');
+				if (/^\s*select\s+disabled\s+from\s+users\s+where\s+id\s*=/i.test(text)) {
+					return { rows: [{ disabled: false }], rowCount: 1 };
+				}
+				return { rows: [], rowCount: 0 };
+			},
+		}),
 		getDbClient: () => ({ query: async (_sql: string) => ({ rows: [] }) }),
 		getQueryBuilder: () => qb,
 	};
@@ -217,10 +277,21 @@ vi.mock('../services/ai.js', async (importOriginal) => {
 	});
 	return {
 		...actual,
+		// Shaped like the real `ChatCompletionResult` (see services/ai.ts), not
+		// just the two fields `content`-only callers read. A mock missing
+		// `toolUses` made `runAssistantToolLoop` throw on `.length` of undefined,
+		// so no suite could exercise a tool-bearing route through the shared
+		// mock at all — the routes that use the loop were untestable here.
+		// `usage` uses the provider-neutral camelCase keys the route code reads;
+		// it used to report `input_tokens`/`output_tokens`, which every caller
+		// silently turned into `undefined`.
 		chatCompletion: vi.fn(async () => ({
 			content: 'mock assistant reply',
 			model: 'mock-model',
-			usage: { input_tokens: 1, output_tokens: 1 },
+			usage: { inputTokens: 1, outputTokens: 1 },
+			blocks: [{ type: 'text' as const, text: 'mock assistant reply' }],
+			stopReason: null,
+			toolUses: [],
 		})),
 		transcribeAudio: vi.fn(stubTranscript('en')),
 		transcribeAudioSarvam: vi.fn(stubTranscript('ta')),
@@ -232,20 +303,47 @@ vi.mock('../services/ai.js', async (importOriginal) => {
 	};
 });
 
+// Mirrors the *nested* shape `src/config.ts` actually exports.
+//
+// This mock used to be flat (`PORT`, `ANTHROPIC_API_KEY`, `CORS_ORIGIN`, …), which
+// matched a config module that no longer exists. `src/server.ts` now reads
+// `config.cors.origins`, so every one of the 20 suites aborted during collection
+// with "Cannot read properties of undefined (reading 'origins')" and the run
+// reported 0 tests — a green-looking `passWithNoTests` away from being missed.
+// Keep this in step with `ApiConfig` in `src/config.ts`.
 vi.mock('../config', () => ({
 	config: {
-		PORT: 3001,
-		DATABASE_URL: 'postgres://postgres:postgres@localhost:5432/nova_test',
-		JWT_SECRET: 'test-secret-key-that-is-at-least-32-chars-long',
-		JWT_REFRESH_SECRET: 'test-refresh-secret-that-is-at-least-32-chars-long!',
-		REDIS_URL: 'redis://localhost:6379',
-		ANTHROPIC_API_KEY: 'test-anthropic',
-		ELEVENLABS_API_KEY: 'test-elevenlabs',
-		SARVAM_API_KEY: 'test-sarvam',
-		OPENAI_API_KEY: 'test-openai',
-		DEEPGRAM_API_KEY: 'test-deepgram',
-		CORS_ORIGIN: '*',
-		LOG_LEVEL: 'warn',
+		port: 3001,
+		database: {
+			host: 'localhost',
+			port: 5432,
+			database: 'nova_test',
+			user: 'postgres',
+			password: 'postgres',
+		},
+		redis: { host: 'localhost', port: 6379 },
+		storage: {
+			endpoint: 'http://localhost:9000',
+			port: 9000,
+			accessKey: 'test-access-key',
+			secretKey: 'test-secret-key',
+			bucket: 'nova-test',
+		},
+		jwt: {
+			secret: 'test-secret-key-that-is-at-least-32-chars-long',
+			refreshSecret: 'test-refresh-secret-that-is-at-least-32-chars-long!',
+			expiresIn: '1h',
+		},
+		cors: { origins: ['http://localhost:3000'] },
+		services: {
+			anthropicApiKey: 'test-anthropic',
+			anthropicBaseUrl: 'https://api.anthropic.com',
+			broCodeKey: '',
+			elevenlabsApiKey: 'test-elevenlabs',
+			deepgramApiKey: 'test-deepgram',
+			sarvamApiKey: 'test-sarvam',
+			googleCloudApiKey: '',
+		},
 	},
 }));
 

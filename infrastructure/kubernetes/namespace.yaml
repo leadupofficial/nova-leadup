@@ -1,0 +1,13 @@
+# NOVA Leadup — Kubernetes Namespace
+# Isolates all NOVA resources in the cluster.
+#
+# Re-indented: `labels` and its entries were siblings of `metadata.name` rather than
+# children of `metadata.labels`, so the labels were not applied.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nova
+  labels:
+    name: nova
+    app.kubernetes.io/name: nova-leadup
+    app.kubernetes.io/version: "0.1.0"

@@ -28,12 +28,17 @@ import { HttpError } from '../middleware/error-handler.js';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { tokenDenylist } from '../middleware/token-denylist.js';
 import { logger } from '../utils/logger.js';
+import { recordLoginAttempt } from '../services/auth-events.js';
+import { requiresSecondFactor, verifySecondFactor } from '../admin/mfa.js';
 import {
 	accessTokenTtlSeconds,
 	generateRefreshToken,
 	hashRefreshToken,
 	signAccessToken,
 } from '../utils/tokens.js';
+// The one place the minimum password length is written down. `schemas/index.ts` owns it
+// so the register route, the shared schemas and the mobile client cannot drift apart.
+import { PASSWORD_MIN_LENGTH } from '../schemas/index.js';
 
 const router: ReturnType<typeof Router> = Router();
 
@@ -65,15 +70,38 @@ const escapeHtml = (str: string): string => {
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
+/**
+ * The register schema is defined here because this route needs slightly stricter email
+ * handling than the shared one, but the password rule is **not** duplicated: it comes
+ * from `PASSWORD_MIN_LENGTH`, the single constant in `schemas/index.ts`.
+ *
+ * It used to be redefined here as `min(8)` while `schemas/index.ts` said 12 and
+ * `utils/validation.ts` said 8 — three definitions, two of them dead, and no way to
+ * tell which one a given screen was talking to. The mobile client had been written
+ * against *this* one (8), so the value users saw and the value enforced were the same
+ * by luck rather than by construction. The shared constant is now the only place the
+ * number appears, and the client mirrors it.
+ */
 const RegisterSchema = z.object({
 	email: z.string().email('A valid email address is required').max(255),
-	password: z.string().min(8, 'Password must be at least 8 characters').max(200),
+	password: z
+		.string()
+		.min(
+			PASSWORD_MIN_LENGTH,
+			`Password must be at least ${PASSWORD_MIN_LENGTH} characters`,
+		)
+		.max(200),
 	name: z.string().max(255).optional(),
 });
 
 const LoginSchema = z.object({
 	email: z.string().email('A valid email address is required').max(255),
 	password: z.string().min(1, 'Password is required').max(200),
+	// The second factor, when the account has one confirmed. Optional rather than conditional: an
+	// account without MFA sends nothing, and an account with it gets a distinct 401 asking for this.
+	// Both spellings are accepted, matching how the token fields are handled below.
+	mfaCode: z.string().min(4).max(64).optional(),
+	mfa_code: z.string().min(4).max(64).optional(),
 });
 
 // The mobile client sends `refreshToken`; older callers of this API and the
@@ -281,25 +309,63 @@ router.post('/login', async (req, res, next) => {
 			.where(eq(users.email, email))
 			.limit(1)) as UserCredentialsRow[];
 
+		// Where this attempt came from, recorded with every outcome so a successful sign-in can be
+		// compared against the failures around it. `req.id` is set by `request-id.ts`.
+		const attempt = {
+			email,
+			ipAddress: req.ip ?? null,
+			userAgent: (req.headers['user-agent'] as string | undefined) ?? null,
+			// Taken from the header rather than `req.id`, which the request-id middleware only
+			// types as a local extension (`RequestWithId`), not as part of Express's `Request`.
+			requestId: (req.headers['x-request-id'] as string | undefined) ?? null,
+		};
+
 		// A missing account, a passwordless account (e.g. social-only sign-up), and a
-		// wrong password must be indistinguishable — including in how long they take.
+		// wrong password must be indistinguishable — including in how long they take. The
+		// *reason* is recorded for the operator and never returned to the caller.
 		if (!user?.passwordHash) {
 			await equalizeFailedLoginTiming(body.password);
+			await recordLoginAttempt({ ...attempt, reason: 'unknown-account', userId: null });
 			throw invalidCredentials();
 		}
 
 		const passwordMatches = await bcrypt.compare(body.password, user.passwordHash);
 		if (!passwordMatches) {
+			await recordLoginAttempt({ ...attempt, reason: 'bad-password', userId: user.id });
 			throw invalidCredentials();
 		}
 
 		if (user.disabled) {
+			// The credential was correct, so this row names the account: a suspended account
+			// repeatedly trying to sign in is a different signal from a stranger guessing.
+			await recordLoginAttempt({ ...attempt, reason: 'account-disabled', userId: user.id });
 			throw new HttpError(403, 'This account has been disabled', 'ACCOUNT_DISABLED');
+		}
+
+		// Second factor, when this account has one confirmed. Enrolment is opt-in and administrator
+		// only, so the mobile client is unaffected — but the check lives in the shared login route
+		// rather than in the console, because a factor that only guards one client is not a factor.
+		if (await requiresSecondFactor(user.id)) {
+			const submitted = body.mfaCode ?? body.mfa_code;
+			if (!submitted) {
+				// `MFA_REQUIRED` is a distinct code so the console can prompt for the code instead of
+				// showing "invalid credentials" and sending the operator to reset a working password.
+				await recordLoginAttempt({ ...attempt, reason: 'mfa-required', userId: user.id });
+				throw new HttpError(401, 'A verification code is required for this account', 'MFA_REQUIRED');
+			}
+			const factor = await verifySecondFactor(user.id, submitted);
+			if (!factor.ok) {
+				// The rate limiter (10 requests / 60 s per IP) is what makes a six-digit space
+				// unguessable here: three codes are valid per step and the window is 90 seconds.
+				await recordLoginAttempt({ ...attempt, reason: 'mfa-invalid', userId: user.id });
+				throw new HttpError(401, 'That verification code is not valid', 'MFA_INVALID');
+			}
 		}
 
 		await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
 
 		const issued = await issueSession(user, req);
+		await recordLoginAttempt({ ...attempt, reason: 'ok', userId: user.id });
 		logger.info({ userId: user.id }, 'User logged in');
 		res.status(200).json({ success: true, data: issued });
 	} catch (error) {

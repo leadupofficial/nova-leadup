@@ -121,10 +121,19 @@ export function getEnvConfig(): ApiConfig {
 				'24h',
 		},
 		cors: {
+			// Default origins cover the admin panel on common local dev ports and the
+			// production domains. Set CORS_ORIGINS to override (comma-separated).
+			//
+			// On-device mobile testing over WiFi: the Flutter client is not subject to
+			// CORS, but if you serve the admin panel from a device on your local network
+			// (e.g. http://192.168.x.x:3004), add that origin here or via CORS_ORIGINS.
 			origins: process.env.CORS_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean) || [
 				'http://localhost:3000',
+				'http://localhost:3001',
 				'http://localhost:3004',
 				'http://localhost:3005',
+				'https://nova.leadup.in',
+				'https://admin.nova.leadup.in',
 			],
 		},
 		services: {

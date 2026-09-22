@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/app/providers.dart';
+import 'package:nova_mobile/core/api/device_registration.dart';
 import 'package:nova_mobile/core/network/network_info_service.dart';
 import 'package:nova_mobile/core/theme/nova_theme.dart';
 import 'package:nova_mobile/core/voice/wake_word_service.dart';
@@ -196,7 +197,11 @@ class FakeHealthService extends HealthService {
   HealthCheckResult result;
 
   @override
-  Future<HealthCheckResult> check({String path = '/healthz'}) async => result;
+  Future<HealthCheckResult> check({
+    String path = '/healthz',
+    CancelToken? cancelToken,
+  }) async =>
+      result;
 
   @override
   Future<String> getStatus({String path = '/healthz'}) async =>
@@ -366,9 +371,12 @@ Widget testApp(TestDependencies deps, Widget home) {
       healthServiceProvider.overrideWithValue(deps.healthService),
       reminderNotificationsProvider.overrideWithValue(deps.reminderNotifications),
     ],
-    child: MaterialApp(
-      theme: NovaTheme.darkTheme,
-      home: home,
+    child: MediaQuery(
+      data: const MediaQueryData(disableAnimations: true),
+      child: MaterialApp(
+        theme: NovaTheme.darkTheme,
+        home: home,
+      ),
     ),
   );
 }
@@ -378,6 +386,24 @@ Widget testScope(
   TestDependencies deps,
   Widget child, {
   NetworkService? networkService,
+  /// Overrides [dioProvider], which [dioProvider] builds itself from scratch.
+  ///
+  /// `networkServiceProvider` is not enough for code that talks to `Dio` directly — device
+  /// registration does, because it needs its own timeout and sends its own Authorization
+  /// header. Without this override such a call escapes to the real network and fails
+  /// silently, which is exactly the kind of "the test passed and nothing happened" result
+  /// the harness exists to prevent.
+  Dio? dio,
+  /// Replaces the device-registration call with a spy.
+  ///
+  /// Used to *observe* a call rather than replace a transport: a test asserting "the app tried
+  /// to register the device" is far more direct than inspecting a fake HTTP adapter, and it
+  /// does not depend on `device_info_plus` resolving — which, in a widget test with no plugin
+  /// behind it, it does not.
+  ///
+  /// Concrete rather than a general `List<Override>` because Riverpod 2 does not export
+  /// `Override`; the override list below is a literal so its element type is inferred.
+  Future<DeviceRegistrationResult> Function()? deviceRegistration,
 }) {
   return ProviderScope(
     overrides: [
@@ -396,6 +422,9 @@ Widget testScope(
         networkServiceProvider.overrideWithValue(networkService),
       if (networkService != null)
         authNetworkServiceProvider.overrideWithValue(networkService),
+      if (dio != null) dioProvider.overrideWithValue(dio),
+      if (deviceRegistration != null)
+        deviceRegistrationProvider.overrideWithValue(deviceRegistration),
     ],
     // The design's avatar and waveform loops repeat forever, so `pumpAndSettle`
     // would never return. Every animated widget honours the OS "Reduce Motion"

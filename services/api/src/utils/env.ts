@@ -57,6 +57,88 @@ const confirmationLevel = z
     'Minimum tool permission level that requires user confirmation on the realtime voice path. 0 = never prompt, 1 = confirm every write (blueprint §10.1 beta default), 3 = confirm only the most sensitive. Blueprint levels are accepted too (L1, L2).',
   );
 
+/**
+ * A value where an empty string means "unset".
+ *
+ * `dotenv` turns `KEY=` into `''`, and `z.string().optional()` does not accept
+ * it — so a placeholder line copied from `.env.example` would make boot fail on
+ * a value that means exactly the same thing as absence. Treating a blank value
+ * as absent keeps "leave it empty to disable this" honest.
+ */
+const blankIsUnset = (value: unknown): unknown =>
+ typeof value === 'string' && value.trim() === '' ? undefined : value;
+
+/**
+ * The secondary LLM provider, used automatically when the primary is unusable —
+ * out of credit, `5xx`, timed out or unreachable — and only while the turn has
+ * committed no side effect or spoken output. A request error (`400`), an auth
+ * failure from this service's own middleware, and any error this service raised
+ * itself are never retried. See `services/llm-fallback.ts`.
+ *
+ * Every name is optional, and the fallback counts as configured only when
+ * **both** `LLM_FALLBACK_BASE_URL` and `LLM_FALLBACK_API_KEY` are set. Absence
+ * means "no fallback configured", which is exactly the behaviour that existed
+ * before one did. Read at call time in `services/llm-fallback.ts`, so a change
+ * takes effect without a restart.
+ */
+const llmFallbackBaseUrl = z
+ .preprocess(blankIsUnset, z.string().url().optional())
+ .describe(
+  'Base URL of the secondary LLM provider. Unset or blank disables the fallback entirely. OpenAI-compatible providers take {base}/chat/completions; Anthropic-protocol ones take {base}/v1/messages.',
+ );
+
+const llmFallbackApiKey = z
+ .preprocess(blankIsUnset, z.string().optional())
+ .describe(
+  'Credential for the secondary LLM provider. Unset or blank disables the fallback entirely. Never logged, and redacted out of any provider error body before that body is stored or returned.',
+ );
+
+const llmFallbackAuthStyle = z
+ .preprocess(blankIsUnset, z.enum(['bearer', 'api-key']).optional())
+ .describe(
+  'How the fallback credential is sent: bearer = Authorization: Bearer <key>; api-key = x-api-key: <key>. Defaults to bearer for the OpenAI-compatible protocol and api-key for the Anthropic one.',
+ );
+
+const llmFallbackProtocol = z
+ .preprocess(blankIsUnset, z.enum(['openai', 'anthropic']).optional())
+ .describe(
+  'Wire protocol of the secondary provider: openai = POST {base}/chat/completions; anthropic = POST {base}/v1/messages. Defaults from the auth style: api-key implies anthropic, anything else implies openai (the likely fallbacks — apimaster.ai, Z.ai/GLM, Moonshot/Kimi, DeepSeek — are OpenAI-compatible).',
+ );
+
+/**
+ * The output-token ceiling every chat call sends, when a call site does not name
+ * its own.
+ *
+ * 4096 rather than the 1024 the voice and chat routes used to hard-code, because
+ * the configured fallback is a **reasoning** model: `reasoning_content` is billed
+ * against `max_tokens`, so 1024 bought ~1023 reasoning tokens and no answer at
+ * all. On the measured turn the model spent 1023 of 1024 tokens thinking,
+ * `finish_reason` came back `length`, `content` was empty, and the route replied
+ * HTTP 200 with `text: ""`. A working turn of the same prompt used 842 output
+ * tokens (506 of them reasoning), so 4096 leaves roughly four times the headroom
+ * while staying the module's documented default.
+ *
+ * Bounded deliberately. `max_tokens` is a ceiling and not a charge, but an
+ * unbounded one lets a runaway or looping model generate without limit, so a
+ * misconfigured value is rejected at boot rather than quietly accepted. The
+ * ceiling is the cap on one reply, not on one turn: a tool-using turn can make
+ * up to `MAX_TOOL_ITERATIONS` such calls. Lower it if a provider bills more than
+ * the turn is worth; raise it if a longer reasoning budget is genuinely needed.
+ */
+const llmMaxOutputTokens = z
+ .preprocess(
+  blankIsUnset,
+  z.coerce
+   .number()
+   .int('LLM_MAX_OUTPUT_TOKENS must be a whole number of tokens')
+   .min(256, 'LLM_MAX_OUTPUT_TOKENS must be at least 256; a reasoning model needs room to think and answer')
+   .max(32768, 'LLM_MAX_OUTPUT_TOKENS must be at most 32768 — a larger per-reply ceiling is a runaway-cost risk')
+   .default(4096),
+ )
+ .describe(
+  'Maximum output tokens per chat completion (reasoning tokens included). Default 4096. Too low for a reasoning model returns an empty reply; too high risks an unbounded-cost reply. Allowed 256–32768.',
+ );
+
 const envSchema = z.object({
  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
  PORT: z.string().default('3001'),
@@ -69,6 +151,21 @@ const envSchema = z.object({
  OPENAI_API_KEY: z.string().optional(),
  DEEPGRAM_API_KEY: z.string().optional(),
  GOOGLE_CLOUD_API_KEY: z.string().optional(),
+
+ // Secondary LLM provider — see the block above for the semantics of each name.
+ LLM_FALLBACK_BASE_URL: llmFallbackBaseUrl,
+ LLM_FALLBACK_API_KEY: llmFallbackApiKey,
+ LLM_FALLBACK_MODEL: z
+  .preprocess(blankIsUnset, z.string().optional())
+  .describe(
+   'Model id to ask the secondary provider for. Unset = the primary model id (ANTHROPIC_MODEL). A gateway that namespaces its model ids (for example deepseek-chat) should set this explicitly.',
+  ),
+ LLM_FALLBACK_AUTH_STYLE: llmFallbackAuthStyle,
+ LLM_FALLBACK_PROTOCOL: llmFallbackProtocol,
+
+ // One shared ceiling for every chat/reply call site — see the block above.
+ LLM_MAX_OUTPUT_TOKENS: llmMaxOutputTokens,
+
  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
  CORS_ORIGIN: z.string().default('http://localhost:19000'),
 

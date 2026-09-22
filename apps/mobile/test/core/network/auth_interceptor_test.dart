@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/core/network/auth_interceptor.dart';
+import 'package:nova_mobile/features/auth/auth_api.dart';
 import 'package:nova_mobile/features/auth/auth_repository.dart';
 
 import '../../helpers/test_harness.dart';
@@ -191,5 +192,80 @@ void main() {
     );
     expect(refreshCalls, 1);
     expect(calls, 2);
+  });
+
+  test('a network failure does NOT end the session', () async {
+    // The bug this pins: any throw from the refresh was treated as an authentication
+    // failure, which clears the session and forces the sign-in screen. So the app logged
+    // people out whenever it could not *reach* the server — airplane mode, a dropped
+    // connection, a timeout, a 5xx during a deploy. Observed directly: the API was
+    // stopped and restarted while the app was running and the app returned to
+    // "Welcome back", with a refresh token the server had never rejected.
+    await seed();
+    var refreshFailedCalls = 0;
+
+    final built = buildDio(
+      handler: (options) async => jsonResponse(<String, dynamic>{'error': 'unauthorized'}, statusCode: 401),
+      refresh: (_) async {
+        // What a socket error looks like by the time it reaches the interceptor: no HTTP
+        // response, so no status code.
+        throw const AuthException('Connection refused');
+      },
+      onRefreshFailed: () async => refreshFailedCalls++,
+    );
+
+    await expectLater(
+      built.dio.get<dynamic>('/api/v1/tasks'),
+      throwsA(isA<DioException>()),
+    );
+
+    expect(
+      refreshFailedCalls,
+      0,
+      reason: 'an unreachable server is not a rejected credential',
+    );
+    expect(
+      repository.currentToken,
+      isNotNull,
+      reason: 'the session must survive a network failure so the next request can retry',
+    );
+  });
+
+  test('a 401 from the refresh endpoint DOES end the session', () async {
+    // The other half: when the server answers and refuses the refresh token, the session
+    // really is over and the user has to sign in again.
+    await seed();
+    var refreshFailedCalls = 0;
+
+    final built = buildDio(
+      handler: (options) async => jsonResponse(<String, dynamic>{'error': 'unauthorized'}, statusCode: 401),
+      refresh: (_) async => throw const AuthException('Invalid refresh token', statusCode: 401),
+      onRefreshFailed: () async => refreshFailedCalls++,
+    );
+
+    await expectLater(
+      built.dio.get<dynamic>('/api/v1/tasks'),
+      throwsA(isA<DioException>()),
+    );
+
+    expect(refreshFailedCalls, 1, reason: 'a refused refresh token ends the session');
+  });
+
+  test('a 500 from the refresh endpoint does NOT end the session', () async {
+    await seed();
+    var refreshFailedCalls = 0;
+
+    final built = buildDio(
+      handler: (options) async => jsonResponse(<String, dynamic>{'error': 'unauthorized'}, statusCode: 401),
+      refresh: (_) async => throw const AuthException('Internal Server Error', statusCode: 500),
+      onRefreshFailed: () async => refreshFailedCalls++,
+    );
+
+    await expectLater(
+      built.dio.get<dynamic>('/api/v1/tasks'),
+      throwsA(isA<DioException>()),
+    );
+
+    expect(refreshFailedCalls, 0, reason: 'the server failing is not the credential failing');
   });
 }

@@ -19,8 +19,10 @@ import { getLanguageByCode } from '@nova/shared-types';
 import { buildUserContext, composeSystemPrompt } from '../services/user-context.js';
 import { logger } from '../utils/logger.js';
 import { ASSISTANT_TOOLS_PROMPT } from '../services/assistant-tools.js';
+import { checkReplyScript, summarizeScriptViolations } from '../services/script-validator.js';
 import { buildSystemPromptForLanguage } from '../routes/voice.js';
 import type { ChatMessage } from '../services/ai.js';
+import { defaultMaxOutputTokens } from '../services/ai.js';
 import type { ExecutedToolCall } from '../services/assistant-tool-executor.js';
 import { SentenceChunker } from './sentence-chunker.js';
 import { openSpeechStream, toSpeakableText } from './tts.js';
@@ -90,6 +92,15 @@ export interface ReplyResult {
 	 * the rate the characters are billed at.
 	 */
 	ttsCharsByProvider: Record<string, number>;
+	/**
+	 * Which provider served the model turn — `'anthropic'`, or the configured
+	 * secondary provider when the primary was unusable. Reported so the per-turn
+	 * cost leg is priced against the provider that really answered, and so an
+	 * outage of the primary is visible in the logs.
+	 */
+	provider?: string;
+	/** True when the secondary provider served any part of this reply. */
+	fellBack?: boolean;
 }
 
 function abortError(): Error {
@@ -126,6 +137,33 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 		// skip it without consuming a sentence index or calling the provider.
 		const speakable = toSpeakableText(sentence);
 		if (!speakable) return;
+
+		// ── The last point where a broken sentence is still only text ──────
+		// Tamil TTS reads whatever it is given, so a letter from another writing
+		// system is heard as garbage in the middle of a sentence the user asked
+		// for in Tamil. Measured on this route across five models: one put 55
+		// letters — Malayalam, Devanagari, Bengali and a CJK ideograph — inside
+		// Tamil replies. `speakable` is exactly the string Sarvam receives, which
+		// is why the check is on it and not on the raw reply.
+		//
+		// Logged, not re-prompted: sentences already handed to `ttsChain` are
+		// playing, so a corrective turn would speak a second, contradictory reply
+		// after the user heard the first. Withholding the sentence is the only
+		// remedy that would protect the ear, and that is a product decision about
+		// dropped audio rather than a validation one — so this reports, and the
+		// metric is what makes the rate visible instead of silent.
+		const script = checkReplyScript(speakable, options.language);
+		if (!script.clean) {
+			logger.warn(
+				{
+					userId: options.userId,
+					language: options.language,
+					foreign: script.violations.length,
+					metric: summarizeScriptViolations(script.violations),
+				},
+				'spoken reply mixed writing systems',
+			);
+		}
 
 		const index = sentenceIndex++;
 		ttsChain = ttsChain.then(async () => {
@@ -178,9 +216,14 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 	check();
 
 	// Timed because this sits in front of the model on every spoken turn, so its
-	// cost is added directly to how long the user waits for a reply.
+	// cost is added directly to how long the user waits for a reply. The user's
+	// utterance is passed as the turn so the memory block is ranked against it —
+	// on the primary voice path this is the difference between NOVA recalling what
+	// matters right now and recalling its twelve most "important" notes.
 	const contextStartedAt = Date.now();
-	const context = await buildUserContext(options.userId);
+	const context = await buildUserContext(options.userId, {}, undefined, {
+		userTurn: options.userText,
+	});
 	const contextMs = Date.now() - contextStartedAt;
 	check();
 
@@ -203,11 +246,14 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 		messages,
 		{
 			systemPrompt,
-			maxTokens: 1024,
+			maxTokens: defaultMaxOutputTokens(),
 			temperature: 0.7,
 			signal,
 			turnId: options.turnId,
 			approval: options.approval,
+			// So a corrective sentence this loop authors itself — spoken when the
+			// model claimed an action it never took — is in the user's language.
+			language: options.language,
 			onToolCall: (call) =>
 				handlers.onTool?.({
 					name: call.name,
@@ -248,5 +294,7 @@ export async function runReply(options: ReplyOptions): Promise<ReplyResult> {
 		iterations: result.iterations,
 		capped: result.capped,
 		ttsCharsByProvider,
+		provider: result.provider,
+		fellBack: result.fellBack,
 	};
 }

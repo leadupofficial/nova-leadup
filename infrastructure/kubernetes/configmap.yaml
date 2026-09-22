@@ -1,0 +1,38 @@
+# NOVA Leadup — Kubernetes ConfigMap
+# Non-sensitive configuration shared across deployments in the nova namespace.
+#
+# Re-indented for consistency with the other manifests. This one happened to parse
+# correctly, because every key under `data` was a flat sibling and nothing was nested
+# below them.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nova-config
+  namespace: nova
+data:
+  # Application
+  NODE_ENV: "production"
+  API_PORT: "3000"
+  WS_PORT: "3001"
+  CORS_ORIGIN: "https://nova.leadup.in"
+
+  # Database
+  POSTGRES_HOST: "nova-postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "nova"
+  POSTGRES_USER: "nova"
+
+  # Redis
+  REDIS_HOST: "nova-redis"
+  REDIS_PORT: "6379"
+
+  # JWT
+  JWT_EXPIRY: "15m"
+  JWT_REFRESH_EXPIRY: "7d"
+
+  # S3 / MinIO
+  S3_ENDPOINT: "http://nova-minio:9000"
+  S3_BUCKET: "nova-assets"
+
+  # Health check
+  HEALTH_CHECK_PATH: "/health"

@@ -7,7 +7,8 @@
  * Design:
  * - Auth routes: 10 requests / 60s window (brute-force protection)
  * - Default: 100 requests / 60s window
- * - Uses an in-memory sliding window; the Map is bounded and auto-cleaned.
+ * - Uses an in-memory sliding window; the Map is bounded and auto-cleaned, and
+ *   reclamation never discards a key that is inside an active block (P-01).
  * - For distributed deployments, replace `SlidingWindowStore` with Redis.
  */
 import type { NextFunction, Request, Response } from 'express';
@@ -43,13 +44,18 @@ class SlidingWindowStore {
 		this.startCleanup();
 	}
 
+	/** Keys currently tracked. Exposed for the memory-bound tests. */
+	get size(): number {
+		return this.store.size;
+	}
+
 	check(key: string): RateLimitResult {
 		const now = Date.now();
 		const entry = this.store.get(key);
 
 		if (!entry) {
 			this.store.set(key, { timestamps: [now] });
-			this.enforceLimit();
+			this.enforceLimit(now);
 			return { limited: false };
 		}
 
@@ -63,7 +69,7 @@ class SlidingWindowStore {
 
 		if (entry.timestamps.length === 0) {
 			entry.timestamps = [now];
-			this.enforceLimit();
+			this.enforceLimit(now);
 			return { limited: false };
 		}
 
@@ -76,19 +82,56 @@ class SlidingWindowStore {
 		}
 
 		entry.timestamps.push(now);
-		this.enforceLimit();
+		this.enforceLimit(now);
 		return { limited: false };
 	}
 
-	reset(key: string): void {
-		this.store.delete(key);
+	/** True while the key is inside an active block (P-01). */
+	private isBlocked(entry: RateLimitEntry, now: number): boolean {
+		return entry.blockedUntil !== undefined && now < entry.blockedUntil;
 	}
 
-	private enforceLimit(): void {
-		if (this.store.size > this.maxEntries) {
-			// Evict oldest 30% of entries
-			const keys = Array.from(this.store.keys()).slice(0, Math.floor(this.maxEntries * 0.3));
-			keys.forEach((k) => this.store.delete(k));
+	/**
+	 * True when nothing about the entry is still live: every timestamp is outside
+	 * the window and it is not blocked. Only these may be reclaimed.
+	 */
+	private isExpired(entry: RateLimitEntry, now: number): boolean {
+		if (this.isBlocked(entry, now)) return false;
+		return entry.timestamps.every((ts) => now - ts > this.windowMs);
+	}
+
+	/**
+	 * Keeps the map bounded **without ever discarding a live brute-force block.**
+	 *
+	 * This used to delete the oldest 30 % of keys whenever `check()` found the map
+	 * over its cap. On the auth limiter that was a self-inflicted bypass: the key
+	 * is `ip:route`, `/api/v1/auth/<anything>` is a new key per request, so an
+	 * attacker could flood the limiter with fresh keys and evict their own
+	 * accumulated block — and every other caller's block — resetting the
+	 * protection the store exists for.
+	 *
+	 * Reclamation now runs in two ordered steps:
+	 *  1. windows that have fully elapsed and hold no block — nothing live is lost;
+	 *  2. only if that was not enough, the oldest entries that are **not** blocked.
+	 *     A key inside an active block is never removed, so an attacker cannot
+	 *     evict a block by flooding; the worst a flood can drop is a partial
+	 *     counter from an unblocked window.
+	 *
+	 * Blocks are also bounded in lifetime by the window itself, so a map full of
+	 * blocks drains on the cleanup timer rather than growing forever.
+	 */
+	private enforceLimit(now: number = Date.now()): void {
+		if (this.store.size <= this.maxEntries) return;
+
+		for (const [key, entry] of this.store) {
+			if (this.isExpired(entry, now)) this.store.delete(key);
+		}
+		if (this.store.size <= this.maxEntries) return;
+
+		for (const [key, entry] of this.store) {
+			if (this.store.size <= this.maxEntries) break;
+			if (this.isBlocked(entry, now)) continue;
+			this.store.delete(key);
 		}
 	}
 
@@ -121,6 +164,19 @@ class SlidingWindowStore {
 
 /**
  * Per-route rate limit stores keyed by (ip | routeKey).
+ */
+/**
+ * The auth limiter.
+ *
+ * **Nothing resets it, and that is deliberate.** A successful sign-in does not clear the window, so ten
+ * attempts per minute per IP is a hard ceiling whether or not some of them succeed — which is the
+ * property that matters against credential stuffing, where the attacker holds valid credentials for one
+ * account and is guessing at others.
+ *
+ * This comment replaces one that claimed a reset happens "after successful authentication" — a helper
+ * with that name existed and no caller used it. The comment misled a verification script into expecting
+ * the window to clear, which is why it is now stated as the opposite: if you are looking for
+ * `resetRateLimit`, it was deleted rather than left as a temptation.
  */
 const authStore = new SlidingWindowStore(60_000, 10, 5000); // 10 req / 60s
 const defaultStore = new SlidingWindowStore(60_000, 100, 20000); // 100 req / 60s
@@ -182,13 +238,6 @@ export function rateLimitMiddleware(config: RateLimitConfig = DEFAULT_RATE_LIMIT
 	};
 }
 
-/**
- * Reset rate limits for a given key (used after successful authentication).
- */
-export function resetRateLimit(key: string): void {
-	authStore.reset(key);
-	defaultStore.reset(key);
-}
 
 // ─── Fixed-window limiter (express-rate-limit-compatible options) ─────────────
 //
@@ -218,6 +267,74 @@ interface FixedWindowBucket {
  */
 export const buckets = new Map<string, FixedWindowBucket>();
 
+/**
+ * Ceiling on tracked fixed-window keys.
+ *
+ * The map had neither a cap nor a cleanup timer, so every one-off key — a new
+ * client, a probing scanner, a load balancer health check behind a rotating
+ * address — left a bucket behind for the life of the process, and the map only
+ * ever grew. The map is not mounted today (`rateLimit()` has no call site), which
+ * is exactly why the leak was latent rather than visible.
+ */
+export const MAX_FIXED_WINDOW_BUCKETS = 10_000;
+
+/** How often expired fixed-window buckets are reclaimed. */
+const BUCKET_CLEANUP_INTERVAL_MS = 60_000;
+
+let bucketCleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Drops every bucket whose window has already reset. Nothing live is touched. */
+function sweepExpiredBuckets(now: number = Date.now()): void {
+	for (const [key, bucket] of buckets) {
+		if (now >= bucket.resetAt) buckets.delete(key);
+	}
+}
+
+/**
+ * Starts the reclamation timer. Called when a limiter is constructed, and idempotent
+ * — every `rateLimit()` shares the one module-level map.
+ */
+function startBucketCleanup(): void {
+	if (bucketCleanupTimer) return;
+	bucketCleanupTimer = setInterval(() => sweepExpiredBuckets(), BUCKET_CLEANUP_INTERVAL_MS);
+	// Never hold the process open: this is housekeeping, not work.
+	bucketCleanupTimer.unref?.();
+}
+
+/** Stops the reclamation timer. Exposed for tests and a graceful shutdown hook. */
+export function stopBucketCleanup(): void {
+	if (bucketCleanupTimer) {
+		clearInterval(bucketCleanupTimer);
+		bucketCleanupTimer = null;
+	}
+}
+
+/**
+ * Makes room for one more bucket without letting the map grow past its cap.
+ *
+ * Expired windows are reclaimed first, so the bound normally costs nothing. If
+ * every tracked window is still live, the bucket that resets soonest goes: a
+ * fixed window holds no block, so no accumulated brute-force state is discarded —
+ * only a counter that was about to expire anyway. The incoming key is always
+ * admitted, so the limiter keeps limiting under memory pressure.
+ */
+function evictForCapacity(now: number): void {
+	if (buckets.size < MAX_FIXED_WINDOW_BUCKETS) return;
+
+	sweepExpiredBuckets(now);
+	if (buckets.size < MAX_FIXED_WINDOW_BUCKETS) return;
+
+	let oldestKey: string | null = null;
+	let oldestReset = Infinity;
+	for (const [key, bucket] of buckets) {
+		if (bucket.resetAt < oldestReset) {
+			oldestReset = bucket.resetAt;
+			oldestKey = key;
+		}
+	}
+	if (oldestKey !== null) buckets.delete(oldestKey);
+}
+
 function defaultKeyGenerator(req: Request): string {
 	return req.ip || req.socket?.remoteAddress || 'unknown';
 }
@@ -233,12 +350,17 @@ export function rateLimit(options: RateLimitOptions = {}) {
 	const max = options.max ?? 100;
 	const keyGenerator = options.keyGenerator ?? defaultKeyGenerator;
 
+	startBucketCleanup();
+
 	return (req: Request, res: Response, next: NextFunction): void => {
 		const now = Date.now();
 		const key = String(keyGenerator(req));
 
 		let bucket = buckets.get(key);
 		if (!bucket || now >= bucket.resetAt) {
+			// Only a *new* key can push the map past its cap; a key that already has
+			// a bucket is being re-set in place.
+			if (!buckets.has(key)) evictForCapacity(now);
 			bucket = { count: 0, resetAt: now + windowMs };
 			buckets.set(key, bucket);
 		}

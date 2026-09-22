@@ -1,0 +1,92 @@
+# NOVA Leadup — Kubernetes Ingress
+# Routes external traffic to API and Realtime Gateway services.
+# TLS is handled via cert-manager (certificates are provisioned from the ingress annotations).
+#
+# Re-indented: the original had every key at one space, so `tls`, `rules`, `http.paths`
+# and `backend.service` were flat and the file was not valid YAML.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nova-ingress
+  namespace: nova
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "10"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/limit-connections: "20"
+    # Rate limiting per client IP
+    nginx.ingress.kubernetes.io/limit-rps: "10"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
+spec:
+  tls:
+    - hosts:
+        - nova.leadup.in
+        - api.nova.leadup.in
+        - ws.nova.leadup.in
+        - admin.nova.leadup.in
+      secretName: nova-tls
+  rules:
+    # Main frontend
+    - host: nova.leadup.in
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nova-api
+                port:
+                  number: 3000
+    # API subdomain
+    - host: api.nova.leadup.in
+      http:
+        paths:
+          - path: /api/(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: nova-api
+                port:
+                  number: 3000
+          - path: /auth/(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: nova-api
+                port:
+                  number: 3000
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: nova-api
+                port:
+                  number: 3000
+    # WebSocket / Realtime subdomain
+    - host: ws.nova.leadup.in
+      http:
+        paths:
+          - path: /ws/(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: nova-realtime
+                port:
+                  number: 3001
+    # Admin subdomain
+    - host: admin.nova.leadup.in
+      http:
+        paths:
+          - path: /(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: nova-api
+                port:
+                  number: 3000

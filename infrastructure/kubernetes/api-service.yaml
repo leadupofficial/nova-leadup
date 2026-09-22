@@ -1,0 +1,27 @@
+# NOVA Leadup — Kubernetes API Service
+#
+# Re-indented: this file previously had every key at one space, which YAML rejects
+# ("expected <block end>, but found '-'") because `spec.ports` list items were siblings
+# of `spec` rather than children of `ports`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nova-api
+  namespace: nova
+  labels:
+    app: nova-api
+    app.kubernetes.io/name: api
+    app.kubernetes.io/part-of: nova
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  selector:
+    app: nova-api

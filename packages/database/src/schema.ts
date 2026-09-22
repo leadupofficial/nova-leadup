@@ -27,6 +27,7 @@ import {
  date,
  numeric,
  uniqueIndex,
+ vector,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm/relations';
 
@@ -138,16 +139,37 @@ export const sessions = pgTable('sessions', {
 
 // ─── Devices ────────────────────────────────────────────────────
 
+/**
+ * A device the app runs on.
+ *
+ * `userId` is **nullable** because the app registers a device at first launch, which is
+ * before sign-in. Requiring an owner would have meant either not reporting pre-login devices
+ * at all, or inventing one; neither is acceptable for an inventory whose purpose is to answer
+ * "which app versions and platforms are in the field".
+ *
+ * `appVersion`, `platformVersion` and `model` exist because the client previously reported
+ * nothing, so the console's device and app-version views were empty by construction and the
+ * version gate had no adoption data to target. `pushToken` stays nullable and unwritten — the
+ * Flutter app has no FCM integration yet, and a fabricated token would be worse than none.
+ */
 export const devices = pgTable('devices', {
  id: uuid('id').defaultRandom().primaryKey(),
- userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+ userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+ /** Stable per-install identifier from the client, so re-registration updates one row. */
+ installationId: varchar('installation_id', { length: 100 }),
  name: varchar('name', { length: 255 }),
  platform: varchar('platform', { length: 50 }),
+ platformVersion: varchar('platform_version', { length: 50 }),
+ model: varchar('model', { length: 100 }),
+ appVersion: varchar('app_version', { length: 50 }),
  pushToken: text('push_token'),
  lastSeenAt: timestamp('last_seen_at'),
  createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => [
  index('devices_user_idx').on(table.userId),
+ // An installation re-registers on every launch; this index is what lets that be an upsert
+ // rather than a new row per start.
+ uniqueIndex('devices_installation_id_idx').on(table.installationId),
 ]);
 
 // ─── Personas ───────────────────────────────────────────────────
@@ -216,6 +238,17 @@ export const conversationMessages = pgTable('conversation_messages', {
  toolResults: jsonb('tool_results'),
  model: varchar('model', { length: 50 }),
  tokenUsage: jsonb('token_usage'),
+ /**
+  * Wall-clock duration of the model call that produced this message, in milliseconds.
+  *
+  * Added because "AI latency" was reported as NOT AVAILABLE: nothing recorded how long a
+  * completion took, so the console had no figure to show and no way to detect a provider
+  * slowing down. Only assistant rows carry it — a user message is not a model call.
+  *
+  * It is the full tool loop, not a single HTTP round trip: `runAssistantToolLoop` may make
+  * several model calls, and the number a user experiences is the total.
+  */
+ durationMs: integer('duration_ms'),
  createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => [
  index('messages_conversation_idx').on(table.conversationId),
@@ -232,6 +265,12 @@ export const audioRecordings = pgTable('audio_recordings', {
  language: varchar('language', { length: 50 }),
  participants: jsonb('participants').default([]),
  status: varchar('status', { length: 50 }).default('recording').notNull(),
+ // Why a recording entered `failed`. The reaper knows the reason
+ // (`capture-abandoned`, `audio-missing-after-upload`,
+ // `audio-missing-while-processing`) but the client only ever saw `failed`.
+ // Nullable and free-form on purpose: rows that failed before this column
+ // existed have no reason, and only the writer's vocabulary is meaningful.
+ failureReason: text('failure_reason'),
  storageKey: text('storage_key').notNull(),
  storageChecksum: text('storage_checksum'),
  consentRecorded: boolean('consent_recorded').default(false).notNull(),
@@ -305,6 +344,10 @@ export const memories = pgTable('memories', {
 }, (table) => [
  index('memories_user_idx').on(table.userId),
  index('memories_status_idx').on(table.status),
+ // Bounds `content ILIKE '%term%'`. A leading wildcard can never use btree,
+ // and "contains" semantics inherently require it, so only a trigram index
+ // (pg_trgm) narrows the scan.
+ index('memories_content_trgm_idx').using('gin', table.content.op('gin_trgm_ops')),
 ]);
 
 // ─── Memory Embeddings ──────────────────────────────────────────
@@ -313,10 +356,21 @@ export const memoryEmbeddings = pgTable('memory_embeddings', {
  id: uuid('id').defaultRandom().primaryKey(),
  memoryId: uuid('memory_id').references(() => memories.id, { onDelete: 'cascade' }).notNull().unique(),
  embedding: jsonb('embedding').notNull(), // pgvector stored as JSON array
+ // The same vector as a real `vector(1536)` value. `embedding` is jsonb, so no
+ // ANN index can exist on it; this column is what the HNSW index below is
+ // built on. Nullable because rows written before this column existed have no
+ // vector, and the writer is free to fill it lazily.
+ embeddingVec: vector('embedding_vec', { dimensions: 1536 }),
  model: varchar('model', { length: 100 }).notNull(),
  dimensions: integer('dimensions').notNull(),
  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+}, (table) => [
+ // HNSW + cosine, matching the normalised embedding geometry. `m` and
+ // `ef_construction` are the pgvector defaults made explicit.
+ index('memory_embeddings_embedding_hnsw_idx')
+  .using('hnsw', table.embeddingVec.op('vector_cosine_ops'))
+  .with({ m: 16, ef_construction: 64 }),
+]);
 
 // ─── Tasks ──────────────────────────────────────────────────────
 
@@ -340,11 +394,21 @@ export const tasks = pgTable('tasks', {
  source: varchar('source', { length: 50 }).default('manual').notNull(),
  tags: jsonb('tags').default([]),
  aiConfidence: integer('ai_confidence'),
+ // Create-idempotency identity: a hash of (user, normalised title, 60-second
+ // window bucket), or of (user, caller-supplied idempotency key). NULL for rows
+ // written before the column existed and for writers that do not supply one
+ // (the migration's BEFORE INSERT trigger fills it in for those).
+ dedupeKey: varchar('dedupe_key', { length: 64 }),
  createdAt: timestamp('created_at').defaultNow().notNull(),
  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => [
  index('tasks_user_idx').on(table.userId),
  index('tasks_status_idx').on(table.status),
+ // The create path is `INSERT ... ON CONFLICT (dedupe_key) DO UPDATE`, so this
+ // index is what makes two concurrent identical creates produce one row. It is
+ // a plain unique index, not a partial one: Postgres treats NULLs as distinct,
+ // so rows written without a key never collide.
+ uniqueIndex('tasks_dedupe_key_idx').on(table.dedupeKey),
 ]);
 
 // ─── Reminders ──────────────────────────────────────────────────
@@ -362,9 +426,61 @@ export const reminders = pgTable('reminders', {
  sourceAudit: text('source_audit'),
  dismissed: boolean('dismissed').default(false).notNull(),
  triggeredAt: timestamp('triggered_at'),
+ // Create-idempotency identity. Expected values (see
+ // services/api/src/services/create-dedupe.ts):
+ //   * no idempotency key  — md5(user | normalised title | trigger_at | window bucket)
+ //   * idempotency key     — md5(user | 'idem' | key)
+ // The bucket is the current 60-second window, which is what keeps a genuine
+ // repeat ("Call Kumar" today at 10:00 and again tomorrow at 10:00) from being
+ // absorbed: the trigger instants differ, so the keys differ.
+ dedupeKey: varchar('dedupe_key', { length: 64 }),
  createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => [
  index('reminders_user_trigger_idx').on(table.userId, table.triggerAt),
+ // See the matching comment on `tasks_dedupe_key_idx`.
+ uniqueIndex('reminders_dedupe_key_idx').on(table.dedupeKey),
+]);
+
+// ─── Reminder Events ────────────────────────────────────────────
+
+/**
+ * The exact record of a reminder being moved.
+ *
+ * `reminders` has no history: it holds the current `trigger_at` only, and
+ * `reminders.triggered_at` is never written by anything, so before this table
+ * "this reminder was pushed back more than once" could only count the
+ * push-backs NOVA happened to witness in its own process memory.
+ *
+ * A journal answers both halves of the question the follow-up engine asks —
+ * *how many* times, and *when* — which a `revision` counter cannot: a counter
+ * gives the count but throws away the timestamps and the from→to pairs.
+ *
+ * Rows are written by the `reminders_trigger_at_change` trigger installed in
+ * the matching `drizzle/0004_*.sql`, not by application code. Every writer that
+ * updates `reminders.trigger_at` — `PATCH /reminders/:id` and the assistant's
+ * `update_reminder`, both of which are a plain single-row `UPDATE` — is
+ * captured automatically, so no service change is required to populate it.
+ *
+ * `onDelete: 'cascade'` matches the rest of the schema (a reminder is owned by
+ * its user, and every reminder row cascades when the user is deleted): a
+ * deletion makes the question moot, and orphan history is worse than no
+ * history.
+ */
+export const reminderEvents = pgTable('reminder_events', {
+ id: uuid('id').defaultRandom().primaryKey(),
+ reminderId: uuid('reminder_id').references(() => reminders.id, { onDelete: 'cascade' }).notNull(),
+ userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+ // 'postponed' when `trigger_at` moved later, 'rescheduled_earlier' when it
+ // moved earlier. Free-form text rather than an enum: adding a value must not
+ // need a type migration.
+ event: varchar('event', { length: 50 }).notNull(),
+ fromTriggerAt: timestamp('from_trigger_at'),
+ toTriggerAt: timestamp('to_trigger_at'),
+ occurredAt: timestamp('occurred_at').defaultNow().notNull(),
+}, (table) => [
+ // "How many times was this reminder postponed, and when" reads exactly this
+ // way: filter by reminder, order by time.
+ index('reminder_events_reminder_occurred_idx').on(table.reminderId, table.occurredAt),
 ]);
 
 // ─── Notifications ──────────────────────────────────────────────

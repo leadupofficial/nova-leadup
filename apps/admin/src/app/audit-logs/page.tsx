@@ -2,16 +2,7 @@
  * LEA-021 — Admin Audit Logs page
  */
 
-import { listAuditLogs, type AdminAuditLog } from '../../lib/api';
-
-async function getLogs(params: Record<string, string | number>) {
- try {
- const result = await listAuditLogs({ ...params });
- return result;
- } catch {
- return null;
- }
-}
+import { requestListPage, type AdminAuditLog } from '../../lib/api';
 
 const OUTCOME_COLORS: Record<string, { bg: string; color: string; border: string }> = {
  success: { bg: '#ecfdf5', color: '#059669', border: '#a7f3d0' },
@@ -19,11 +10,37 @@ const OUTCOME_COLORS: Record<string, { bg: string; color: string; border: string
  denied: { bg: '#fffbeb', color: '#d97706', border: '#fde68a' },
 };
 
+import { loadPage } from '../../lib/page-data';
+import { PageError } from '../../components/PageError';
+
 export default async function AuditLogsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
 	const resolved = await searchParams;
 	const actionFilter = typeof resolved.action === 'string' ? resolved.action : '';
-	const result = await getLogs({ action: actionFilter, limit: 50 });
-	const logs: AdminAuditLog[] = result ?? [];
+	const result = await loadPage<AdminAuditLog>(() =>
+		requestListPage<AdminAuditLog>('/admin/audit-logs', {
+			pageSize: 50,
+			...(actionFilter ? { action: actionFilter } : {}),
+		}),
+	);
+	const logs: AdminAuditLog[] = result.ok ? result.rows : [];
+
+ if (!result.ok) {
+ // Failure and emptiness must never look the same: a 401 used to render
+ // the empty-state row, which reads as "you have no data".
+ return (
+ <div>
+ <div style={{ marginBottom: '1.5rem' }}>
+ <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>Audit Logs</h1>
+ </div>
+ <PageError
+ title="Could not load audit logs"
+ message={result.message}
+ status={result.status}
+ retryHref="/audit-logs"
+ />
+ </div>
+ );
+ }
 
  return (
  <div>
@@ -79,7 +96,16 @@ export default async function AuditLogsPage({ searchParams }: { searchParams: Pr
  </thead>
  <tbody>
  {logs.map((log) => {
- const colors = OUTCOME_COLORS[log.outcome as keyof typeof OUTCOME_COLORS]!;
+ // Fallback rather than a non-null assertion: `outcome` is a varchar(50) with the
+// allowed values only in a schema comment, so a fourth value from the database
+// turned this row into `undefined.bg` and threw. A neutral badge is the honest
+// rendering of an outcome this console does not know.
+ const colors =
+ OUTCOME_COLORS[log.outcome as keyof typeof OUTCOME_COLORS] ?? {
+ bg: '#f9fafb',
+ color: '#6b7280',
+ border: '#e5e7eb',
+ };
  return (
  <tr key={log.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
  <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#6b7280', whiteSpace: 'nowrap' }}>

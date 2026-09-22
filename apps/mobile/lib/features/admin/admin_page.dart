@@ -49,7 +49,11 @@ class AdminPage extends ConsumerWidget {
   }
 }
 
-/// `.top-bar` — back button, `h1`, and the `V2 · Beta` pill.
+/// `.top-bar` — back button, `h1`, and the build label.
+///
+/// The design's pill read `V2 · Beta`. A "Beta" badge in a production binary is the
+/// kind of copy App Review 2.2 asks about, and it was simply untrue of this build, so
+/// it now names the release instead.
 class _AdminTopBar extends StatelessWidget {
   const _AdminTopBar();
 
@@ -85,6 +89,11 @@ class _AdminTopBar extends StatelessWidget {
 }
 
 /// `.tab-pill`.
+/// Shown in the admin console's top bar. Kept in step with `pubspec.yaml`'s
+/// `version:` by hand — the app has no `package_info_plus` dependency, and adding a
+/// plugin to print a version string is not worth the platform surface.
+const String _kBuildLabel = 'v1.0.0';
+
 class _BetaPill extends StatelessWidget {
   const _BetaPill();
 
@@ -99,7 +108,7 @@ class _BetaPill extends StatelessWidget {
         border: Border.all(color: c.accent.withValues(alpha: 0.3)),
       ),
       child: Text(
-        'V2 · Beta',
+        _kBuildLabel,
         style: NovaTheme.statusPill(c).copyWith(color: c.accent),
       ),
     );

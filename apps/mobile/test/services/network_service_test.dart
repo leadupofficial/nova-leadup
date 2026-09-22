@@ -215,13 +215,13 @@ void main() {
       );
     });
 
-    test('sendTimeout is retried, then throws NetworkTimeoutException',
+    test('a sendTimeout on POST is NOT retried, because a repeat can duplicate the write',
         () async {
       final service = NetworkService(
         dio: dio,
         networkInfo: info,
         retryConfig: const RetryConfig(
-          maxAttempts: 2,
+          maxAttempts: 3,
           initialDelay: Duration(milliseconds: 1),
         ),
       );
@@ -238,10 +238,52 @@ void main() {
         type: DioExceptionType.sendTimeout,
       ));
 
-      expect(
+      await expectLater(
         () => service.post('/upload', data: {}),
         throwsA(isA<NetworkException>()),
       );
+
+      // One attempt only: the request may already have been applied server-side.
+      verify(() => dio.post(
+            any(),
+            data: any(named: 'data'),
+            queryParameters: any(named: 'queryParameters'),
+            options: any(named: 'options'),
+            cancelToken: any(named: 'cancelToken'),
+          )).called(1);
+    });
+
+    test('a 500 on GET IS retried up to the configured attempts', () async {
+      final service = NetworkService(
+        dio: dio,
+        networkInfo: info,
+        retryConfig: const RetryConfig(
+          maxAttempts: 3,
+          initialDelay: Duration(milliseconds: 1),
+        ),
+      );
+
+      var calls = 0;
+      final opts = buildOpts(method: 'GET', path: '/users');
+      when(() => dio.get(
+            any(),
+            queryParameters: any(named: 'queryParameters'),
+            options: any(named: 'options'),
+            cancelToken: any(named: 'cancelToken'),
+          )).thenAnswer((_) async {
+        calls++;
+        throw DioException(
+          requestOptions: opts,
+          type: DioExceptionType.badResponse,
+          response: Response(requestOptions: opts, statusCode: 500),
+        );
+      });
+
+      await expectLater(
+        () => service.get('/users'),
+        throwsA(isA<NetworkException>()),
+      );
+      expect(calls, 3);
     });
   });
 

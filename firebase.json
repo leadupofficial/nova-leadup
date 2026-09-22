@@ -1,0 +1,20 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "nova-leadup-stagging",
+          "appId": "1:386562103255:android:1ed355528b54d97aab9d92",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "ios": {
+        "default": {
+          "projectId": "nova-leadup-stagging",
+          "appId": "1:386562103255:ios:7366adf0e9af25a6ab9d92",
+          "fileOutput": "ios/Runner/GoogleService-Info.plist"
+        }
+      }
+    }
+  }
+}

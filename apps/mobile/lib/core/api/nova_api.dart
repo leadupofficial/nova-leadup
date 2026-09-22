@@ -1,7 +1,7 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
@@ -267,15 +267,106 @@ class NovaApi {
 
   // ─── Reminders ────────────────────────────────────────────────────────────
 
-  Future<List<NovaReminder>> listReminders({int limit = 50}) async {
-    final data = await _get(ApiConfig.reminders, query: {'limit': limit});
-    if (data is List) {
-      return data
-          .whereType<Map>()
-          .map((m) => NovaReminder.fromJson(Map<String, dynamic>.from(m)))
-          .toList();
+  /// One page of reminders, plus the cursor for the next one.
+  ///
+  /// `GET /api/v1/reminders` is cursor-paginated: it answers
+  /// `{reminders, pagination: {nextCursor, prevCursor, hasMore, total}}`. This used
+  /// to be the whole client surface, with a default limit of 50 and no cursor —
+  /// so a user with 51 reminders had a "list" that was missing one, and the
+  /// reconciler read that absence as a deletion and cancelled the alarm.
+  Future<NovaReminderPage> listReminderPage({
+    int limit = 50,
+    String? cursor,
+  }) async {
+    final data = await _get(
+      ApiConfig.reminders,
+      query: {'limit': limit, 'cursor': ?cursor},
+    );
+
+    final reminders = data is List
+        ? data
+              .whereType<Map>()
+              .map((m) => NovaReminder.fromJson(Map<String, dynamic>.from(m)))
+              .toList()
+        : _list(data, 'reminders', NovaReminder.fromJson);
+
+    final pagination = data is Map
+        ? _asMap(data['pagination'])
+        : const <String, dynamic>{};
+
+    // `hasMore` alone is not enough: a next page without a cursor to reach it is
+    // the same as no next page, and treating it as one would loop.
+    String? nextCursor;
+    if (pagination['hasMore'] == true) {
+      final next = pagination['nextCursor'];
+      if (next is String && next.isNotEmpty) nextCursor = next;
     }
-    return _list(data, 'reminders', NovaReminder.fromJson);
+
+    return NovaReminderPage(
+      reminders: reminders,
+      nextCursor: nextCursor,
+      hasMore: nextCursor != null,
+    );
+  }
+
+  /// Every reminder the account has, by following the server's cursor.
+  ///
+  /// [maxPages] bounds the loop so a server that never runs out of pages cannot
+  /// hang a sync. Two further guards exist because a bad cursor must not become an
+  /// infinite one: a page that returns nothing new stops the walk, and a cursor
+  /// that does not change stops it too.
+  ///
+  /// A failure **after** the first page is not thrown: the pages already read are
+  /// returned with `complete: false`, because a partial list is still worth
+  /// scheduling from and the caller must be able to tell that it is partial. A
+  /// failure on the *first* page is thrown, since there is nothing to reconcile and
+  /// a sync that quietly did nothing would be worse than one that reports an error.
+  Future<NovaReminderList> listAllReminders({
+    int limit = 50,
+    int maxPages = 40,
+  }) async {
+    final all = <NovaReminder>[];
+    final seen = <String>{};
+    String? cursor;
+
+    for (var page = 0; page < maxPages; page++) {
+      final NovaReminderPage result;
+      try {
+        result = await listReminderPage(limit: limit, cursor: cursor);
+      } catch (error) {
+        if (page == 0) rethrow;
+        debugPrint(
+          '[NovaApi] reminder page ${page + 1} failed; returning an incomplete list '
+          'so nothing is cancelled on the strength of it: $error',
+        );
+        return NovaReminderList(reminders: all, complete: false);
+      }
+
+      final before = seen.length;
+      for (final reminder in result.reminders) {
+        if (seen.add(reminder.id)) all.add(reminder);
+      }
+
+      if (!result.hasMore || result.nextCursor == null) {
+        return NovaReminderList(reminders: all, complete: true);
+      }
+      if (seen.length == before || result.nextCursor == cursor) {
+        // The server repeated a page or handed back the cursor it was given.
+        // Walking on would loop until `maxPages` for no new data.
+        debugPrint(
+          '[NovaApi] reminder pagination did not advance; stopping with an '
+          'incomplete list',
+        );
+        return NovaReminderList(reminders: all, complete: false);
+      }
+      cursor = result.nextCursor;
+    }
+
+    debugPrint(
+      '[NovaApi] reminder pagination hit the $maxPages-page bound; returning an '
+      'incomplete list',
+    );
+    return NovaReminderList(reminders: all, complete: false);
   }
 
   /// Creates a reminder.
@@ -320,6 +411,25 @@ class NovaApi {
   }
 
   Future<void> deleteReminder(String id) => _delete(ApiConfig.reminder(id));
+
+  /// Reports that the user opened this reminder's notification.
+  ///
+  /// This is the only delivery signal the platform offers: Android arms the alarm and
+  /// fires it with the app closed, so nothing in Dart observes the firing itself,
+  /// whereas a tap wakes the app. The server records it as an *acknowledgement* — see
+  /// `reminders.triggered_at` and migration 0010 — and counts each reminder once, so
+  /// calling this twice is harmless.
+  ///
+  /// Returns the instant the server recorded, or `null` when it had already recorded
+  /// an acknowledgement (which is a success, not a failure).
+  Future<DateTime?> acknowledgeReminder(String id) async {
+    final data = await _post(
+      ApiConfig.reminderAcknowledge(id),
+      const <String, dynamic>{},
+    );
+    final recorded = _object(data)['triggeredAt'];
+    return recorded is String ? DateTime.tryParse(recorded) : null;
+  }
 
   // ─── Voice ────────────────────────────────────────────────────────────────
 
@@ -736,6 +846,46 @@ class NovaApi {
     return NovaConsentRecord.fromJson(_object(data));
   }
 
+  // ─── AI content reporting ─────────────────────────────────────────────────
+
+  /// Files a report about an AI reply.
+  ///
+  /// Play's AI-Generated Content policy requires an in-app way to report offensive
+  /// model output without leaving the app; this is the client half of it. The
+  /// server records the report in the audit trail rather than storing the reply
+  /// text again.
+  Future<void> reportAiResponse({
+    required String messageId,
+    required String reason,
+    String? excerpt,
+  }) async {
+    await _post(ApiConfig.aiReports, {
+      'messageId': messageId,
+      'reason': reason,
+      'excerpt': ?excerpt,
+    });
+  }
+
+  // ─── Account deletion ─────────────────────────────────────────────────────
+
+  /// What deleting this account will remove, for the confirmation screen.
+  Future<NovaDeletionPreview> deletionPreview() async {
+    final data = await _get(ApiConfig.accountDeletionPreview);
+    return NovaDeletionPreview.fromJson(_object(data));
+  }
+
+  /// Permanently deletes the account and everything in it.
+  ///
+  /// [password] is required whenever the account has one; the server returns 400
+  /// `PASSWORD_REQUIRED` otherwise. `confirm` must be the literal `DELETE`.
+  Future<void> deleteAccount({String? password, String? reason}) async {
+    await _deleteWithBody(ApiConfig.account, {
+      'confirm': 'DELETE',
+      'password': ?password,
+      'reason': ?reason,
+    });
+  }
+
   // ─── Transport helpers ────────────────────────────────────────────────────
 
   Future<dynamic> _get(String url, {Map<String, dynamic>? query}) =>
@@ -767,12 +917,27 @@ class NovaApi {
       url,
       data: bytes,
       queryParameters: query,
-      options: Options(headers: {'Content-Type': mimeType}),
+      // dio budgets `sendTimeout` over the **whole** body write, and the client's
+      // default is 10 seconds, so a multi-minute recording could never finish
+      // uploading on anything but a fast link. `Duration.zero` disables that budget
+      // (dio only arms the timeout when it is greater than zero); the connect and
+      // receive timeouts still apply, so a dead server still fails promptly.
+      options: Options(
+        headers: {'Content-Type': mimeType},
+        sendTimeout: Duration.zero,
+      ),
     ),
   );
 
   Future<void> _delete(String url) async {
     await _guard(() => _network.delete<dynamic>(url));
+  }
+
+  /// A DELETE that carries a JSON body, needed for account deletion: the server
+  /// requires `confirm: "DELETE"` (and the password when one is set) so an
+  /// accidental or replayed call cannot destroy an account.
+  Future<void> _deleteWithBody(String url, Map<String, dynamic> body) async {
+    await _guard(() => _network.delete<dynamic>(url, data: body));
   }
 
   /// Returns the unwrapped `data` payload (object or list).

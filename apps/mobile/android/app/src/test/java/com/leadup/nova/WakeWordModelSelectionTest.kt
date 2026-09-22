@@ -5,7 +5,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * JVM unit tests for which wake-word classifier the service listens for.
+ * JVM unit tests for which wake word the service listens for.
  *
  * `WakeWordModelSelection` is deliberately free of Android dependencies, so this
  * runs on a plain JVM — no device, no emulator, no microphone. It pins the
@@ -25,9 +25,9 @@ class WakeWordModelSelectionTest {
 
     @Test
     fun `a single installed classifier is always the one selected`() {
-        // This is the shipped build: `models.json` lists only `hey_jarvis`. No
-        // stored choice, a stale one, or a blank one all resolve to it — the
-        // service never listens for a phrase whose asset is absent.
+        // The single-entry case, which is the shape of any build with one installed
+        // wake word. No stored choice, a stale one, or a blank one all resolve to
+        // it — the service never listens for a phrase whose asset is absent.
         assertEquals("hey_jarvis", WakeWordModelSelection.resolve(null, listOf("hey_jarvis")))
         assertEquals("hey_jarvis", WakeWordModelSelection.resolve("hey_nova", listOf("hey_jarvis")))
         assertEquals("hey_jarvis", WakeWordModelSelection.resolve("", listOf("hey_jarvis")))

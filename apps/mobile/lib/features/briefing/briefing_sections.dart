@@ -266,8 +266,8 @@ class BriefingScheduleCard extends StatelessWidget {
               padding: const EdgeInsets.all(NovaSpace.sm),
               child: Text(
                 'Android did not grant exact alarms, so the briefing may arrive '
-                'a few minutes late. Grant "Alarms & reminders" to make it '
-                'punctual.',
+                'a few minutes late. Open Reminders and tap Continue to allow '
+                '"Alarms & reminders" and make it punctual.',
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall!.copyWith(color: c.warning),

@@ -18,15 +18,21 @@
 import { type ReactNode, useEffect, useState, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import AdminSidebar from '../app/AdminSidebar';
+import type { MyPermissions } from '../lib/api';
 
 const TOKEN_KEY = 'admin_token';
 const REFRESH_TOKEN_KEY = 'admin_refresh_token';
 
 // Roles allowed to access the admin panel
-const ALLOWED_ROLES = new Set(['owner', 'admin']);
+// Mirrors `PLATFORM_ROLE_MAP` in services/api/src/admin/permissions.ts. The server is
+// the authority — it resolves the role to a permission set and answers 403 per route —
+// but the edge and client gates should not bounce a legitimate support or read-only
+// operator before they can reach a page their role permits.
+const ALLOWED_ROLES = new Set<string>(['owner', 'admin', 'superadmin', 'super_admin', 'platform_admin', 'support', 'support_admin', 'operations', 'operations_admin', 'analytics', 'analytics_admin', 'developer', 'read_only', 'readonly']);
 
-// Token refresh endpoint
-const REFRESH_PATH = '/auth/refresh';
+// The refresh path is `/auth/refresh` relative to the API base; it is inlined in
+// `attemptRefresh` because the base is resolved at call time. The module-level
+// constant that used to sit here was dead code.
 
 // ---------------------------------------------------------------------------
 // JWT helpers (no external deps)
@@ -103,7 +109,8 @@ export function readRefreshToken(): string | null {
  * /login, where the middleware still saw the cookie, treated the visitor as
  * authenticated, and redirected straight back to /. Logout silently did nothing.
  */
-import { clearTokens } from '../lib/api';
+import { clearTokens, writeTokens } from '../lib/api';
+import { getPublicEnv } from '../lib/env';
 
 export { clearTokens };
 
@@ -122,13 +129,20 @@ interface AdminAuthGuardProps {
  children: ReactNode;
  /** Override the set of allowed roles (default: owner, admin) */
  allowedRoles?: string[];
+ /**
+ * What the **server** says this operator may do, resolved in the root layout for this page load.
+ *
+ * Passed down rather than fetched here: the console's API calls are server-side, and asking from the
+ * browser is blocked by CORS and would leave the navigation wrong until a round trip finished.
+ */
+ authority?: MyPermissions | null;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuardProps) {
+export default function AdminAuthGuard({ children, allowedRoles, authority }: AdminAuthGuardProps) {
  const router = useRouter();
  const pathname = usePathname();
  const [state, setState] = useState<AuthState>({ status: 'loading' });
@@ -140,7 +154,17 @@ export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuar
  * the same spinner again. The server HTML for the page was literally
  * "NOVA Admin Verifying session…" with no <form> or <input> in it at all.
  */
- const isPublicRoute = pathname === '/login';
+ // `/privacy`, `/delete-account` and `/support` are exempt for a different reason:
+ // they are the public URLs both app stores require (policy link, deletion resource,
+ // Support URL). Play's account-deletion requirement says the
+ // web resource must be reachable **without reinstalling the app** — by anyone,
+ // signed in or not. `src/middleware.ts` already lets them through the edge gate, but
+ // this guard is the layer that actually renders the page, so leaving them out here
+ // produced a 200 whose body was the spinner and whose visible content (once JS ran)
+ // was a redirect to /login: a policy URL that looks live to a crawler and dead to a
+ // reviewer.
+ const PUBLIC_ROUTES = new Set(['/login', '/privacy', '/delete-account', '/support']);
+ const isPublicRoute = PUBLIC_ROUTES.has(pathname);
 
  const roles = allowedRoles
  ? new Set(allowedRoles)
@@ -151,7 +175,11 @@ export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuar
  if (!refreshToken) return false;
 
  try {
- const base = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:3000';
+ // `getPublicEnv()` rather than a bare `process.env` read: the base must carry the
+ // `/api/v1` prefix that every other call site relies on, and a hard-coded
+ // `http://localhost:3000` fallback sent the refresh to a host that is not the API
+ // in any environment. This path previously disagreed with `lib/api.ts` about both.
+ const base = getPublicEnv().NEXT_PUBLIC_API_BASE.replace(/\/+$/, '');
  const res = await fetch(`${base}/auth/refresh`, {
  method: 'POST',
  headers: {
@@ -170,11 +198,13 @@ export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuar
  const newToken = payload?.access_token ?? payload?.accessToken;
  if (!newToken) return false;
 
- window.localStorage.setItem(TOKEN_KEY, newToken);
  const newRefresh = payload?.refresh_token ?? payload?.refreshToken;
- if (newRefresh) {
- window.localStorage.setItem(REFRESH_TOKEN_KEY, newRefresh);
- }
+ // `writeTokens`, not a local assignment: it is the single place that keeps
+ // localStorage, the refresh token and the `admin_token` COOKIE in step. Writing
+ // only localStorage left the middleware reading the expired cookie on the next
+ // navigation, so a refresh that had just succeeded bounced the operator straight
+ // back to /login — which then deleted the cookie it had just failed to read.
+ writeTokens(newToken, newRefresh);
  return true;
  } catch {
  return false;
@@ -364,7 +394,7 @@ export default function AdminAuthGuard({ children, allowedRoles }: AdminAuthGuar
  return (
  <AuthenticatedProvider payload={state.payload}>
  <div style={{ display: 'flex', minHeight: '100vh' }}>
- <AdminSidebar />
+ <AdminSidebar authority={authority ?? null} />
  <main style={{ flex: 1, padding: '2rem', overflow: 'auto', marginLeft: '240px' }}>{children}</main>
  </div>
  </AuthenticatedProvider>

@@ -1,5 +1,5 @@
 /**
- * NOVA API — AI utility routes (summarize, embeddings, model catalogue).
+ * NOVA API — AI utility routes (summarize, embeddings, model catalogue, reporting).
  *
  * These are thin, authenticated wrappers over `services/ai.js`. The heavy
  * lifting (guardrails, PII redaction, timeouts, provider init) lives there.
@@ -10,9 +10,18 @@ import { HttpError } from '../middleware/error-handler.js';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { logger } from '../utils/logger.js';
-import { chatCompletion, generateEmbedding, type ChatMessage } from '../services/ai.js';
-import { toAssistantError } from '../services/assistant.js';
-import { AISummarizeSchema, AIEmbedSchema } from '../schemas/index.js';
+import { getDb } from '../db/connection.js';
+import { auditLogs } from '@nova/database';
+import {
+	chatCompletion,
+	defaultMaxOutputTokens,
+	embeddingsAvailable,
+	generateEmbedding,
+	EMBEDDING_MODEL,
+	type ChatMessage,
+} from '../services/ai.js';
+import { toAssistantError, assistantErrorStatus } from '../services/assistant.js';
+import { AISummarizeSchema, AIEmbedSchema, AIReportSchema } from '../schemas/index.js';
 
 const router: ReturnType<typeof Router> = Router();
 
@@ -59,8 +68,11 @@ function isModelAvailable(model: (typeof CHAT_MODELS)[number]): boolean {
 
 function providerHttpError(err: unknown, fallbackMessage: string): HttpError {
 	const assistantError = toAssistantError(err);
-	const status = assistantError.code === 'AI_NOT_CONFIGURED' ? 503 : 502;
-	return new HttpError(status, assistantError.message || fallbackMessage, assistantError.code);
+	return new HttpError(
+		assistantErrorStatus(assistantError.code),
+		assistantError.message || fallbackMessage,
+		assistantError.code,
+	);
 }
 
 // POST /ai/summarize — summarize text with the chat model.
@@ -78,7 +90,7 @@ router.post('/summarize', authenticate, validate(AISummarizeSchema), async (req:
 		try {
 			completion = await chatCompletion(messages, {
 				systemPrompt: `You summarize text for NOVA, a personal AI companion. Return only the summary, with no preamble.${lengthInstruction}`,
-				maxTokens: 1024,
+				maxTokens: defaultMaxOutputTokens(),
 				temperature: 0.3,
 			});
 		} catch (aiErr) {
@@ -113,13 +125,12 @@ router.post('/embed', authenticate, validate(AIEmbedSchema), async (req: Authent
 	try {
 		const body = (req as any).validatedBody as z.infer<typeof AIEmbedSchema>;
 
-		// NOTE: `generateEmbedding()` is itself a documented no-op today — it returns
-		// `{ embedding: [], dimensions: 0 }` because the Anthropic SDK has no
-		// embeddings endpoint and no other provider is wired into services/ai.js.
-		// This route now calls the real function rather than fabricating a vector, and
-		// reports `available: false` so clients can detect the gap.
+		// `generateEmbedding()` reports availability explicitly. It used to return
+		// `{ embedding: [], dimensions: 0 }` for every input, which this route could
+		// only distinguish by inspecting the length — the same shape a real
+		// zero-dimension success would have had.
 		const result = await generateEmbedding(body.text);
-		const available = result.dimensions > 0 && result.embedding.length > 0;
+		const available = result.available;
 
 		logger.info({ userId: req.user!.id, dimensions: result.dimensions, available }, 'AI embed');
 
@@ -128,6 +139,9 @@ router.post('/embed', authenticate, validate(AIEmbedSchema), async (req: Authent
 			embedding: result.embedding,
 			dimensions: result.dimensions,
 			available,
+			// Only present when there is no vector, so a client can say *why*
+			// instead of guessing.
+			...(result.available ? {} : { reason: result.reason }),
 		});
 	} catch (err) { next(err); }
 });
@@ -148,11 +162,55 @@ router.get('/models', authenticate, (_req, res) => {
 		success: true,
 		models,
 		embeddings: {
-			available: false,
-			// Mirrors the comment on generateEmbedding() in services/ai.js.
-			reason: 'No embeddings provider is configured; the Anthropic SDK exposes no embeddings endpoint.',
+			// Derived, not hard-coded: this said `available: false` unconditionally,
+			// which would become a lie the moment a key was configured.
+			available: embeddingsAvailable(),
+			// Mirrors the reason `generateEmbedding()` reports in the same condition.
+			reason: embeddingsAvailable()
+				? `Embeddings are served by ${EMBEDDING_MODEL}.`
+				: 'No embeddings provider is configured; the Anthropic SDK exposes no embeddings endpoint.',
 		},
 	});
+});
+
+// POST /ai/reports — in-app reporting of an offensive or unsafe AI reply.
+//
+// Google Play's AI-Generated Content policy requires apps that generate content with
+// AI to provide in-app reporting "without needing to exit the app", and App Review
+// Guideline 1.2 asks for the same for apps that surface generated content. The report
+// lands in `audit_logs` rather than a new table: it is an accountability record, not
+// user content, and `audit_logs` already carries actor, target, outcome and a free-form
+// `details` payload.
+//
+// The excerpt is capped at 500 characters by the schema. A report must not become a
+// second copy of the conversation.
+router.post('/reports', authenticate, validate(AIReportSchema), async (req: AuthenticatedRequest, res, next) => {
+	try {
+		const body = (req as any).validatedBody as z.infer<typeof AIReportSchema>;
+		const db = getDb();
+
+		await db.insert(auditLogs).values({
+			userId: req.user!.id,
+			actorType: 'user',
+			actorId: req.user!.id,
+			action: 'ai.response.reported',
+			targetType: 'message',
+			targetId: body.messageId,
+			outcome: 'success',
+			details: {
+				reason: body.reason,
+				excerpt: body.excerpt ?? null,
+				reportedFrom: 'app',
+			},
+		});
+
+		logger.info(
+			{ userId: req.user!.id, messageId: body.messageId, reason: body.reason },
+			'AI response reported',
+		);
+
+		res.status(201).json({ success: true, data: { recorded: true } });
+	} catch (err) { next(err); }
 });
 
 export { router as aiRoutes };

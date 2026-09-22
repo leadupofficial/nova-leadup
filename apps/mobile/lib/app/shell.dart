@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../core/design/widgets/index.dart';
 import '../features/overlay/floating_overlay.dart';
+import '../features/overlay/summon_hint.dart';
 import '../features/tasks/reminder_composer.dart';
 
 /// Bottom-navigation shell for the authenticated app.
@@ -65,17 +66,52 @@ class NovaShell extends StatelessWidget {
       // app, not one tab, so it is mounted here rather than per screen. Its
       // primary action keeps the overlay's own voice behaviour (onAskNova is
       // left null on purpose); the action chips route to real destinations.
-      body: Stack(
+      //
+      // The assistant's sentence is chrome *around* the screen, not a coat of
+      // paint *over* it. It used to be a `Positioned(bottom: 8)` inside
+      // [FloatingOverlay], which is a `Positioned.fill` mounted ABOVE
+      // `navigationShell` in the stack below. So the sentence painted last, on
+      // top of whatever the current screen's body ended with — and a body is the
+      // screen's whole scroll viewport.
+      //
+      // Measured on the OnePlus 9R: the sentence sat at y≈2080 of 2400 while the
+      // Home scroll viewport still extended ~30 logical pixels past it, so the
+      // sentence ran across the *Today's Overview* cards, which were in turn
+      // clipped by the viewport's bottom edge.
+      //
+      // A `Column` is what makes that impossible rather than merely invisible:
+      // the sentence is a sibling of the screen now, laid out underneath it. The
+      // screen's `Expanded` slot — and therefore its scroll viewport — ends where
+      // the sentence begins, at every viewport height and on every device, and
+      // no amount of content can push the cards under it.
+      body: Column(
         children: [
-          navigationShell,
-          // FloatingOverlay already fills and positions itself, and only its
-          // orb captures taps, so it can sit directly in this stack. Do not wrap
-          // it in another Positioned.fill.
+          Expanded(
+            child: Stack(
+              children: [
+                navigationShell,
+                // FloatingOverlay already fills and positions itself, and only
+                // its orb captures taps, so it can sit directly in this stack. Do
+                // not wrap it in another Positioned.fill.
+                if (_showOverlay)
+                  FloatingOverlay(
+                    onTranslate: () => context.push('/translate'),
+                    onReminder: () => ReminderComposer.show(context),
+                    onTask: () => navigationShell.goBranch(2),
+                  ),
+              ],
+            ),
+          ),
           if (_showOverlay)
-            FloatingOverlay(
-              onTranslate: () => context.push('/translate'),
-              onReminder: () => ReminderComposer.show(context),
-              onTask: () => navigationShell.goBranch(2),
+            Semantics(
+              button: true,
+              label: 'Summon NOVA',
+              child: SummonHint(
+                // Same destination as the orb and Home's "Tap to talk", so the
+                // promise the sentence makes ("tap avatar to summon") is
+                // reachable by tapping the sentence too.
+                onTap: () => context.go('/converse'),
+              ),
             ),
         ],
       ),

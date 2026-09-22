@@ -1,5 +1,7 @@
 #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
-#include: "Flutter/Generated.xcconfig"
+// See Debug.xcconfig — the `#include:` colon made this unparseable, so no release
+// build ever had FLUTTER_ROOT.
+#include "Generated.xcconfig"
 FLUTTER_BUILD_MODE=release
 FLUTTER_BUILD_NAME=1.0.0
 FLUTTER_BUILD_NUMBER=1

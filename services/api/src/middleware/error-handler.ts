@@ -22,6 +22,23 @@ export class HttpError extends Error implements AppError {
  }
 }
 
+/**
+ * 5xx codes whose message is written for the user and is safe to surface.
+ *
+ * Keep this list as short as it is: a code belongs here only when the message
+ * is authored in this repository (never an upstream body), names a condition
+ * the user can understand, and would leave the client with nothing to say if it
+ * were replaced by the generic text.
+ */
+const USER_FACING_OPERATIONAL_CODES = new Set([
+	'AI_CREDIT_EXHAUSTED',
+	// The provider answered with nothing — most often a reasoning model that
+	// spent its whole budget thinking and was cut off. The sentences live in
+	// `services/llm-wire-format.ts` and say which of the two it was, so a blank
+	// reply bubble becomes something the app can actually show.
+	'AI_EMPTY_REPLY',
+]);
+
 export function errorHandler(err: AppError, req: Request, res: Response, next: NextFunction) {
 	if (res.headersSent) return next(err);
 
@@ -39,8 +56,15 @@ export function errorHandler(err: AppError, req: Request, res: Response, next: N
 	const code = err.code || 'INTERNAL_ERROR';
 
 	// Log the full error server-side with stack trace for debugging
+	// `requestId` is included because correlation is the point of the durable log: without it a stored
+	// error line cannot be tied to the request that produced it, and `GET /control/traces/:id` — which
+	// exists precisely to answer "what happened to this request" — would show every other record and
+	// not the error. The header is read directly rather than through `req.id`, which the request-id
+	// middleware types as a local extension rather than part of Express's `Request`.
+	const requestId = (req.headers['x-request-id'] as string | undefined) ?? null;
+
 	logger.error(
-		{ err, method: req.method, path: req.path, statusCode, code },
+		{ err, method: req.method, path: req.path, statusCode, code, requestId },
 		`${req.method} ${req.path} -> ${statusCode}`
 	);
 
@@ -66,12 +90,22 @@ export function errorHandler(err: AppError, req: Request, res: Response, next: N
 	// Under NODE_ENV=test the raw message is surfaced in `detail` (the RFC 7807
 	// developer-facing field) while `title` stays generic, so a failing 5xx is
 	// debuggable from the suite. Production and every deployed environment keep
-	// the generic text; this is not a `NODE_ENV !== 'production'` escape hatch.
+	// the generic text — with the deliberate exception below.
+	//
+	// The exception exists because some 5xx are *named operational conditions*
+	// rather than an anonymous crash: "NOVA's AI credit has run out" is a
+	// message the user can act on, and sanitising it back to "An unexpected
+	// error occurred" is what left the app with nothing useful to say. Only
+	// codes listed here surface their own text, and every one of them is
+	// authored in this repository rather than derived from an upstream body —
+	// an unknown error still gets the generic wording.
 	const isTest = process.env.NODE_ENV === 'test';
-	const safeTitle = statusCode >= 500 ? 'Internal Server Error' : (err.message || 'Request failed');
-	const safeDetail = statusCode >= 500 && !isTest
-		? 'An unexpected error occurred'
-		: (err.message || 'Request failed');
+	const operational = statusCode >= 500 && USER_FACING_OPERATIONAL_CODES.has(code);
+	const safeTitle = statusCode >= 500 && !operational ? 'Internal Server Error' : (err.message || 'Request failed');
+	const safeDetail =
+		statusCode >= 500 && !isTest && !operational
+			? 'An unexpected error occurred'
+			: (err.message || 'Request failed');
 
 	const response: Record<string, unknown> = {
 		type: `https://api.nova.leadup.in/problems/${code.toLowerCase()}`,

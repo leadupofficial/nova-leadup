@@ -235,7 +235,7 @@ class _OfflinePageState extends ConsumerState<OfflinePage> {
                         const SizedBox(height: 36),
                         _Stats(online: online),
                         const SizedBox(height: 28),
-                        const _WarningBanner(),
+                        _WarningBanner(online: online),
                         const SizedBox(height: 20),
                         _RetryButton(
                           busy: _retrying,
@@ -402,8 +402,25 @@ class _StatsCard extends StatelessWidget {
   }
 }
 
+/// The advisory line under the status card.
+///
+/// This used to be a `const` widget with no inputs, so it rendered
+/// *"Rate-limited or maintenance mode. Retry later or contact support."* on
+/// **every** visit to this page — including the one it exists for, a plain loss
+/// of connectivity. Measured on the OnePlus 9R after a reboot with the API
+/// unreachable: the header said *"No connection"* and *"Live AI is unavailable —
+/// reconnect to restore conversation"* while the banner underneath told the user
+/// to contact support about a rate limit. Two contradictory diagnoses on one
+/// screen, and the wrong one sends a user with no wifi to the wrong action.
+///
+/// The page knows exactly one thing — whether it is online — so the banner now
+/// says only what that supports. The rate-limit wording is kept for the case it
+/// was written for: reachable but refusing.
 class _WarningBanner extends StatelessWidget {
-  const _WarningBanner();
+  const _WarningBanner({required this.online});
+
+  /// Whether the device currently has a usable connection to NOVA.
+  final bool online;
 
   @override
   Widget build(BuildContext context) {
@@ -425,8 +442,11 @@ class _WarningBanner extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Rate-limited or maintenance mode. Retry later or contact '
-                  'support.',
+                  online
+                      ? 'Rate-limited or maintenance mode. Retry later or '
+                            'contact support.'
+                      : 'You appear to be offline. NOVA will reconnect when '
+                            'the network is back — nothing you saved is lost.',
                   style: Theme.of(context).textTheme.bodySmall!.copyWith(
                     height: 1.4,
                     color: c.warning,

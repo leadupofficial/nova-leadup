@@ -2,7 +2,10 @@ import { Queue } from 'bullmq';
 import { ServiceHealth } from '@nova/types';
 
 const REDIS_HOST = process.env.REDIS_HOST ?? 'localhost';
-const REDIS_PORT = Number(process.env.REDIS_PORT) ?? 6379;
+// `Number(undefined)` is `NaN`, and `NaN ?? x` is `NaN` — the `??` never fired, so an
+// unset REDIS_PORT silently became NaN instead of the default port. Default the raw
+// value first, then convert.
+const REDIS_PORT = Number(process.env.REDIS_PORT ?? 6379);
 
 const connection = { host: REDIS_HOST, port: REDIS_PORT };
 

@@ -1,14 +1,17 @@
 'use client';
 
 import { type FormEvent, useState } from 'react';
-import { adminLogin } from '../../lib/api';
-import { clearTokens } from '../../components/AdminAuthGuard';
+import { adminLogin, MfaInvalidError, MfaRequiredError, writeTokens } from '../../lib/api';
 
 type FormState = 'idle' | 'loading' | 'error' | 'success';
 
 export default function LoginForm() {
  const [email, setEmail] = useState('');
  const [password, setPassword] = useState('');
+ // Revealed only once the API says this account has a second factor. Showing it always would train
+ // operators to ignore a field that does nothing for most of them.
+ const [mfaCode, setMfaCode] = useState('');
+ const [mfaRequired, setMfaRequired] = useState(false);
  const [state, setState] = useState<FormState>('idle');
  const [error, setError] = useState<string | null>(null);
 
@@ -17,18 +20,31 @@ export default function LoginForm() {
  setError(null);
  setState('loading');
  try {
- const result = await adminLogin({ email, password });
- if (typeof window !== 'undefined' && result?.accessToken) {
- window.localStorage.setItem('admin_token', result.accessToken);
- if (result.refreshToken) {
- window.localStorage.setItem('admin_refresh_token', result.refreshToken);
- }
- // Mirror token into cookie so middleware can read it at the edge
- document.cookie = `admin_token=${result.accessToken}; path=/; max-age=31536000; SameSite=Lax`;
+ const result = await adminLogin({ email, password, mfaCode: mfaCode || undefined });
+ if (result?.accessToken) {
+ // One writer for localStorage and the edge-readable cookie. This block used to
+ // assign `document.cookie` itself, for a year and without `Secure`, which
+ // contradicted the 1-hour/Secure policy documented in `lib/api.ts` and left the
+ // sign-in cookie outliving the token it carried by 364 days.
+ writeTokens(result.accessToken, result.refreshToken);
  }
  setState('success');
  window.location.href = '/';
  } catch (err) {
+ // A required-but-missing factor is not a failure to report and retype: it is the next step.
+ if (err instanceof MfaRequiredError) {
+ setMfaRequired(true);
+ setError(null);
+ setState('idle');
+ return;
+ }
+ if (err instanceof MfaInvalidError) {
+ setMfaRequired(true);
+ setError(err.message);
+ setState('error');
+ setMfaCode('');
+ return;
+ }
  const message = err instanceof Error ? err.message : 'Login failed. Please try again.';
  setError(message);
  setState('error');
@@ -151,6 +167,55 @@ export default function LoginForm() {
  boxSizing: 'border-box',
  }}
  />
+
+ {mfaRequired && (
+ <>
+ <label
+ htmlFor="mfaCode"
+ style={{
+ display: 'block',
+ fontSize: '0.8rem',
+ fontWeight: 500,
+ color: '#94a3b8',
+ marginBottom: '0.35rem',
+ }}
+ >
+ Verification code
+ </label>
+ <input
+ id="mfaCode"
+ name="mfaCode"
+ type="text"
+ inputMode="numeric"
+ autoComplete="one-time-code"
+ // Focused on appearance: the operator has just been told a code is needed, and making them
+ // click the field is the kind of small friction that gets a security control disabled.
+ autoFocus
+ required
+ value={mfaCode}
+ onChange={(e) => setMfaCode(e.target.value)}
+ disabled={state === 'loading'}
+ placeholder="123456 or ABCD-EFGH-JKLM"
+ aria-label="Two-factor verification code"
+ style={{
+ width: '100%',
+ padding: '0.65rem 0.85rem',
+ background: '#0a0e1a',
+ border: '1px solid #1a2340',
+ borderRadius: '6px',
+ color: '#f8fafc',
+ fontSize: '0.9rem',
+ marginBottom: '0.5rem',
+ outline: 'none',
+ boxSizing: 'border-box',
+ letterSpacing: '0.08em',
+ }}
+ />
+ <p style={{ fontSize: '0.7rem', color: '#64748b', margin: '0 0 1rem' }}>
+ Code from your authenticator app, or one of your recovery codes. Each code works once.
+ </p>
+ </>
+ )}
 
  {state === 'error' && error && (
  <div

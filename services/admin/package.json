@@ -7,6 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc",
+    "test": "vitest run",
     "audit": "pnpm audit --audit-level=moderate"
   },
   "dependencies": {
@@ -29,6 +30,7 @@
     "@types/morgan": "^1.9.9",
     "@types/pg": "^8.11.0",
     "tsx": "^4.7.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.0"
   }
 }

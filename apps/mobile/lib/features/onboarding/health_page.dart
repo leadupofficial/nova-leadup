@@ -7,10 +7,15 @@ import 'package:go_router/go_router.dart';
 import '../../app/providers.dart';
 import '../../core/theme/nova_theme.dart';
 import '../../services/analytics_service.dart';
+import '../reminders/notification_delivery_cache.dart';
 import 'onboarding_greeting.dart';
 import 'onboarding_service.dart';
 
-/// Final onboarding step: activity goal, notification and voice preferences.
+/// Final onboarding step: notification and voice preferences.
+///
+/// The class and route keep the `health` name because the persisted
+/// [HealthFormData] record and its key are part of stored state; the step no longer
+/// asks for anything health-related — see the note in `build`.
 class HealthPage extends ConsumerStatefulWidget {
   const HealthPage({super.key});
 
@@ -21,8 +26,6 @@ class HealthPage extends ConsumerStatefulWidget {
 class _HealthPageState extends ConsumerState<HealthPage> {
   late int _stepGoal;
   late bool _notificationsEnabled;
-  late bool _voiceCommandsEnabled;
-  late bool _healthDataAccess;
 
   bool _saving = false;
   String? _error;
@@ -33,8 +36,6 @@ class _HealthPageState extends ConsumerState<HealthPage> {
     final existing = ref.read(onboardingServiceProvider).getHealth();
     _stepGoal = existing?.dailyStepGoal ?? 10000;
     _notificationsEnabled = existing?.notificationsEnabled ?? true;
-    _voiceCommandsEnabled = existing?.voiceCommandsEnabled ?? true;
-    _healthDataAccess = existing?.healthDataAccess ?? false;
   }
 
   Future<void> _finish() async {
@@ -44,16 +45,36 @@ class _HealthPageState extends ConsumerState<HealthPage> {
     });
 
     final onboarding = ref.read(onboardingServiceProvider);
+    final storedHealth = onboarding.getHealth();
 
     try {
+      // Mirror the choice where delivery actually reads it. Without this the switch
+      // stored a preference that no code consulted, so a user who turned notifications
+      // off here still got every reminder.
+      await cacheNotificationDelivery(
+        ref.read(sharedPreferencesProvider),
+        push: _notificationsEnabled,
+        inApp: _notificationsEnabled,
+      );
+
       await onboarding.saveHealth(
         HealthFormData(
+          // Written as an explicit `false` / default rather than echoing a stored
+          // value: the app has no health integration, and the published policy states
+          // "No health, fitness or step data". Round-tripping a previously stored
+          // `true` would have kept a claim the app cannot honour.
           dailyStepGoal: _stepGoal,
           notificationsEnabled: _notificationsEnabled,
-          voiceCommandsEnabled: _voiceCommandsEnabled,
-          healthDataAccess: _healthDataAccess,
+          // Carried through untouched: the switch that used to set it was removed
+          // because nothing read it, and dropping the stored value would be a silent
+          // change for anyone who had already answered.
+          voiceCommandsEnabled: storedHealth?.voiceCommandsEnabled ?? true,
+          healthDataAccess: false,
+          // `'health'` was one of the three notification categories. There is no
+          // health feature to notify about, so the category contradicted the Data
+          // safety form and the in-app policy for no benefit.
           enabledNotificationCategories: _notificationsEnabled
-              ? const <String>['reminders', 'health', 'agent']
+              ? const <String>['reminders', 'agent']
               : const <String>[],
         ),
       );
@@ -105,48 +126,39 @@ class _HealthPageState extends ConsumerState<HealthPage> {
         child: ListView(
           padding: const EdgeInsets.all(24),
           children: [
-            Text(
-              'Daily step goal',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '$_stepGoal steps',
-              style: const TextStyle(color: NovaTheme.onSurfaceVariant),
-            ),
-            Slider(
-              value: _stepGoal.toDouble(),
-              min: 2000,
-              max: 30000,
-              divisions: 28,
-              label: '$_stepGoal',
-              activeColor: NovaTheme.primary,
-              onChanged: (value) => setState(() => _stepGoal = value.round()),
-            ),
-            const SizedBox(height: 16),
+            // The "Daily step goal" slider and the "Share health data" switch were
+            // removed here before the first store submission. Both collected a
+            // preference for data the app has no way to read: there is no Health
+            // Connect integration, no `ACTIVITY_RECOGNITION` permission, no
+            // pedometer/sensors dependency and no step API anywhere in `lib/`. Asking
+            // the user to "Share health data — Steps and activity inform your daily
+            // summary" was therefore a false claim, and it contradicted the Data Safety
+            // form, which must not declare health data. `HealthFormData` keeps the two
+            // fields so previously stored values still round-trip; nothing is collected.
+            // Both of these were written to `SharedPreferences` and read by nothing —
+            // the same shape as the privacy switches fixed in the previous round.
+            //
+            // "Notifications" is now the real gate: it writes the same local value the
+            // reminder and briefing reconcilers read, so turning it off here actually
+            // stops an alert arriving rather than only recording an opinion. (The
+            // account-level `push` / `inApp` pair lives in Profile → Notifications,
+            // which is where it can be changed once an account exists.)
             SwitchListTile(
               value: _notificationsEnabled,
               onChanged: (value) => setState(() => _notificationsEnabled = value),
               title: const Text('Notifications'),
-              subtitle: const Text('Reminders, nudges and agent updates'),
+              subtitle: const Text('Reminders and briefings on this device'),
               activeThumbColor: NovaTheme.primary,
             ),
-            SwitchListTile(
-              value: _voiceCommandsEnabled,
-              onChanged: (value) => setState(() => _voiceCommandsEnabled = value),
-              title: const Text('Voice commands'),
-              subtitle: const Text('Let NOVA act on spoken requests'),
-              activeThumbColor: NovaTheme.primary,
-            ),
-            SwitchListTile(
-              value: _healthDataAccess,
-              onChanged: (value) => setState(() => _healthDataAccess = value),
-              title: const Text('Share health data'),
-              subtitle: const Text('Steps and activity inform your daily summary'),
-              activeThumbColor: NovaTheme.primary,
-            ),
+            // "Voice commands — Let NOVA act on spoken requests" was REMOVED. There is
+            // no global voice-action switch to honour: nothing in the app consults it,
+            // and the only thing that acts on speech is the device-control screen,
+            // where every action already goes through its own explicit confirmation
+            // sheet — a per-action guard that is strictly better than one blanket
+            // toggle, and one the user can actually see. Keeping a switch that changed
+            // nothing would have been the same false claim this file has already had to
+            // remove twice. `HealthFormData` keeps the field so previously stored values
+            // still round-trip.
             if (_error != null) ...[
               const SizedBox(height: 16),
               Text(

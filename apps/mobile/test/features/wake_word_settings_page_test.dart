@@ -71,18 +71,21 @@ void main() {
     expect(find.byIcon(Icons.radio_button_unchecked_rounded), findsNothing);
     expect(find.byIcon(Icons.radio_button_checked_rounded), findsNothing);
 
-    // The phrase shown is the installed classifier, humanised — not "Hey Nova".
+    // The phrase shown is the installed wake word, humanised — not the raw asset key
+    // and not a name the app cannot hear.
     expect(find.text('"Hey Jarvis"'), findsOneWidget);
     expect(find.text('Hey Nova'), findsNothing);
     expect(find.text('"Hey Nova"'), findsNothing);
 
-    // What switching would actually take is stated, with where it is documented.
+    // What switching would actually take is stated, with where it is documented. The
+    // phrase is a keywords file, not a trained classifier — this copy used to describe
+    // adding an "openWakeWord classifier" `.onnx`, an engine this build no longer ships.
     expect(
       find.textContaining('wakeword/models.json'),
       findsOneWidget,
     );
     expect(
-      find.textContaining('No such model exists in this repository'),
+      find.textContaining('The phrase is data'),
       findsOneWidget,
     );
   });

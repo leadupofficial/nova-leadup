@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../core/theme/nova_theme.dart';
@@ -54,6 +55,139 @@ class BootstrapFailureApp extends StatelessWidget {
   }
 }
 
+/// Catches render exceptions in the routed subtree and shows a recoverable error
+/// screen with a Retry button.
+///
+/// Flutter does not provide a per-subtree error boundary. This widget installs a
+/// temporary [FlutterError.onError] handler while the child builds, catching any
+/// synchronous widget-build failure. If an error is caught, the handler is removed,
+/// the error is stored in state, and a retry screen is shown until the key changes.
+///
+/// Usage: wrap the router (or any subtree) with this widget. Tapping Retry rebuilds
+/// the subtree from scratch.
+class ErrorBoundary extends StatefulWidget {
+  const ErrorBoundary({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<ErrorBoundary> createState() => _ErrorBoundaryState();
+}
+
+class _ErrorBoundaryState extends State<ErrorBoundary> {
+  FlutterExceptionHandler? _previousHandler;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _previousHandler = FlutterError.onError;
+    FlutterError.onError = (details) {
+      if (mounted) {
+        setState(() => _error = details.exception);
+      }
+      // Forward to the previous handler (e.g. crash reporting) so the error is
+      // still recorded even though the UI recovers gracefully.
+      if (_previousHandler != null) {
+        _previousHandler!(details);
+      }
+    };
+  }
+
+  @override
+  void dispose() {
+    FlutterError.onError = _previousHandler;
+    super.dispose();
+  }
+
+  void _retry() {
+    setState(() => _error = null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error != null) {
+      return _RecoverableErrorScreen(
+        error: _error!,
+        onRetry: _retry,
+      );
+    }
+    return widget.child;
+  }
+}
+
+class _RecoverableErrorScreen extends StatelessWidget {
+  const _RecoverableErrorScreen({
+    required this.error,
+    required this.onRetry,
+  });
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.error_outline_rounded,
+                    color: NovaTheme.error, size: 48),
+                const SizedBox(height: 16),
+                Text(
+                  'Something went wrong',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'A screen failed to load. You can try again.',
+                  style: TextStyle(color: NovaTheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: NovaTheme.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: NovaTheme.border),
+                  ),
+                  child: Text(
+                    '$error',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      color: NovaTheme.warning,
+                    ),
+                    maxLines: 8,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Retry'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: NovaTheme.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _FatalScreen extends StatelessWidget {
   const _FatalScreen({
     required this.icon,
@@ -99,7 +233,8 @@ class _FatalScreen extends StatelessWidget {
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Text(
                       '• $detail',
-                      style: const TextStyle(fontSize: 13, color: NovaTheme.warning),
+                      style: const TextStyle(
+                          fontSize: 13, color: NovaTheme.warning),
                     ),
                   ),
                 const SizedBox(height: 16),
@@ -112,7 +247,8 @@ class _FatalScreen extends StatelessWidget {
                   ),
                   child: SelectableText(
                     hint,
-                    style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                    style: const TextStyle(
+                        fontSize: 12, fontFamily: 'monospace'),
                   ),
                 ),
               ],

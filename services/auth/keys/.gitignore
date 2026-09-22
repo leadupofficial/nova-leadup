@@ -1,0 +1,2 @@
+# Keys directory - add private.pem and public.pem here
+# These files are gitignored and should be provided via secrets management

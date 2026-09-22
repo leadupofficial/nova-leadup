@@ -58,6 +58,20 @@ enum NovaAvatarFaceState {
   /// holds still rather than idling.
   bool get isStill =>
       this == NovaAvatarFaceState.success || this == NovaAvatarFaceState.warning;
+
+  /// True only while NOVA is doing something the user is waiting on: a voice
+  /// turn in flight, or a recording. These are the states whose motion is worth
+  /// a continuous frame budget.
+  ///
+  /// [listening] is included because it is what a real listening turn maps to.
+  /// It is *not* the passive "wake word is armed" state — that is a background
+  /// capability, not foreground activity, and a caller that only knows the wake
+  /// word is armed must not pass `animate: true` (see `faceStateForWake`).
+  bool get isLive =>
+      this == NovaAvatarFaceState.listening ||
+      this == NovaAvatarFaceState.thinking ||
+      this == NovaAvatarFaceState.speaking ||
+      this == NovaAvatarFaceState.recording;
 }
 
 /// [AvatarState] -> [NovaAvatarFaceState].
@@ -100,8 +114,18 @@ NovaAvatarFaceState faceStateForWake(NovaAvatarFaceState current, bool wake) {
 /// microphone-level subscription. Continuous motion is driven from the
 /// controller through an [AnimatedBuilder] — there is no per-frame `setState`,
 /// so `pumpAndSettle` is not held open by a rebuild loop. Under
-/// `MediaQuery.disableAnimations` the controller is stopped at a calm still pose
-/// and no blink is ever scheduled.
+/// `MediaQuery.disableAnimations`, or whenever [animate] is false, the
+/// controller is stopped at a calm still pose and no blink is ever scheduled.
+///
+/// [animate] is the frame-budget switch, and it defaults to **false**. A
+/// repeating [AnimationController] is a permanent 60 fps commitment: it asks the
+/// engine for a frame every vsync for as long as it runs, and each of those
+/// frames repaints whatever is on screen. A rig that starts animating at mount
+/// and never stops therefore pins a core on an otherwise idle screen — measured
+/// on the OnePlus 9R at ~113 % of one core and 61 fps on Home with nothing
+/// happening. Callers pass `animate: true` only while the face really is live
+/// ([NovaAvatarFaceState.isLive], i.e. a voice turn is in flight), so the same
+/// face looks right when it should run and settles when it should not.
 ///
 /// Nothing here claims viseme lip-sync. See [NovaAvatarFacePainter] for exactly
 /// what the speaking mouth is and is not.
@@ -113,6 +137,7 @@ class NovaAvatarFace extends ConsumerStatefulWidget {
     this.emotion = 'neutral',
     this.density = NovaAvatarDensity.medium,
     this.micLevels,
+    this.animate = false,
   });
 
   final double size;
@@ -127,6 +152,12 @@ class NovaAvatarFace extends ConsumerStatefulWidget {
   /// Microphone amplitude source. Defaults to the real [VoiceCapture.levels]
   /// stream; a test or preview can pass another `Stream<double>` of `0..1`.
   final Stream<double>? micLevels;
+
+  /// Whether this face may hold a continuous frame budget right now.
+  ///
+  /// False (the default) parks the timeline at a still pose, so an idle screen
+  /// settles instead of rendering forever. See the class comment.
+  final bool animate;
 
   @override
   ConsumerState<NovaAvatarFace> createState() => _NovaAvatarFaceState();
@@ -181,6 +212,11 @@ class _NovaAvatarFaceState extends ConsumerState<NovaAvatarFace>
         old.density != widget.density ||
         old.micLevels != widget.micLevels) {
       _syncLevels();
+    }
+    if (old.state != widget.state ||
+        old.density != widget.density ||
+        old.micLevels != widget.micLevels ||
+        old.animate != widget.animate) {
       _syncMotion();
     }
   }
@@ -212,8 +248,15 @@ class _NovaAvatarFaceState extends ConsumerState<NovaAvatarFace>
     });
   }
 
+  /// Starts or parks the timeline.
+  ///
+  /// A parked face holds the same calm pose `MediaQuery.disableAnimations`
+  /// produces, so "no motion" is already a designed look rather than a frozen
+  /// mid-animation frame. It is also the only way an idle screen can stop asking
+  /// the engine for frames: a running [AnimationController] schedules the next
+  /// vsync unconditionally.
   void _syncMotion() {
-    if (context.novaReduceMotion) {
+    if (!widget.animate || context.novaReduceMotion) {
       _timeline.stop();
       _timeline.value = 0;
       return;
@@ -277,7 +320,9 @@ class _NovaAvatarFaceState extends ConsumerState<NovaAvatarFace>
   @override
   Widget build(BuildContext context) {
     final colors = context.nova;
-    final reduce = context.novaReduceMotion;
+    // "Still" covers both a reader who asked for reduced motion and a caller
+    // that has no frame budget to spend: the painter renders the same calm pose.
+    final still = !widget.animate || context.novaReduceMotion;
     final secondsPerLoop = _timeline.duration!.inMicroseconds / 1e6;
 
     return RepaintBoundary(
@@ -287,8 +332,8 @@ class _NovaAvatarFaceState extends ConsumerState<NovaAvatarFace>
         child: AnimatedBuilder(
           animation: _timeline,
           builder: (context, _) {
-            final seconds = reduce ? 0.0 : _timeline.value * secondsPerLoop;
-            if (!reduce) _advanceBlinkSchedule(seconds);
+            final seconds = still ? 0.0 : _timeline.value * secondsPerLoop;
+            if (!still) _advanceBlinkSchedule(seconds);
             return CustomPaint(
               painter: NovaAvatarFacePainter(
                 frame: rigFrame(
@@ -297,9 +342,9 @@ class _NovaAvatarFaceState extends ConsumerState<NovaAvatarFace>
                   state: widget.state,
                   emotion: widget.emotion,
                   density: widget.density,
-                  blink: reduce ? 0 : _blinkClosure(seconds),
+                  blink: still ? 0 : _blinkClosure(seconds),
                   amplitude: _effectiveAmplitude,
-                  reducedMotion: reduce,
+                  reducedMotion: still,
                   // Matches the painter's `size.shortestSide * 0.40` head
                   // radius, so the breathing float scales with the face.
                   radius: widget.size * 0.40,

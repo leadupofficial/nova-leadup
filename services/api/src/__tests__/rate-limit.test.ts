@@ -4,8 +4,14 @@
  * Covers: requests under the limit succeed, requests over the limit return 429,
  * and the window resets after expiry.
  */
-import { describe, it, expect, afterEach } from 'vitest';
-import { rateLimit, buckets } from '../middleware/rateLimit.js';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import {
+	MAX_FIXED_WINDOW_BUCKETS,
+	SlidingWindowStore,
+	buckets,
+	rateLimit,
+	stopBucketCleanup,
+} from '../middleware/rateLimit.js';
 import { errorHandler } from '../middleware/error-handler.js';
 import express from 'express';
 import request from 'supertest';
@@ -132,5 +138,121 @@ describe('rate limiting', () => {
  const res = await request(app).get('/test').set('X-Client', clientB);
  expect(res.status).toBe(200);
  });
+ });
+});
+
+// ─── The sliding window store's memory bound (P-01) ───────────────────────────
+//
+// `rateLimitMiddleware` above keeps its state in a `SlidingWindowStore`, and the
+// auth store is the brute-force protection: 10 requests per minute per
+// `ip:route`, after which the key is *blocked* for the rest of the window. The
+// store's reclamation used to evict the oldest 30 % of keys on every `check()`
+// once the map was over its cap, so an attacker who flooded the limiter with
+// fresh keys — `/api/v1/auth/<junk>` produces one new key per request — evicted
+// their own accumulated block, and everyone else's, resetting brute-force
+// protection. The store's cap is small enough here to reach the eviction path
+// directly, which the module-level stores (5000 / 20000 keys) could never do in
+// a test.
+
+describe('the sliding window store never discards a live block', () => {
+ afterEach(() => {
+  vi.useRealTimers();
+ });
+
+ it('keeps an actively blocked key even when the store is flooded with junk keys', () => {
+  const store = new SlidingWindowStore(60_000, 2, 100);
+  try {
+   // Accumulate a block on the victim key: two requests fill the window, the
+   // third is refused and blocks the key for the rest of the window.
+   expect(store.check('victim:auth').limited).toBe(false);
+   expect(store.check('victim:auth').limited).toBe(false);
+   expect(store.check('victim:auth').limited).toBe(true);
+
+   for (let i = 0; i < 5_000; i++) store.check(`junk-${i}:auth`);
+
+   const blocked = store.check('victim:auth');
+   expect(blocked.limited).toBe(true);
+   expect(blocked.retryAfterMs).toBeGreaterThan(0);
+   // …and the flood itself does not grow the map without bound.
+   expect(store.size).toBeLessThanOrEqual(100);
+  } finally {
+   store.destroy();
+  }
+ });
+
+ it('reclaims windows that have fully elapsed', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+  const store = new SlidingWindowStore(1_000, 5, 2);
+  try {
+   store.check('elapsed-a');
+   store.check('elapsed-b');
+   expect(store.size).toBe(2);
+
+   // Past the window: both entries are fully expired, so the third key is
+   // admitted by reclaiming them rather than by evicting anything live.
+   vi.setSystemTime(new Date('2026-01-01T00:00:05Z'));
+   store.check('fresh');
+
+   expect(store.size).toBe(1);
+  } finally {
+   store.destroy();
+  }
+ });
+});
+
+// ─── The fixed-window bucket map's memory bound (P-02) ────────────────────────
+//
+// `rateLimit()` (the fixed-window limiter) keeps one counter per key in a
+// module-level `buckets` map with no cap and no cleanup timer, so a one-off key
+// leaked for the life of the process. It is latent today — `rateLimit()` is not
+// mounted — but the map is exported and global, so the bound is asserted here.
+
+describe('the fixed-window bucket map is bounded', () => {
+ afterEach(() => {
+  stopBucketCleanup();
+  buckets.clear();
+  vi.useRealTimers();
+ });
+
+ it('reclaims expired buckets instead of letting a flood of one-off keys grow it', async () => {
+  const expired = Date.now() - 60_000;
+  for (let i = 0; i < MAX_FIXED_WINDOW_BUCKETS + 25; i++) {
+   buckets.set(`stale-${i}`, { count: 1, resetAt: expired });
+  }
+
+  const app = createRateLimitedApp(5, 60_000, 'live-after-a-flood-of-stale-keys');
+  expect((await request(app).get('/test')).status).toBe(200);
+
+  expect(buckets.size).toBeLessThanOrEqual(MAX_FIXED_WINDOW_BUCKETS);
+  // The live counter is retained; the expired ones are the ones reclaimed.
+  expect(buckets.has('live-after-a-flood-of-stale-keys')).toBe(true);
+ });
+
+ it('stays bounded even when no bucket has expired yet', async () => {
+  const live = Date.now() + 60_000;
+  for (let i = 0; i < MAX_FIXED_WINDOW_BUCKETS; i++) {
+   buckets.set(`live-${i}`, { count: 1, resetAt: live });
+  }
+
+  const app = createRateLimitedApp(5, 60_000, 'newcomer');
+  expect((await request(app).get('/test')).status).toBe(200);
+
+  expect(buckets.size).toBeLessThanOrEqual(MAX_FIXED_WINDOW_BUCKETS);
+ });
+
+ it('sweeps expired buckets on a timer, without waiting for the next request', () => {
+  vi.useFakeTimers();
+  stopBucketCleanup();
+  // Constructing the limiter is what starts the cleanup; no request is needed.
+  rateLimit({ windowMs: 60_000, max: 5, keyGenerator: () => 'sweep-key' });
+
+  buckets.set('expired', { count: 1, resetAt: Date.now() - 1 });
+  buckets.set('live', { count: 1, resetAt: Date.now() + 120_000 });
+
+  vi.advanceTimersByTime(60_000);
+
+  expect(buckets.has('expired')).toBe(false);
+  expect(buckets.has('live')).toBe(true);
  });
 });

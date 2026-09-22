@@ -23,7 +23,7 @@ import { HttpError } from '../middleware/error-handler.js';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { logger } from '../utils/logger.js';
-import { chatCompletion } from '../services/ai.js';
+import { chatCompletion, defaultMaxOutputTokens } from '../services/ai.js';
 import { NOVA_SYSTEM_PROMPT, toAssistantError } from '../services/assistant.js';
 
 const router: ReturnType<typeof Router> = Router();
@@ -88,7 +88,7 @@ async function streamAssistantReply(
 	try {
 		const completion = await chatCompletion([{ role: 'user', content: message }], {
 			systemPrompt: NOVA_SYSTEM_PROMPT,
-			maxTokens: 1024,
+			maxTokens: defaultMaxOutputTokens(),
 			temperature: 0.7,
 		});
 

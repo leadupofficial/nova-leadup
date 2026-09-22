@@ -1,0 +1,77 @@
+{
+  "expo": {
+    "name": "NOVA",
+    "slug": "nova",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a1a2e"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nova.leadup",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "NOVA needs access to your microphone for voice conversations.",
+        "NSSpeechRecognitionUsageDescription": "NOVA needs speech recognition to transcribe your voice.",
+        "NSFaceIDUsageDescription": "NOVA uses Face ID for secure authentication.",
+        "NSPhotoLibraryUsageDescription": "NOVA needs access to photos for profile pictures.",
+        "NSContactsUsageDescription": "NOVA needs access to contacts to help you connect with people.",
+        "NSCalendarsUsageDescription": "NOVA needs calendar access to manage your schedule."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1a1a2e"
+      },
+      "package": "com.nova.leadup",
+      "versionCode": 1,
+      "permissions": [
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "USE_FINGERPRINT",
+        "USE_BIOMETRIC",
+        "READ_CONTACTS",
+        "WRITE_CONTACTS",
+        "READ_CALENDAR",
+        "WRITE_CALENDAR",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#1a1a2e"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "eacfbae2-27cf-4dc4-b817-809bab3b5206"
+      }
+    },
+    "owner": "leadup"
+  }
+}

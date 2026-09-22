@@ -12,7 +12,7 @@ const features = [
  {
  icon: Mic,
  title: 'Voice-First',
- description: 'Talk naturally with your AI assistant. Just say "Hey NOVA" to start.',
+ description: 'Talk naturally with your AI assistant.',
  color: COLORS.accent,
  },
  {
@@ -276,7 +276,7 @@ export default function Onboarding() {
  transition={{ delay: 0.4 }}
  className="text-nova-text-secondary text-lg"
  >
- NOVA is ready to help. Say "Hey NOVA" or tap the mic to start.
+ NOVA is ready to help. Tap the mic to start.
  </motion.p>
  </div>
  <motion.button

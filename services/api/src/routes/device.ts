@@ -27,11 +27,11 @@
  * schema change is needed; the column has existed since the canonical schema
  * was written.
  */
-import { Router, NextFunction } from 'express';
+import { Router, type NextFunction, type Response } from 'express';
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { getDb } from '../db/connection.js';
-import { companionConfigs } from '@nova/database';
+import { companionConfigs, devices } from '@nova/database';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { logger } from '../utils/logger.js';
@@ -163,6 +163,137 @@ router.patch('/wake-word/config', authenticate, validate(WakeWordConfigSchema), 
 		);
 
 		res.status(200).json({ success: true, data: present((saved?.wakeWord ?? record) as StoredWakeWord) });
+	} catch (err) {
+		next(err);
+	}
+});
+
+// ─── Device registration ─────────────────────────────────────────────────────
+//
+// The `devices` table existed from the canonical schema and **nothing ever wrote to it**.
+// That is why the console's device, platform and app-version views were empty, and why the
+// version gate had no adoption data to target — not a rendering bug, a missing writer.
+//
+// Design decisions:
+//
+//  * **Auth is required.** A device row is linked to an account. Registering before sign-in
+//    would mean either an ownerless row or a fabricated one, and the inventory exists to
+//    answer "who is on which build". The client calls this right after a session exists.
+//  * **`installationId` is the identity, not the row.** The app registers on every launch, so
+//    this is an upsert keyed on the installation: one row per install, updated in place. The
+//    partial unique index added in migration 0008 is what makes that an upsert rather than a
+//    row per start.
+//  * **Every field is optional except the installation id.** A client that cannot read its OS
+//    version must still be able to register; refusing would lose the device entirely.
+//  * **`platformVersion` and `appVersion` are stored, not guessed.** They are what the
+//    dashboard's "Android versions" and "app versions" tiles read.
+
+const RegisterDeviceSchema = z
+	.object({
+		installationId: z.string().trim().min(8).max(100),
+		name: z.string().trim().max(255).optional(),
+		platform: z.string().trim().max(50).optional(),
+		platformVersion: z.string().trim().max(50).optional(),
+		model: z.string().trim().max(100).optional(),
+		appVersion: z.string().trim().max(50).optional(),
+	})
+	.strict();
+
+router.post('/register', authenticate, validate(RegisterDeviceSchema), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+	try {
+		const body = (req as unknown as { validatedBody: z.infer<typeof RegisterDeviceSchema> }).validatedBody;
+		const userId = req.user!.id;
+		const db = getDb();
+		const now = new Date();
+
+		// Upsert on the installation id. `onConflictDoUpdate` needs the conflict target to be a
+		// unique index, which migration 0008 creates.
+		const [row] = await db
+			.insert(devices)
+			.values({
+				userId,
+				installationId: body.installationId,
+				name: body.name ?? null,
+				platform: body.platform ?? null,
+				platformVersion: body.platformVersion ?? null,
+				model: body.model ?? null,
+				appVersion: body.appVersion ?? null,
+				lastSeenAt: now,
+			})
+			.onConflictDoUpdate({
+				target: devices.installationId,
+				set: {
+					// Rebind to the current account: a shared device switching users must not stay
+					// attached to the previous one.
+					userId,
+					name: body.name ?? null,
+					platform: body.platform ?? null,
+					platformVersion: body.platformVersion ?? null,
+					model: body.model ?? null,
+					appVersion: body.appVersion ?? null,
+					lastSeenAt: now,
+				},
+			})
+			.returning({ id: devices.id, createdAt: devices.createdAt });
+
+		res.status(200).json({
+			success: true,
+			data: {
+				deviceId: row?.id ?? null,
+				registeredAt: now.toISOString(),
+				// The client is told what the server now believes, so a mismatch (wrong platform
+				// reported) is visible rather than silent.
+				recorded: {
+					platform: body.platform ?? null,
+					platformVersion: body.platformVersion ?? null,
+					appVersion: body.appVersion ?? null,
+				},
+				note:
+					'Re-registering the same installationId updates this row rather than creating another. This endpoint is the only writer of the devices table.',
+			},
+		});
+	} catch (err) {
+		logger.error({ err }, 'Device registration failed');
+		next(err);
+	}
+});
+
+/**
+ * `GET /device/register` — what the server currently holds for this installation.
+ *
+ * Lets the client check whether its last report landed, without a console session.
+ */
+router.get('/register', authenticate, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+	try {
+		const installationId = typeof req.query.installationId === 'string' ? req.query.installationId.trim() : '';
+		if (!installationId) {
+			res.status(400).json({ success: false, error: 'installationId is required', code: 'BAD_REQUEST' });
+			return;
+		}
+
+		const db = getDb();
+		const [row] = await db
+			.select()
+			.from(devices)
+			.where(and(eq(devices.installationId, installationId), eq(devices.userId, req.user!.id)))
+			.limit(1);
+
+		res.status(200).json({
+			success: true,
+			data: {
+				registered: Boolean(row),
+				device: row
+					? {
+							id: row.id,
+							platform: row.platform,
+							platformVersion: row.platformVersion,
+							model: row.model,
+							appVersion: row.appVersion,
+							lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
+						}
+					: null,
+			},
+		});
 	} catch (err) {
 		next(err);
 	}

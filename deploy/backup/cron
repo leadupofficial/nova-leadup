@@ -1,0 +1,18 @@
+# deploy/backup/cron — NOVA-Leadup backup schedule
+# Load cron with: crontab deploy/backup/cron
+# ───────────────────────────────────────────────────────────────────────────
+# Environment
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+PGHOST=nova-postgres
+PGPORT=5432
+PGUSER=nova_user
+PGDATABASE=nova
+BACKUP_DIR=/backups
+RETENTION_DAYS=7
+
+# Daily full backup at 02:00 UTC
+0 2 * * * /app/deploy/backup/backup.sh >> /var/log/nova-backup.log 2>&1
+
+# Weekly WAL-G-style continuous archiving check (placeholder for pgBackRest / Barman)
+# 0 3 * * 0 /app/deploy/backup/backup.sh --wal-archive >> /var/log/nova-backup-wal.log 2>&1

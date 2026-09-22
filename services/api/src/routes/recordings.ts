@@ -45,12 +45,27 @@ import {
 	UpdateRecordingSchema,
 	RecordingListQuerySchema,
 	parseCursorPagination,
-	encodeCursor,
 } from '../schemas/index.js';
 import { recordingCaptureRoutes } from './recordings-capture.js';
-import { parseCursor, parseRecordingId as parseId } from './recordings-shared.js';
+import { parseCursor, parseRecordingId as parseId, RECORDING_COLUMNS } from './recordings-shared.js';
+import { decodeKeysetCursor, encodeKeysetCursor, keysetWhere } from '../utils/pagination.js';
+
 
 const router: ReturnType<typeof Router> = Router();
+
+/**
+ * Transcript segments `GET /:id` will return in one response.
+ *
+ * The route selected every segment for the transcript with no bound. A long
+ * meeting produces thousands of rows — a four-hour recording at the pipeline's
+ * ~40-word segments is well past this — and all of them went into a single
+ * response body, with no way for the client to tell whether it had received the
+ * whole transcript. The query now asks for one more than the cap, so the response
+ * can say honestly that it truncated instead of silently dropping rows.
+ *
+ * The constant is not a client contract: `segmentsTruncated` is.
+ */
+export const MAX_SEGMENTS_PER_RESPONSE = 500;
 
 // The capture half (capabilities, audio upload, async processing) is registered
 // first so its literal `/capabilities` path is matched before the `/:id`
@@ -72,10 +87,17 @@ router.get('/', authenticate, validate(RecordingListQuerySchema, 'query'), async
 		const whereClauses = [eq(audioRecordings.userId, userId), isNull(audioRecordings.deletedAt)];
 
 		if (q.cursor) {
-			const decoded = parseCursor(q.cursor);
-			whereClauses.push(q.direction === 'backward'
-				? lt(audioRecordings.id, decoded)
-				: gt(audioRecordings.id, decoded));
+			// Keyset on `(created_at, id)`. This filtered on `id` while ordering by
+			// `created_at`: with UUID keys that is not a keyset, and walking the list
+			// skipped and duplicated rows (measured: 7 recordings returned 8 rows, 6
+			// unique). `parseCursor` validated the shape, but the shape was the wrong one.
+			let cursor;
+			try {
+				cursor = decodeKeysetCursor(q.cursor);
+			} catch {
+				throw new HttpError(400, 'Invalid cursor', 'INVALID_CURSOR');
+			}
+			whereClauses.push(keysetWhere(audioRecordings.createdAt, audioRecordings.id, cursor, q.direction));
 		}
 
 		const where = and(...whereClauses);
@@ -86,23 +108,23 @@ router.get('/', authenticate, validate(RecordingListQuerySchema, 'query'), async
 		const total = Number(countRow?.count ?? 0);
 
 		const orderBy = q.direction === 'backward' ? asc(audioRecordings.createdAt) : desc(audioRecordings.createdAt);
-		const rows = await db.select().from(audioRecordings)
+		const rows = await db.select(RECORDING_COLUMNS).from(audioRecordings)
 			.where(where)
 			.orderBy(orderBy)
 			.limit(q.limit + 1); // +1 to detect hasMore
 
 		const hasMore = rows.length > q.limit;
 		const pageData = hasMore ? rows.slice(0, q.limit) : rows;
-		const lastId = pageData[pageData.length - 1]?.id;
-		const firstId = pageData[0]?.id;
+		const last = pageData[pageData.length - 1];
+		const first = pageData[0];
 
 		res.status(200).json({
 			success: true,
 			data: {
 				recordings: pageData,
 				pagination: {
-					nextCursor: hasMore ? encodeCursor(lastId) : null,
-					prevCursor: firstId ? encodeCursor(firstId) : null,
+					nextCursor: hasMore && last ? encodeKeysetCursor(last.createdAt, last.id) : null,
+					prevCursor: first ? encodeKeysetCursor(first.createdAt, first.id) : null,
 					hasMore,
 					limit: q.limit,
 					total,
@@ -204,7 +226,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 		const db = getDb();
 		const userId = req.user!.id;
 
-		const [recording] = await db.select().from(audioRecordings)
+		const [recording] = await db.select(RECORDING_COLUMNS).from(audioRecordings)
 			.where(and(
 				eq(audioRecordings.id, id),
 				eq(audioRecordings.userId, userId),
@@ -225,11 +247,18 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 		// Segments are the transcript's own boundaries, as the provider reported
 		// them. `speakerIndex` is always 0 — there is no diarisation here — so a
 		// client must not read it as a speaker number.
-		const segments = transcript
+		//
+		// Bounded (see MAX_SEGMENTS_PER_RESPONSE): one extra row is requested purely
+		// to detect truncation, so the response can say `segmentsTruncated: true`
+		// rather than returning a silently incomplete transcript.
+		const segmentRows = transcript
 			? await db.select().from(transcriptSegments)
 				.where(eq(transcriptSegments.transcriptId, transcript.id))
 				.orderBy(asc(transcriptSegments.startMs))
+				.limit(MAX_SEGMENTS_PER_RESPONSE + 1)
 			: [];
+		const segmentsTruncated = segmentRows.length > MAX_SEGMENTS_PER_RESPONSE;
+		const segments = segmentsTruncated ? segmentRows.slice(0, MAX_SEGMENTS_PER_RESPONSE) : segmentRows;
 
 		res.status(200).json({
 			success: true,
@@ -238,6 +267,9 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 				transcript: transcript ?? null,
 				summary: summary ?? null,
 				segments,
+				// False — not absent — when there is nothing to truncate, so a client
+				// never has to distinguish "complete" from "the server did not say".
+				segmentsTruncated,
 			},
 		});
 	} catch (err) { next(err); }

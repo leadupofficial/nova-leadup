@@ -455,7 +455,7 @@ class CallRecordingOutcomesCard extends StatelessWidget {
           if (state.outcomes.isEmpty)
             Text(
               'Nothing has been imported in this session. Uploaded recordings '
-              'appear with the meeting summaries, in the same list.',
+              'are saved to your account as soon as the import finishes.',
               style: Theme.of(context).textTheme.bodySmall!.copyWith(color: c.muted),
             ),
         ],

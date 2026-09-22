@@ -4,14 +4,28 @@ import { useState, useCallback, useRef } from 'react';
 import { useAssistantStore } from '../stores/assistant-store';
 import { useConversationStore } from '../stores/conversation-store';
 
-const MOCK_RESPONSES = [
- "I understand, Abishek. Let me look into that for you.",
- "Got it! I've made a note of that.",
- "Based on what I know, I'd recommend focusing on the CRM proposal first. Kumar seems ready to move forward.",
- "I've set that up for you. Is there anything else you need?",
- "Here's what I found from your recent conversations: You have 3 pending tasks and a meeting at 3 PM today.",
- "Perfect, I've updated your preferences accordingly.",
-];
+/**
+ * There is exactly one reply, and it is true.
+ *
+ * This hook does not call the API. It used to pick at random from a list of canned
+ * lines that **claimed completed actions** — "I've made a note of that.", "I've set
+ * that up for you.", "I've updated your preferences accordingly." — plus a hardcoded
+ * briefing naming two real-looking people ("Abishek", "Kumar"). Nothing was recorded,
+ * set up or updated, and no such conversation existed. A user reading those replies
+ * would reasonably believe the product had done something on their behalf.
+ *
+ * Fabricated *capability* is the one thing that cannot be left in a surface a user can
+ * reach, so the fake delay, the random choice and the word-by-word "streaming" of an
+ * invented answer are gone. The honest answer is that this build is not connected.
+ *
+ * `apps/web` is not the shipped client — the voice companion is `apps/mobile` — so
+ * wiring this page to `POST /api/v1/chat` is a decision for whoever owns it. Until
+ * then, it says so.
+ */
+const NOT_CONNECTED_REPLY =
+ "This build of the NOVA web preview is not connected to the NOVA API yet, so I can't " +
+ "answer or change anything for you here. The voice companion in the mobile app is the " +
+ "working client.";
 
 export function useAssistant() {
  const { state, setState, setEmotion, startListening, stopListening } = useAssistantStore();
@@ -32,19 +46,18 @@ export function useAssistant() {
  setEmotion('neutral');
  setIsProcessing(true);
 
- const responseDelay = 800 + Math.random() * 1200;
-
+ // No fake "thinking" delay: the reply is a fixed notice, and pretending to consider
+ // the question is part of what made the fabricated answers convincing.
  await new Promise((resolve) => {
- timeoutRef.current = setTimeout(resolve, responseDelay);
+ timeoutRef.current = setTimeout(resolve, 0);
  });
 
  if (cancelledRef.current) return;
 
- const randomResponse = MOCK_RESPONSES[Math.floor(Math.random() * MOCK_RESPONSES.length)];
  setState('speaking');
- setEmotion('happy');
+ setEmotion('neutral');
 
- const words = randomResponse.split(' ');
+ const words = NOT_CONNECTED_REPLY.split(' ');
  let currentText = '';
 
  const streamingMsg = addMessage({

@@ -1,4 +1,6 @@
 import 'package:flutter/foundation.dart';
+import '../../core/state/account_scoped_state.dart';
+import '../reminders/notification_delivery_cache.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
@@ -82,6 +84,15 @@ class AuthController extends Notifier<AuthState> {
           );
     }
     await ref.read(authRepositoryProvider).clearSession();
+    // Everything the previous account left in memory — the open conversation and its
+    // transcript, the notification assistant's inbox, a persona mid-onboarding. Without
+    // this the next person to sign in on this process sees the previous user's transcript
+    // and posts into their conversation.
+    await clearAccountScopedState(ref);
+    // The notification-delivery cache is device-scoped, not account-scoped: leaving it
+    // in place means a second account on this device inherits the first account's
+    // off-state and has its reminders silently suppressed.
+    await clearNotificationDeliveryCache(ref.read(sharedPreferencesProvider));
     await ref.read(crashReportingServiceProvider).setUserId(null);
     await ref.read(analyticsServiceProvider).setUserId(null);
     await ref.read(analyticsServiceProvider).logEvent(AnalyticsService.eventLogout);
@@ -97,6 +108,8 @@ class AuthController extends Notifier<AuthState> {
     if (state.status == AuthStatus.unauthenticated && state.error != null) return;
 
     await ref.read(authRepositoryProvider).clearSession();
+    await clearAccountScopedState(ref);
+    await clearNotificationDeliveryCache(ref.read(sharedPreferencesProvider));
     await ref.read(crashReportingServiceProvider).setUserId(null);
     await ref.read(analyticsServiceProvider).setUserId(null);
     state = const AuthState(

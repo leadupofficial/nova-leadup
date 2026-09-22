@@ -3,16 +3,41 @@
  */
 
 import { getUsageSummary, getUsageByUser, type UsageSummary, type UsageByUser } from '../../lib/api';
+import { describeLoadError } from '../../lib/page-data';
+import { PageError } from '../../components/PageError';
 
-async function getUsageData(tenantId: string) {
+/**
+ * Money, without lying in either direction.
+ *
+ * The API's cost is a flat list-price estimate and it used to be rounded to whole
+ * dollars, so every tenant below 50k tokens rendered as `$0.00` and the Cost card read
+ * as "free". The API now carries four decimals; `toFixed(2)` here would undo that, so
+ * sub-cent amounts are shown to four places and everything else to two.
+ */
+function formatUsd(amount: number | null | undefined): string {
+  const value = amount ?? 0;
+  if (value === 0) return '$0.00';
+  return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
+}
+
+/**
+ * Loads both halves of the page, keeping the failure instead of discarding it.
+ *
+ * `catch { return null }` made "no tenant chosen yet" and "the request failed" the
+ * same state, so an expired session rendered an empty usage table.
+ */
+async function getUsageData(tenantId: string): Promise<
+ | { ok: true; summary: UsageSummary; byUser: UsageByUser[] }
+ | { ok: false; message: string; status: number | null }
+> {
  try {
  const [summary, byUser] = await Promise.all([
  getUsageSummary(tenantId),
  getUsageByUser(tenantId),
  ]);
- return { summary, byUser };
- } catch {
- return null;
+ return { ok: true, summary, byUser };
+ } catch (error) {
+ return { ok: false, ...describeLoadError(error) };
  }
 }
 
@@ -20,8 +45,23 @@ export default async function UsagePage({ searchParams }: { searchParams: Promis
 	const resolved = await searchParams;
 	const tenantId = typeof resolved.tenantId === 'string' ? resolved.tenantId : '';
 	const data = tenantId ? await getUsageData(tenantId) : null;
-	const summary: UsageSummary | null = data?.summary ?? null;
-	const byUser: UsageByUser[] = data?.byUser ?? [];
+	if (data && !data.ok) {
+		return (
+			<div>
+				<div style={{ marginBottom: '1.5rem' }}>
+					<h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>Usage &amp; Cost</h1>
+				</div>
+				<PageError
+					title="Could not load usage"
+					message={data.message}
+					status={data.status}
+					retryHref={`/usage?tenantId=${encodeURIComponent(tenantId)}`}
+				/>
+			</div>
+		);
+	}
+	const summary: UsageSummary | null = data?.ok ? data.summary : null;
+	const byUser: UsageByUser[] = data?.ok ? data.byUser : [];
 
  // Summary is a single object; the per-metric breakdown is derived from it below.
 
@@ -90,11 +130,16 @@ export default async function UsagePage({ searchParams }: { searchParams: Promis
  </div>
  <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '1.25rem' }}>
  <p style={{ margin: '0 0 0.5rem', fontSize: '0.8rem', color: '#6b7280', fontWeight: 500 }}>Cost</p>
- <p style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700, color: '#1a1a2e' }}>${(summary?.totalCost ?? 0).toFixed(2)}</p>
+ <p style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700, color: '#1a1a2e' }}>{formatUsd(summary?.totalCost)}</p>
  </div>
  <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '1.25rem' }}>
  <p style={{ margin: '0 0 0.5rem', fontSize: '0.8rem', color: '#6b7280', fontWeight: 500 }}>Active Users</p>
  <p style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700, color: '#1a1a2e' }}>{byUser.length}</p>
+ {byUser.length >= 100 && (
+ <p style={{ margin: '0.25rem 0 0', fontSize: '0.75rem', color: '#b45309' }}>
+ At least {byUser.length} — the API returns at most 100 per request.
+ </p>
+ )}
  </div>
  </div>
 
@@ -114,11 +159,16 @@ export default async function UsagePage({ searchParams }: { searchParams: Promis
  {[
  { metric: 'API calls', value: summary?.totalCalls ?? 0, unit: 'calls' },
  { metric: 'Tokens', value: summary?.totalTokens ?? 0, unit: 'tokens' },
- { metric: 'Cost', value: summary?.totalCost ?? 0, unit: 'USD' },
+ { metric: 'Cost', value: formatUsd(summary?.totalCost), unit: 'USD' },
  ].map((row) => (
  <tr key={row.metric} style={{ borderBottom: '1px solid #f3f4f6' }}>
  <td style={{ padding: '0.75rem 1rem', fontWeight: 500 }}>{row.metric}</td>
- <td style={{ padding: '0.75rem 1rem', textAlign: 'right', fontWeight: 600 }}>{row.value.toLocaleString()}</td>
+ {/* `formatUsd` for money, `toLocaleString` for counts. This cell used to run the Cost
+     row through `toLocaleString` as well, so the same amount read `$0.0012` on the card
+     and `0.001` here. */}
+ <td style={{ padding: '0.75rem 1rem', textAlign: 'right', fontWeight: 600 }}>
+ {row.unit === 'USD' ? row.value : Number(row.value).toLocaleString()}
+ </td>
  <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#6b7280' }}>{row.unit}</td>
  </tr>
  ))}
@@ -156,7 +206,7 @@ export default async function UsagePage({ searchParams }: { searchParams: Promis
  </td>
  <td style={{ padding: '0.75rem 1rem', textAlign: 'right', fontWeight: 600 }}>{u.calls.toLocaleString()}</td>
  <td style={{ padding: '0.75rem 1rem', textAlign: 'right', fontWeight: 600 }}>{u.tokens.toLocaleString()}</td>
- <td style={{ padding: '0.75rem 1rem', textAlign: 'right', color: '#6b7280' }}>${u.cost.toFixed(2)}</td>
+ <td style={{ padding: '0.75rem 1rem', textAlign: 'right', color: '#6b7280' }}>{formatUsd(u.cost)}</td>
  </tr>
  ))}
  {byUser.length === 0 && (

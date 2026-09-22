@@ -169,6 +169,15 @@ class ApiConfig {
   static String get approvals => '$baseUrl/api/v1/tools/approvals';
   static String get consent => '$baseUrl/api/v1/consent';
 
+  /// Account deletion (App Store 5.1.1(v), Play account-deletion policy).
+  static String get account => '$baseUrl/api/v1/account';
+  static String get accountDeletionPreview =>
+      '$baseUrl/api/v1/account/deletion-preview';
+
+  /// Reporting an offensive AI reply. Play's AI-Generated Content policy requires
+  /// this to be reachable without leaving the app.
+  static String get aiReports => '$baseUrl/api/v1/ai/reports';
+
   /// `services/api` mounts settings as sub-resources, so there is no
   /// `GET /api/v1/settings` — that path 404s. Each screen targets its own path.
   static String get settingsProfile => '$baseUrl/api/v1/settings/profile';
@@ -201,6 +210,14 @@ class ApiConfig {
   /// its query schema has no `search` field — so a text query has to go here.
   static String get memorySearch => '$memories/search';
   static String reminder(String id) => '$reminders/$id';
+
+  /// Where the app reports that the user opened a reminder's notification.
+  ///
+  /// Not `PATCH /reminders/:id` with a `triggeredAt` field, deliberately: this is a
+  /// distinct fact ("the user saw it") with its own idempotency rule (first report
+  /// wins), and a general-purpose update route would let a client set any value it
+  /// liked. See `POST /api/v1/reminders/:id/acknowledge`.
+  static String reminderAcknowledge(String id) => '${reminder(id)}/acknowledge';
   static String avatar(String id) => '$settingsAvatars/$id';
   static String recording(String id) => '$recordings/$id';
   static String recordingSummary(String id) => '${recording(id)}/summary';

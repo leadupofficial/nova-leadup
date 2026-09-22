@@ -1,17 +1,73 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <uses-permission android:name="android.permission.USE_BIOMETRICS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!--
+      Removed 2026-09-20, before the first Play submission: CAMERA,
+      READ_EXTERNAL_STORAGE, READ_MEDIA_IMAGES, READ_MEDIA_VIDEO and
+      USE_BIOMETRICS were declared and used by nothing.
+
+      Verified by grep over lib/ and android/app/src/main/java/ for the
+      corresponding APIs (`Permission.camera`, `Permission.photos`,
+      `Permission.storage`, `image_picker`/`ImagePicker`, `local_auth`,
+      `biometric`): zero references, and neither `image_picker` nor `local_auth` is
+      a dependency in pubspec.yaml. The app takes no photos, reads no user media
+      (the call-recording import uses the Storage Access Framework, which needs no
+      permission at all), and has no biometric unlock.
+
+      Play flags apps that request sensitive permissions they do not use, and the
+      Data Safety form has to match what the app actually collects — so a
+      camera/photos/biometrics declaration would have to be justified in review and
+      contradicted in the form. Unused permissions are also a real over-privilege
+      risk on the device, not just a paperwork one.
+    -->
+
+    <!--
+      Firebase Analytics arrives with `ACCESS_ADSERVICES_AD_ID` and
+      `ACCESS_ADSERVICES_ATTRIBUTION` merged in from play-services-measurement-api.
+      NOVA shows no ads and does no attribution, so both are removed rather than
+      declared:
+
+        * on Play, holding an advertising-ID permission makes the Data Safety form
+          disclose "Device or other IDs" collected for advertising purposes, which
+          would be untrue here; and
+        * the same access is precisely what iOS App Tracking Transparency exists to
+          gate, so leaving it in invites the ATT question on a product that does not
+          track.
+
+      Analytics keeps working: it identifies an install by its app-instance ID, not by
+      the advertising ID. Verified in the merged **release** manifest after this change.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_AD_ID" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_ATTRIBUTION" tools:node="remove" />
+
+    <!--
+      `ACCESS_ADSERVICES_*` were not the whole story. play-services-measurement also
+      merges in the *runtime* advertising-ID permission and the install-referrer
+      binding, which the block above does not touch:
+
+        * `com.google.android.gms.permission.AD_ID` — the permission Play actually
+          keys the Data safety "Device or other IDs / Advertising" disclosure off.
+          If it is present in the built manifest, the truthful answer on the form
+          becomes "collected", and Play checks the manifest against the form. It was
+          still present after the first removal pass.
+        * `com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE` —
+          attribution/install-referrer binding. Same reasoning: NOVA attributes
+          nothing.
+
+      Both are removed at merge time with `tools:node="remove"`. Verified in the
+      merged **release** manifest after this change; Firebase Analytics continues to
+      work off the app-instance ID.
+    -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove" />
+    <uses-permission android:name="com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE" tools:node="remove" />
 
     <!--
       Device & system control (§9.2).
@@ -91,7 +147,31 @@
     <application
         android:label="NOVA"
         android:icon="@mipmap/ic_launcher"
-        android:networkSecurityConfig="@xml/network_security_config">
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:allowBackup="false"
+        android:fullBackupContent="false">
+
+        <!--
+          `roundIcon` was missing, so a launcher that asks for a round icon (rather
+          than mask-intersecting the square one) fell back to `ic_launcher`. Both now
+          resolve: `mipmap-anydpi-v26/ic_launcher_round.xml` is an adaptive icon on
+          API 26+, and the density PNGs cover API 24-25.
+        -->
+
+        <!--
+          `allowBackup` is off, which is a deliberate privacy decision rather than a
+          default. With it unset (the previous state) Android backs app data up to the
+          user's Google Drive automatically, and for NOVA that means local caches of
+          voice transcripts, meeting recordings and saved memories leaving the device
+          without the user ever being asked. The account on the server is the source of
+          truth — everything durable is already synced — so nothing is lost by refusing
+          the automatic cloud copy, and the onboarding preferences are the only
+          device-local state worth re-entering.
+
+          `fullBackupContent="false"` disables the key/value and full backup paths for
+          API <= 30 as well; API 31+ honours `allowBackup` alone.
+        -->
 
         <!--
           REQUIRED. Tells the Flutter tool that this app uses the Android v2
@@ -102,14 +182,20 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- Firebase Cloud Messaging notification icon. -->
+        <!-- Firebase Cloud Messaging notification icon. `firebase_messaging` is not a
+             dependency and nothing registers for push, so this meta-data is inert; it
+             is kept because removing it would silently change the icon for any future
+             FCM integration. -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"
             android:resource="@drawable/ic_notification" />
 
-        <!-- Crashlytics: automatic collection. Effective only once a real
-             google-services.json is generated (flutterfire configure); the
-             committed one is still a placeholder. -->
+        <!-- Crashlytics: automatic collection. This is **live**: the committed
+             `google-services.json` is real (project `nova-leadup-stagging`, zero
+             `YOUR_` placeholders), so crash reports are collected in release builds.
+             The Data safety form must therefore declare "App info and performance →
+             Crash logs, Diagnostics" for Android. (iOS is separate and still inert —
+             its `GoogleService-Info.plist` is a placeholder that is not even bundled.) -->
         <meta-data
             android:name="firebase_crashlytics_collection_enabled"
             android:value="true" />
@@ -137,9 +223,28 @@
           app: `.WakeWordForegroundService`, `.NovaWakeService` and their
           duplicates were removed.
         -->
+        <!--
+          `stopWithTask="false"` is the difference between "listening" and "listening until
+          you swipe the app away".
+
+          Android's default is `true`, so removing NOVA from Recents killed the service and
+          the wake word stopped — with no indication to the user that it had, and no way to
+          tell short of watching the log. The service is a foreground service with a
+          persistent notification, which is exactly the contract that says it may outlive
+          its task: the user can see it running and stop it deliberately.
+
+          Measured on a OnePlus 9R, this is necessary but not sufficient: OxygenOS ALSO
+          freezes the whole process when the screen goes off
+          (`OplusHansManager: freeze uid … scene: LcdOff`), which stops detection
+          regardless of this flag. Beating that needs the user to exclude NOVA from
+          battery optimisation — see the note in docs/REQUIREMENTS_VERIFICATION.md about
+          why that is offered as a settings link rather than the restricted
+          REQUEST_IGNORE_BATTERY_OPTIMIZATIONS permission.
+        -->
         <service
             android:name=".WakeWordService"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="microphone" />
 
         <!-- Boot receiver: restarts the wake-word service after a reboot. -->

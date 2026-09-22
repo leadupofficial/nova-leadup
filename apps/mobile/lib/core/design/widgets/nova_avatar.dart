@@ -38,6 +38,7 @@ class NovaAvatarRing extends StatefulWidget {
     this.animationDensity = NovaAvatarDensity.medium,
     this.showEmojiFace = false,
     this.reducedMotionFace = false,
+    this.animate = true,
   });
 
   final double size;
@@ -61,6 +62,13 @@ class NovaAvatarRing extends StatefulWidget {
   /// "Reduce Motion" on.
   final bool reducedMotionFace;
 
+  /// Whether this avatar may spend a continuous frame budget.
+  ///
+  /// The ring only moves for the states the design calls animated
+  /// (`NovaAvatarState.isAnimated`) and only while this is true, so a caller can
+  /// park a ring whose state is live but whose screen must settle.
+  final bool animate;
+
   @override
   State<NovaAvatarRing> createState() => _NovaAvatarRingState();
 }
@@ -83,6 +91,7 @@ Widget novaAvatarFaceLayer({
   required Widget? child,
   required bool showEmojiFace,
   required bool reducedMotionFace,
+  bool animate = false,
   double? emojiSize,
 }) {
   if (child != null) return child;
@@ -98,6 +107,7 @@ Widget novaAvatarFaceLayer({
   return NovaAvatarFace(
     size: size,
     state: state,
+    animate: animate,
     emotion: emotion,
     density: animationDensity,
   );
@@ -131,7 +141,7 @@ class _NovaAvatarRingState extends State<NovaAvatarRing>
 
   void _sync() {
     final reduce = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    if (widget.breathe && !reduce && widget.state.isAnimated) {
+    if (widget.animate && widget.breathe && !reduce && widget.state.isAnimated) {
       _c.repeat(reverse: true);
     } else {
       _c.stop();
@@ -148,7 +158,11 @@ class _NovaAvatarRingState extends State<NovaAvatarRing>
   @override
   void didUpdateWidget(covariant NovaAvatarRing old) {
     super.didUpdateWidget(old);
-    if (old.state != widget.state || old.breathe != widget.breathe) _sync();
+    if (old.state != widget.state ||
+        old.breathe != widget.breathe ||
+        old.animate != widget.animate) {
+      _sync();
+    }
   }
 
   @override
@@ -210,6 +224,9 @@ class _NovaAvatarRingState extends State<NovaAvatarRing>
                       child: widget.child,
                       showEmojiFace: widget.showEmojiFace,
                       reducedMotionFace: widget.reducedMotionFace,
+                      // The rig fills this circle, so it may animate exactly when
+                      // the ring itself may: only for a genuinely live state.
+                      animate: widget.animate && widget.state.isAnimated,
                       emojiSize: widget.size * 0.44,
                     ),
                   ),
@@ -266,6 +283,7 @@ class NovaAvatarHeroCard extends StatefulWidget {
     this.emotion = 'neutral',
     this.animationDensity = NovaAvatarDensity.medium,
     this.showEmojiFace = false,
+    this.animate = false,
   });
 
   final String face;
@@ -285,6 +303,13 @@ class NovaAvatarHeroCard extends StatefulWidget {
   /// Opt back into the emoji instead of the code-drawn rig.
   final bool showEmojiFace;
 
+  /// Whether this card may spend a continuous frame budget.
+  ///
+  /// False (the default) parks both the breathing aura and the rig, so a screen
+  /// the user is merely looking at stops scheduling frames. The expression
+  /// still follows [state]; only the motion stops.
+  final bool animate;
+
   @override
   State<NovaAvatarHeroCard> createState() => _NovaAvatarHeroCardState();
 }
@@ -303,7 +328,10 @@ class _NovaAvatarHeroCardState extends State<NovaAvatarHeroCard>
 
   void _sync() {
     final reduce = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    if (!reduce) {
+    // The aura is decoration, not information: it may only run while the screen
+    // genuinely has something to show. Running it at mount and never stopping is
+    // what pinned a core on an idle Home screen.
+    if (widget.animate && !reduce) {
       _c.repeat(reverse: true);
     } else {
       _c.stop();
@@ -315,6 +343,12 @@ class _NovaAvatarHeroCardState extends State<NovaAvatarHeroCard>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _sync();
+  }
+
+  @override
+  void didUpdateWidget(covariant NovaAvatarHeroCard old) {
+    super.didUpdateWidget(old);
+    if (old.animate != widget.animate || old.state != widget.state) _sync();
   }
 
   @override
@@ -410,6 +444,7 @@ class _NovaAvatarHeroCardState extends State<NovaAvatarHeroCard>
                       child: null,
                       showEmojiFace: widget.showEmojiFace,
                       reducedMotionFace: false,
+                      animate: widget.animate && widget.state.isLive,
                     );
                   },
                 ),

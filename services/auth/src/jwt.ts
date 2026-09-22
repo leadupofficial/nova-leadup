@@ -3,12 +3,27 @@
  */
 import jwt, { type SignOptions } from 'jsonwebtoken';
 import type { JwtPayload } from '@nova/auth-types';
-import { env } from './env.js';
 
-const JWT_SECRET = env.JWT_SECRET;
-const REFRESH_SECRET = env.JWT_REFRESH_SECRET;
-const ACCESS_TTL = env.JWT_ACCESS_TTL;
-const REFRESH_TTL_MS = parseDuration(env.JWT_REFRESH_TTL);
+/**
+ * Access-token signing and verification read `process.env` on demand rather than
+ * through the package's validated `env` object.
+ *
+ * `authenticateJwt` is imported by other services, and pulling the full `env` schema in
+ * here made every one of them require the whole auth configuration —
+ * `JWT_REFRESH_SECRET`, `API_KEY_SECRET`, `AUTH_ENCRYPTION_KEY` — merely to verify one
+ * JWT. `services/integration-service` could not boot because of it. This module needs
+ * `JWT_SECRET` and defaults for the two TTLs, and nothing more.
+ *
+ * (`REFRESH_SECRET` was read from `env` here and never used: refresh tokens are random
+ * opaque strings, not signed JWTs. It is gone rather than kept as required-but-unused.)
+ */
+function jwtSecret(): string {
+	const secret = process.env.JWT_SECRET;
+	if (!secret) {
+		throw new Error('JWT_SECRET is not set — NOVA access tokens cannot be signed or verified');
+	}
+	return secret;
+}
 
 export interface TokenPair {
 	accessToken: string;
@@ -18,8 +33,8 @@ export interface TokenPair {
 
 export function signAccessToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): { token: string; expiresIn: number; jti: string } {
 	const jti = crypto.randomUUID();
-	const expiresIn = ACCESS_TTL;
-	const token = jwt.sign({ ...payload, jti }, JWT_SECRET, {
+	const expiresIn = process.env.JWT_ACCESS_TTL ?? '15m';
+	const token = jwt.sign({ ...payload, jti }, jwtSecret(), {
 		algorithm: 'HS256',
 		// jsonwebtoken types `expiresIn` as `number | ms.StringValue` (a template
 		// literal union); the value comes from env and is validated at runtime by
@@ -37,12 +52,12 @@ export function signAccessToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): { tok
 export type AccessTokenPayload = JwtPayload & { jti: string };
 
 export function verifyAccessToken(token: string): AccessTokenPayload {
-	return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as AccessTokenPayload;
+	return jwt.verify(token, jwtSecret(), { algorithms: ['HS256'] }) as AccessTokenPayload;
 }
 
 export function signRefreshToken(): { token: string; expiresAt: Date } {
 	const token = crypto.randomUUID().replace(/-/g, '');
-	const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
+	const expiresAt = new Date(Date.now() + parseDuration(process.env.JWT_REFRESH_TTL ?? '7d'));
 	return { token, expiresAt };
 }
 

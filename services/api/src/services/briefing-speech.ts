@@ -29,8 +29,14 @@ export interface BriefingCounts {
 // ─── Speech normalisation ───────────────────────────────────────────────────
 
 const URL_LIKE = /\b(?:https?:\/\/|www\.)\S+/gi;
-/** Emoji, pictographs, dingbats and the zero-width joiner that binds them. */
-const PICTOGRAPH = /[\u{1F000}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu;
+/**
+ * Emoji, pictographs, dingbats and the two invisible characters that bind them
+ * (variation selector-16 and the zero-width joiner). The two joiners are alternatives
+ * rather than class members: kept inside the class they are *combining* characters,
+ * which `no-misleading-character-class` correctly flags because a class member that
+ * combines with its neighbour is almost never what the author meant.
+ */
+const PICTOGRAPH = /(?:[\u{1F000}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]|\u{FE0F}|\u{200D})/gu;
 /** `toSpeakableText` strips `*`; these are the rest of the bullet family. */
 const BULLET_CHARACTERS = /[•·▪▫◦‣⁃]/g;
 
@@ -78,11 +84,45 @@ function plural(n: number, singular: string, pluralForm: string): string {
 	return n === 1 ? singular : pluralForm;
 }
 
+/**
+ * The teens, which are their own words rather than a ten plus a unit.
+ *
+ * This table is not decoration. `minutesToWords` used to derive 10–19 from
+ * `NUMBER_WORDS` with `` `e${NUMBER_WORDS[minutes].slice(1)}` `` — an attempt to
+ * turn "ten"/"eleven" into "eleven" by prefixing an `e` to the tail. It was wrong
+ * in three separate ways, and all three reached the user because this function
+ * renders a **spoken** clock time:
+ *
+ *   10 → `NUMBER_WORDS[10]` = "ten" → `e` + "en"  = **"een"**
+ *   11 → "eleven" → `e` + "leven"                 = "eleven"  (right by accident)
+ *   12 → "twelve" → `e` + "welve"                 = **"ewelve"**
+ *   13–19 → `NUMBER_WORDS[13]` is **undefined**  = **TypeError**
+ *
+ * The TypeError propagated out of `renderGroundedBriefing` and took the whole
+ * briefing route down, so for nine minutes out of every sixty the daily briefing
+ * returned an error instead of a briefing. It hid for a while because the only
+ * test that reached it built a reminder relative to "now", and so only failed
+ * when the suite happened to run between :10 and :19 — which is exactly how a
+ * real defect gets dismissed as a flaky test.
+ */
+const TEEN_WORDS: Record<number, string> = {
+	10: 'ten',
+	11: 'eleven',
+	12: 'twelve',
+	13: 'thirteen',
+	14: 'fourteen',
+	15: 'fifteen',
+	16: 'sixteen',
+	17: 'seventeen',
+	18: 'eighteen',
+	19: 'nineteen',
+};
+
 /** 0-59 as words, so a clock time is never handed to TTS as digits. */
 export function minutesToWords(minutes: number): string {
 	if (minutes === 0) return '';
 	if (minutes < 10) return NUMBER_WORDS[minutes];
-	if (minutes < 20) return `e${NUMBER_WORDS[minutes].slice(1)}`;
+	if (minutes < 20) return TEEN_WORDS[minutes];
 	const tens = TENS_WORDS[Math.floor(minutes / 10)];
 	const unit = minutes % 10;
 	return unit === 0 ? tens : `${tens} ${NUMBER_WORDS[unit]}`;

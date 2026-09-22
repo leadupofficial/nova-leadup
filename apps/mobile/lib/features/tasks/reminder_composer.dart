@@ -120,7 +120,7 @@ class _ReminderComposerState extends ConsumerState<ReminderComposer> {
                 Icon(Icons.notifications_none_rounded, size: 16, color: c.muted),
                 const SizedBox(width: 6),
                 Text(
-                  'Push notification at ${_time.format(context)}',
+                  'Reminder at ${_time.format(context)}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],

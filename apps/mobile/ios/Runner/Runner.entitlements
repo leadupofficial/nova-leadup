@@ -1,8 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+	NOVA currently declares no entitlements.
+
+	`aps-environment: production` was removed here before the first App Store
+	submission. It was dead: there is no `firebase_messaging` dependency, no
+	`FirebaseMessaging` / `registerForRemoteNotifications` call anywhere in `lib/`,
+	and no push-handling code in the Runner target — nothing ever obtained a device
+	token, so the entitlement only asserted a capability the app does not use.
+
+	It was not merely inert, either. `aps-environment` makes the App ID require the
+	Push Notifications capability, so the provisioning profile has to carry it, and a
+	profile generated without it fails to sign the archive. Removing the key lets the
+	app be signed with an ordinary distribution profile.
+
+	To add push later: re-add the key here, add `firebase_messaging`, register for
+	remote notifications, restore the `remote-notification` background mode in
+	Info.plist (also required for silent pushes), and enable the Push Notifications
+	capability on the App ID in the Apple Developer portal.
+-->
 <plist version="1.0">
-<dict>
-	<key>aps-environment</key>
-	<string>production</string>
-</dict>
+<dict/>
 </plist>

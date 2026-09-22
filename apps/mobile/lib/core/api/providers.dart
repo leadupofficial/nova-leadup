@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../features/reminders/reminder_sync.dart';
 import 'models.dart';
 import 'nova_api.dart';
 
@@ -125,7 +126,10 @@ final remindersProvider = FutureProvider.autoDispose<List<NovaReminder>>((
   ref,
 ) async {
   final api = ref.watch(novaApiProvider);
-  return api.listReminders();
+  // Every page. A single 50-row page meant the Reminders screen silently showed a
+  // partial list to anyone with more than 50 — the same truncation that was
+  // deleting their alarms.
+  return (await api.listAllReminders()).reminders;
 });
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -186,12 +190,14 @@ final homeOverviewProvider = FutureProvider.autoDispose<HomeOverview>((
   final results = await Future.wait([
     api.listTasks(),
     api.listMemories(),
-    api.listReminders(),
+    // The whole list, not one page: a count taken from a truncated page would
+    // under-report exactly the users who have the most reminders.
+    api.listAllReminders(),
   ]);
 
   final tasks = results[0] as List<NovaTask>;
   final memories = results[1] as List<NovaMemory>;
-  final reminders = results[2] as List<NovaReminder>;
+  final reminders = (results[2] as NovaReminderList).reminders;
 
   return HomeOverview(
     openTasks: tasks.where((t) => !t.isDone).length,
@@ -281,6 +287,13 @@ class NovaMutations {
   void _refreshReminders() {
     _ref.invalidate(remindersProvider);
     _ref.invalidate(homeOverviewProvider);
+    // The alarm lives on the device, not on the server, so the server round trip
+    // above does not arm anything. Without this the reminder the user just created
+    // had no local alarm until the app was resumed or the auth state changed, and a
+    // deleted reminder kept its alarm until the same moment. `sync` reconciles the
+    // OS's notifications against the list, so invalidating it is what arms or drops
+    // the alarm now.
+    _ref.invalidate(reminderSyncProvider);
   }
 
   Future<NovaConversation> startConversation({String? title}) async {

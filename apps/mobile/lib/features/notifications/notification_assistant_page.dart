@@ -68,7 +68,27 @@ class _NotificationAssistantPageState
         ],
       ),
       refresh: controller.refreshStatus,
-      child: Column(
+      // The whole console is Android-only. It reads the notification shade through a
+      // `NotificationListenerService` and sends the user to Android's own
+      // "Notification access" screen, neither of which exists on iOS —
+      // `notification_platform.dart` reports `unsupported` there. The controller
+      // already refused to act, but the page still rendered every step, the master
+      // toggle and a live-looking inbox, so an iOS reviewer saw a feature set the app
+      // cannot deliver. That is the same App Review 2.3.1(a) defect the device-control
+      // and call-recording screens were fixed for; this was the one screen left.
+      //
+      // Gated after `status` resolves, so the loading state is not mistaken for
+      // "unsupported".
+      child: (state.status != null && !state.isSupported)
+          ? const NovaStateView(
+              icon: Icons.notifications_off_outlined,
+              title: 'Notification assistant is Android only',
+              message:
+                  'Reading alerts from other apps needs Android\'s notification listener, '
+                  'which iOS does not provide. Nothing is being read on this device, and '
+                  'NOVA never reads notification content it was not given access to.',
+            )
+          : Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           NotificationDisclosure(state: state, controller: controller),

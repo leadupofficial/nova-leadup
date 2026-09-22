@@ -32,8 +32,10 @@ import 'dotenv/config';
 
 import express from 'express';
 import compression from 'compression';
-import { validateEnv } from './utils/env.js';
-void validateEnv();
+// The full auth-service configuration (JWT secrets, API-key secret, encryption key,
+// database, Redis, port). Validated when this file starts the server, not on import —
+// see the `isEntryPoint` block at the bottom.
+import { loadEnv } from './env.js';
 import authRoutes from './routes/authRoutes.js';
 import orgRoutes from './routes/orgRoutes.js';
 import apiKeyRoutes, { authenticateApiKey } from './routes/apiKeyRoutes.js';
@@ -129,6 +131,9 @@ const isEntryPoint = (() => {
 })();
 
 if (isEntryPoint) {
+ // Fail fast, but only when we are actually the server. Importing the package for
+ // `authenticateJwt` must not require this service's DATABASE_URL/REDIS_URL/PORT.
+ loadEnv();
  const server = app.listen(PORT, () => {
  console.log(`[auth] @nova/auth listening on :${PORT}`);
  });

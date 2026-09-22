@@ -15,9 +15,15 @@ import '../../core/voice/wake_word_controller.dart';
 /// Geometry from the export: the 80px gradient `overlay-bubble` at
 /// `top:60 right:24` with a cyan live dot and a 4s float loop; the
 /// `overlay-panel` glass sheet at `left/right/bottom:24` (85% surface, 40px
-/// backdrop blur, 24px radius, 18px padding); the `.notice` at `bottom:8`. It
-/// returns a [Positioned.fill], so it must be a **direct** child of a [Stack]:
+/// backdrop blur, 24px radius, 18px padding). It returns a [Positioned.fill], so
+/// it must be a **direct** child of a [Stack]:
 /// `Stack(children: [MyScreen(), FloatingOverlay()])`.
+///
+/// The export's `.notice` at `bottom:8` is deliberately **not** here any more.
+/// Painting it from this overlay put it in the shell's stack, above the body,
+/// where it covered the Home screen's overview cards. It is a layout element now
+/// ([SummonHint], mounted by the shell below the screen's `Expanded` slot), so
+/// it reserves its own space instead of landing on content.
 ///
 /// Real wiring: the copy comes from [voiceProvider] (`VoiceState`) and
 /// [wakeWordStateProvider] (`WakeWordState`) — the same state the Home/Converse
@@ -73,17 +79,33 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
 
   late bool _expanded = widget.initiallyExpanded;
 
-  /// MediaQuery is read here, never in `initState`.
+  /// The `live` value the two loops were last synced for, so the controllers are
+  /// started and parked only when it actually changes.
+  bool _motionLive = false;
+  bool? _motionRunning;
+
+  /// Starts or parks the float/pulse loops.
+  ///
+  /// Both are `repeat()` loops, and a running [AnimationController] asks the
+  /// engine for a frame every vsync for as long as it runs. This orb is mounted
+  /// by the shell, so leaving them running made *every* tab render at 60 fps
+  /// forever — measured on the OnePlus 9R at ~100 % of one core on Tasks, Memory
+  /// and Me, none of which is doing anything. They now run only while something
+  /// is genuinely live; [live] deliberately does *not* include the passive
+  /// "wake word is armed" state, which is a background capability the UI reports
+  /// with static chrome (the lit dot and the status copy), not with motion.
   void _syncMotion() {
-    if (context.novaReduceMotion) {
-      _float.stop();
-      _float.value = 0.5;
-      _pulse.stop();
-      _pulse.value = 1;
+    final running = _motionLive && !context.novaReduceMotion;
+    if (_motionRunning == running) return;
+    _motionRunning = running;
+    if (running) {
+      if (!_float.isAnimating) _float.repeat(reverse: true);
+      if (!_pulse.isAnimating) _pulse.repeat(reverse: true);
       return;
     }
-    if (!_float.isAnimating) _float.repeat(reverse: true);
-    if (!_pulse.isAnimating) _pulse.repeat(reverse: true);
+    // `stop()` alone: writing `value` would notify listeners mid-build.
+    _float.stop();
+    _pulse.stop();
   }
 
   @override
@@ -129,6 +151,12 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
     final live = _live(voice, wake);
     final face = _faceState(voice, wake, avatar);
 
+    // The loops follow what is actually live, not merely armed. Doing this here
+    // (rather than in `didChangeDependencies`) is what lets them react to a voice
+    // turn starting or ending; it only touches controllers, never `setState`.
+    _motionLive = live;
+    _syncMotion();
+
     return Positioned.fill(
       child: Stack(
         children: [
@@ -152,18 +180,6 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
                   duration: NovaMotion.ui,
                   child: _panel(c, prompt),
                 ),
-              ),
-            ),
-          ),
-          Positioned(
-            left: NovaSpace.gutter,
-            right: NovaSpace.gutter,
-            bottom: 8,
-            child: IgnorePointer(
-              child: Text(
-                "NOVA never sees other apps' content. Tap avatar to summon.",
-                textAlign: TextAlign.center,
-                style: _body(c, NovaType.micro, c.muted),
               ),
             ),
           ),
@@ -194,8 +210,8 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
         state == null || state == VoiceState.ready || state == VoiceState.inactive;
     if (wake.listening && passive) {
       // `phrase` is null only before availability has been probed or when the
-      // build has no classifier; neither case may be filled in with a phrase
-      // the app cannot hear.
+      // build has no wake word installed; neither case may be filled in with a
+      // phrase the app cannot hear.
       final phrase = wake.phrase;
       return (
         headline: phrase == null ? '🎙 Listening' : '🎙 Listening for "$phrase"',
@@ -205,8 +221,13 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
     return (headline: base.$1, detail: base.$2);
   }
 
+  /// True while a voice turn is genuinely in flight.
+  ///
+  /// The passive wake word is *not* included. "Armed" is a background capability
+  /// that stays true for days; treating it as live is what kept `_float`,
+  /// `_pulse` and the orb's rig rendering at 60 fps on every screen for no
+  /// reason. The lit dot still reports the wake word (see [_orb]).
   static bool _live(AsyncValue<VoiceState> voice, WakeWordState wake) {
-    if (wake.listening) return true;
     final state = voice.asData?.value;
     return state == VoiceState.listening ||
         state == VoiceState.processing ||
@@ -306,6 +327,10 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
                         state: face,
                         emotion: _avatarEmotion,
                         density: _avatarDensity,
+                        // The orb rides above every tab, so its rig is the one
+                        // face that could bill the whole app: it animates only
+                        // while a turn is live.
+                        animate: live,
                       ),
                     ),
                   ),
@@ -510,14 +535,14 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
   }
 }
 
-/// The wake word NOVA will actually listen for, humanised (`hey_jarvis` ->
-/// `Hey Jarvis`), or null when no classifier is installed in this build.
+/// The wake word NOVA will actually listen for, humanised (`hey_nova` ->
+/// `Hey Nova`), or null when no wake word is installed in this build.
 ///
 /// There is deliberately no invented fallback. An earlier version returned the
-/// string `'Hey Nova'` here, which no build can honour: openWakeWord ships no
-/// "hey nova" classifier and the repo contains none, so the app was naming a
-/// phrase it could not hear. Callers now have to say something honest when this
-/// returns null.
+/// string `'Hey Nova'` unconditionally, from a hardcoded product name rather
+/// than from what the service reports, so the app could name a phrase the
+/// microphone was not listening for. Callers now have to say something honest
+/// when this returns null.
 ///
 /// Public because `wakeword_page.dart` shows it too.
 String? wakePhrase(WakeWordState wake) => wake.phrase;

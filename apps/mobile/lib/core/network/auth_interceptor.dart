@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../features/auth/auth_api.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -125,9 +126,38 @@ class AuthInterceptor extends Interceptor {
       return token;
     } catch (error, stackTrace) {
       debugPrint('[AuthInterceptor] Token refresh failed: $error\n$stackTrace');
-      await _notifyRefreshFailed();
+      // **Only a definitive rejection ends the session.**
+      //
+      // This used to call `_notifyRefreshFailed()` for *any* throw, and that path runs
+      // `handleRefreshFailure()` → clears the session → forces the sign-in screen. So
+      // the app logged the user out whenever it could not *reach* the server: airplane
+      // mode, a dropped connection, a timeout, a 5xx during a deploy. Observed directly
+      // — the API was stopped and restarted several times during testing, and the app
+      // came back to "Welcome back" with a refresh token that had never been rejected.
+      //
+      // A refresh that fails because the network is down is not an authentication
+      // failure. The token is probably still valid, so it is kept and the next request
+      // tries again; only a status that says the credential itself was refused ends the
+      // session.
+      if (_sessionWasRejected(error)) {
+        await _notifyRefreshFailed();
+      }
       return null;
     }
+  }
+
+  /// True when the server answered and refused the refresh token.
+  ///
+  /// A null status means no HTTP response arrived at all — a socket error, a timeout or
+  /// DNS — and a 5xx means the server failed rather than the credential. Neither is a
+  /// reason to sign the user out.
+  static bool _sessionWasRejected(Object error) {
+    final status = switch (error) {
+      AuthException(:final statusCode) => statusCode,
+      _ => null,
+    };
+    if (status == null) return false;
+    return status == 401 || status == 403;
   }
 
   /// Notifies the app at most once per refresh attempt, and never lets a throwing

@@ -1,0 +1,232 @@
+[
+ {
+ "id": "AUDIT-001",
+ "severity": "Critical",
+ "category": "DevOps",
+ "description": "Package directory does not exist at the referenced path. The auth package lives at services/auth/ but is referenced throughout the repo as packages/auth/.",
+ "impact": "Any CI job, developer workflow, or import path targeting packages/auth/ fails with a missing-directory error. Build scripts, monorepo workspace references, and documentation are all broken.",
+ "file": "packages/auth/ (does not exist); actual location: services/auth/",
+ "recommended_fix": "Audit all repository files (package.json workspaces, tsconfig paths, CI workflows, imports in other services, documentation) for packages/auth/ references and replace with services/auth/. Verify the monorepo workspace declaration in the root package.json correctly maps services/auth.",
+ "code_example": null
+ },
+ {
+ "id": "AUDIT-002",
+ "severity": "Critical",
+ "category": "Architecture",
+ "description": "The dedicated src/password.ts module does not exist. Password hashing utilities (hashPassword, verifyPassword) are implemented inside crypto.ts alongside unrelated token encryption, API key generation, and HMAC functions.",
+ "impact": "Single-responsibility principle is violated. Developers searching for password utilities will not find a dedicated module. The team lead explicitly flagged src/password.ts as an audit target, confirming it was intended to exist.",
+ "file": "services/auth/src/crypto.ts:10-16",
+ "recommended_fix": "Create src/password.ts with the bcrypt utilities and re-export from crypto.ts for backward compatibility.",
+ "code_example": "// services/auth/src/password.ts\nimport bcrypt from 'bcryptjs';\n\nconst BCRYPT_ROUNDS = 12;\n\nexport async function hashPassword(plain: string): Promise<string> {\n return bcrypt.hash(plain, BCRYPT_ROUNDS);\n}\n\nexport async function verifyPassword(plain: string, hash: string): Promise<boolean> {\n return bcrypt.compare(plain, hash);\n}\n\n// services/auth/src/crypto.ts — add re-exports:\nexport { hashPassword, verifyPassword } from './password.js';"
+ },
+ {
+ "id": "AUDIT-003",
+ "severity": "High",
+ "category": "Missing Features",
+ "description": "authenticateApiKey is not re-exported from the package root. It is imported internally (index.ts:38) and used only for the /health/service endpoint (index.ts:85), but consuming services cannot access it.",
+ "impact": "integration-service, agent-orchestrator, and any future service cannot perform service-to-service authentication via API keys. They are limited to JWT middleware only, preventing scoped, long-lived service credentials.",
+ "file": "services/auth/src/routes/apiKeyRoutes.ts:90-121; services/auth/src/index.ts:38,44-49",
+ "recommended_fix": "Add the export to src/index.ts.",
+ "code_example": "export { authenticateApiKey } from './routes/apiKeyRoutes.js';"
+ },
+ {
+ "id": "AUDIT-004",
+ "severity": "High",
+ "category": "Missing Features",
+ "description": "AuthHttpError, errorHandler, and sendProblem are exported from middleware.ts but not re-exported from the package root. The auth service uses a consistent RFC 7807 problem-details format (https://api.nova.leadup.in/problems/...) throughout.",
+ "impact": "Consuming services cannot construct RFC 7807 problem-details responses matching the auth service's format. Error response shapes will be inconsistent across the API surface, violating the documented API contract.",
+ "file": "services/auth/src/middleware.ts:26,118,136; services/auth/src/index.ts:44-49",
+ "recommended_fix": "Add the exports to src/index.ts.",
+ "code_example": "export { AuthHttpError, errorHandler, sendProblem } from './middleware.js';"
+ },
+ {
+ "id": "AUDIT-005",
+ "severity": "High",
+ "category": "Missing Features",
+ "description": "rateLimitUser (per-user sliding-window rate limiting via Redis) is not re-exported from the package root. Only the IP-based rateLimitMiddleware is exported.",
+ "impact": "Authenticated users can bypass rate limits by distributing requests across multiple IPs. Without per-user rate limiting, there is no defense against credential-stuffing or abuse from authenticated accounts.",
+ "file": "services/auth/src/ratelimit.ts:55-66; services/auth/src/index.ts",
+ "recommended_fix": "Add the export to src/index.ts.",
+ "code_example": "export { rateLimitUser } from './ratelimit.js';"
+ },
+ {
+ "id": "AUDIT-006",
+ "severity": "Medium",
+ "category": "Missing Features",
+ "description": "Token-level crypto utilities (encryptToken, decryptToken, generateApiKey, hmacSha256, hashToken, compareTokenHash) are exported from crypto.ts but not re-exported from the package root.",
+ "impact": "Other services needing token encryption/decryption or API key hashing must implement their own cryptographic utilities, risking inconsistency and potential security flaws if implementations diverge.",
+ "file": "services/auth/src/crypto.ts:25-70; services/auth/src/index.ts:45",
+ "recommended_fix": "Add the exports to src/index.ts.",
+ "code_example": "export { encryptToken, decryptToken, generateApiKey, hmacSha256, hashToken, compareTokenHash } from './crypto.js';"
+ },
+ {
+ "id": "AUDIT-007",
+ "severity": "Medium",
+ "category": "Missing Features",
+ "description": "signRefreshToken is exported from jwt.ts but not re-exported from the package root.",
+ "impact": "No external service can generate refresh tokens using the shared JWT implementation. If a token refresh endpoint is added to another service, it cannot use the shared utility and may implement an incompatible scheme.",
+ "file": "services/auth/src/jwt.ts:110-114; services/auth/src/index.ts:44",
+ "recommended_fix": "Add the export to src/index.ts.",
+ "code_example": "export { signRefreshToken } from './jwt.js';"
+ },
+ {
+ "id": "AUDIT-008",
+ "severity": "Medium",
+ "category": "Architecture",
+ "description": "The package.json exports field only provides a single root entry point. No subpath exports (./middleware, ./jwt, ./crypto) are defined.",
+ "impact": "Consumers importing a single utility (e.g., authenticateJwt) must bundle the entire package including routes, rate limiters, and crypto modules. This prevents effective tree-shaking and increases bundle size for consumers.",
+ "file": "services/auth/package.json:56-61",
+ "recommended_fix": "Add subpath exports for major modules.",
+ "code_example": "\"exports\": {\n \".\": {\n \"types\": \"./dist/index.d.ts\",\n \"import\": \"./dist/index.js\",\n \"default\": \"./dist/index.js\"\n },\n \"./middleware\": {\n \"types\": \"./dist/middleware.d.ts\",\n \"import\": \"./dist/middleware.js\"\n },\n \"./jwt\": {\n \"types\": \"./dist/jwt.d.ts\",\n \"import\": \"./dist/jwt.js\"\n },\n \"./crypto\": {\n \"types\": \"./dist/crypto.d.ts\",\n \"import\": \"./dist/crypto.js\"\n }\n}"
+ },
+ {
+ "id": "AUDIT-009",
+ "severity": "Medium",
+ "category": "DevOps",
+ "description": "The exports map in @nova/auth is inconsistent with sibling package @nova/auth-types, which includes a \"default\" condition. @nova/auth only provides \".\" without a default fallback.",
+ "impact": "Minor resolution differences in certain bundlers or older Node.js versions that prefer the \"default\" condition. Inconsistency is a maintenance hazard that can cause subtle cross-package import failures.",
+ "file": "services/auth/package.json:56-61; packages/auth-types/package.json:9-15",
+ "recommended_fix": "Add the \"default\" condition to the root export in services/auth/package.json.",
+ "code_example": "\".\": {\n \"types\": \"./dist/index.d.ts\",\n \"import\": \"./dist/index.js\",\n \"default\": \"./dist/index.js\"\n}"
+ },
+ {
+ "id": "AUDIT-010",
+ "severity": "Medium",
+ "category": "Security",
+ "description": "authenticateApiKey uses a dynamic import() to load hmacSha256 from crypto.ts inside the request handler (line 100), rather than at module load time. This was done to avoid a circular dependency.",
+ "impact": "The crypto module is loaded on every API key validation request rather than once at startup, adding minor but unnecessary performance overhead per request. The dynamic import pattern is fragile and complicates error handling.",
+ "file": "services/auth/src/routes/apiKeyRoutes.ts:100",
+ "recommended_fix": "Refactor to eliminate the circular dependency so the import can be hoisted to module scope.",
+ "code_example": "// At top of apiKeyRoutes.ts, before the function:\nimport { hmacSha256 } from '../crypto.js';\n\n// Then in authenticateApiKey, remove the dynamic import:\nconst hash = hmacSha256(process.env.API_KEY_SECRET || 'default', rawKey);"
+ },
+ {
+ "id": "AUDIT-011",
+ "severity": "Medium",
+ "category": "Security",
+ "description": "No JWT key rotation mechanism exists. Keys are loaded from static PEM files (private.pem, public.pem) with no rotation, versioning, or graceful rollover support.",
+ "impact": "If a private key is compromised, there is no way to rotate without a service restart and potential downtime. Tokens signed with the old key cannot be validated during the transition window.",
+ "file": "services/auth/src/jwt.ts:34-54",
+ "recommended_fix": "Implement a key registry that tracks active and previous keys, support JWT_KEY_ID for key versioning (partially present at jwt.ts:92), and load multiple public keys for verification during rotation windows.",
+ "code_example": "// Concept: key registry pattern\ninterface KeyPair {\n kid: string;\n privateKey: string;\n publicKey: string;\n active: boolean;\n}\n\nconst KEY_REGISTRY: KeyPair[] = []; // populated from env or key store\n\nfunction verifyAccessToken(token: string): JwtPayload {\n const decoded = jwt.decode(token, { complete: true });\n const kid = decoded?.header?.kid ?? 'nova-default';\n const key = KEY_REGISTRY.find(k => k.kid === kid) ?? KEY_REGISTRY.find(k => k.active);\n if (!key) throw new Error('No matching key found');\n return jwt.verify(token, key.publicKey, { algorithms: ['RS256'] }) as JwtPayload;\n}"
+ },
+ {
+ "id": "AUDIT-012",
+ "severity": "Medium",
+ "category": "DevOps",
+ "description": "Multiple dependencies listed in package.json are installed but never imported or used in the service code: cors, helmet, morgan, express-ws, ws, pino.",
+ "impact": "Unnecessary dependencies increase install time, Docker image size, and attack surface. The @types/* packages for unused modules also add noise to dependency audits.",
+ "file": "services/auth/package.json:20-40",
+ "recommended_fix": "Remove unused dependencies from package.json. If CORS is intended for production, uncomment and configure the middleware; otherwise remove cors and @types/cors.",
+ "code_example": "// Remove from dependencies:\n// \"@types/cors\", \"@types/helmet\", \"@types/morgan\", \"@types/pino\", \"@types/ws\"\n// \"bcryptjs\" → move to devDependencies if only used in tests (verify actual usage)\n// \"compression\", \"express-ws\", \"pino\", \"ws\"\n\n// If CORS is needed, add to index.ts:\nimport cors from 'cors';\napp.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') ?? 'http://localhost:3000' }));"
+ },
+ {
+ "id": "AUDIT-013",
+ "severity": "Medium",
+ "category": "Architecture",
+ "description": "CORS is listed as a dependency and a comment at index.ts:58 says 'CORS (tighten in production)', but no CORS middleware is actually configured or imported.",
+ "impact": "The service has no CORS policy. In production, this means all cross-origin requests are either blocked by default (no Access-Control-Allow-Origin header) or, if a reverse proxy handles CORS, the service itself has no defense-in-depth. The comment implies CORS was intended but never implemented.",
+ "file": "services/auth/src/index.ts:58-59",
+ "recommended_fix": "Either implement CORS middleware with a configurable origin allowlist, or remove the dependency and comment to avoid the false impression that CORS is handled.",
+ "code_example": "import cors from 'cors';\n\nconst corsOrigin = process.env.CORS_ORIGIN?.split(',') ?? 'http://localhost:3000';\napp.use(cors({ origin: corsOrigin, credentials: true }));\napp.use((req, res, next) => {\n res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');\n res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization');\n if (req.method === 'OPTIONS') return res.sendStatus(204);\n next();\n});"
+ },
+ {
+ "id": "AUDIT-014",
+ "severity": "Low",
+ "category": "Architecture",
+ "description": "validateEnv is invoked inline at module load time (index.ts:33) but is not re-exported for use by consuming services.",
+ "impact": "Low — consuming services likely have their own env validation, but a shared validation utility would ensure consistent environment contracts across the monorepo.",
+ "file": "services/auth/src/index.ts:33; services/auth/src/utils/env.ts:14-27",
+ "recommended_fix": "Add the export to src/index.ts.",
+ "code_example": "export { validateEnv } from './utils/env.js';"
+ },
+ {
+ "id": "AUDIT-015",
+ "severity": "Low",
+ "category": "Architecture",
+ "description": "Internal modules import each other via relative paths (e.g., ../middleware.js, ../crypto.js) instead of package-relative imports.",
+ "impact": "Works correctly today, but any future package restructuring (moving files, splitting into subpackages) requires widespread path refactoring across all internal modules.",
+ "file": "services/auth/src/routes/apiKeyRoutes.ts:9 (and other modules throughout)",
+ "recommended_fix": "Consider adopting package-relative imports or a barrel file pattern if the package structure evolves. No immediate action required.",
+ "code_example": null
+ },
+ {
+ "id": "AUDIT-016",
+ "severity": "Low",
+ "category": "Security",
+ "description": "The MFA verify endpoint (/auth/mfa/verify, authRoutes.ts:303-310) always returns { verified: true } without actually validating the TOTP code against the enrolled secret.",
+ "impact": "MFA enrollment is a no-op. Users who enroll MFA believe they have 2FA protection, but any request to /auth/mfa/verify succeeds regardless of the code. This creates a false sense of security and may cause compliance failures if 2FA is a policy requirement.",
+ "file": "services/auth/src/routes/authRoutes.ts:303-310",
+ "recommended_fix": "Store the MFA secret during enrollment, then validate the TOTP code during verification using a library like otplib or speakeasy.",
+ "code_example": "// During enrollment, store secret in DB:\nawait createMfaSecret({ userId: ctx.userId, secret, method: parsed.method });\n\n// During verification:\nimport { verifyTotp } from 'otplib';\nconst record = await findMfaSecret(userId);\nif (!record || !verifyTotp({ token: parsed.code, secret: record.secret })) {\n return next(problem(401, 'Unauthorized', 'Invalid MFA code'));\n}\nres.json({ verified: true });"
+ },
+ {
+ "id": "AUDIT-017",
+ "severity": "Low",
+ "category": "Security",
+ "description": "The OTP request endpoint logs a partial OTP code to the console (authRoutes.ts:163): `[OTP] SMS to ${phoneNumber}: OTP_${otp.slice(0, 2)}****_sent_via_${channel}`. While the full code is masked, partial OTP leakage in logs is a risk.",
+ "impact": "If logs are compromised or aggregated in a logging service (e.g., Datadog, CloudWatch), an attacker with partial OTP knowledge has a reduced search space. The first 2 digits of a 6-digit OTP reduce the brute-force space from 1,000,000 to 10,000 combinations.",
+ "file": "services/auth/src/routes/authRoutes.ts:163",
+ "recommended_fix": "Remove the OTP from log output entirely. Log only metadata (phone number, channel, timestamp).",
+ "code_example": "console.log(`[OTP] SMS to ${parsed.phoneNumber} via ${parsed.channel} at ${new Date().toISOString()}`);"
+ },
+ {
+ "id": "AUDIT-018",
+ "severity": "Low",
+ "category": "Security",
+ "description": "The password reset endpoint logs a partial reset token to the console (authRoutes.ts:243): `[PASSWORD_RESET] Token for ${user.email}: RESET_${resetToken.slice(0, 4)}****`. The reset token is a UUID, and partial leakage reduces the search space.",
+ "impact": "Partial UUID leakage in logs reduces the entropy an attacker needs to brute-force. A UUID has 2^122 possibilities; leaking 4 characters reduces this significantly.",
+ "file": "services/auth/src/routes/authRoutes.ts:243",
+ "recommended_fix": "Remove the reset token from log output. Log only the user email and action.",
+ "code_example": "console.log(`[PASSWORD_RESET] Reset requested for ${user.email} at ${new Date().toISOString()}`);"
+ },
+ {
+ "id": "AUDIT-019",
+ "severity": "Low",
+ "category": "Security",
+ "description": "The API key hash comparison in authenticateApiKey (apiKeyRoutes.ts:104) checks only for the 'read' scope, not the actual scopes required by the protected endpoint (/health/service).",
+ "impact": "Any API key with the 'read' scope can access the /health/service endpoint, even if the key was created with restrictive scopes. The endpoint should validate that the key has the 'service:health' or equivalent scope.",
+ "file": "services/auth/src/routes/apiKeyRoutes.ts:104",
+ "recommended_fix": "Check for a specific 'service:health' scope instead of the generic 'read' scope.",
+ "code_example": "if (!key || !key.scopes.includes('service:health')) {\n (req as unknown as { authError: AuthHttpError }).authError = new AuthHttpError('Invalid API key', 401);\n return;\n}"
+ },
+ {
+ "id": "AUDIT-020",
+ "severity": "Low",
+ "category": "Performance",
+ "description": "JWT keys are loaded from disk on every token verification (jwt.ts:46 loadPublicKey reads the file synchronously each time verifyAccessToken is called).",
+ "impact": "Synchronous file I/O on every request adds latency. In high-traffic scenarios, this becomes a bottleneck. The private key is similarly reloaded on every signAccessToken call (jwt.ts:35 loadPrivateKey).",
+ "file": "services/auth/src/jwt.ts:34-54, 89, 105",
+ "recommended_fix": "Cache the loaded keys in module-level variables, loading them once at startup or on first access.",
+ "code_example": "let cachedPublicKey: string | null = null;\nlet cachedPrivateKey: string | null = null;\n\nfunction loadPublicKey(): string {\n if (!cachedPublicKey) {\n const p = resolveKeyPath('keys/public.pem', 'JWT_PUBLIC_KEY_PATH');\n cachedPublicKey = fs.readFileSync(p, 'utf8');\n }\n return cachedPublicKey;\n}\n\nfunction loadPrivateKey(): string {\n if (!cachedPrivateKey) {\n const p = resolveKeyPath('keys/private.pem', 'JWT_PRIVATE_KEY_PATH');\n cachedPrivateKey = fs.readFileSync(p, 'utf8');\n }\n return cachedPrivateKey;\n}"
+ },
+ {
+ "id": "AUDIT-021",
+ "severity": "Low",
+ "category": "Edge Cases",
+ "description": "The rate limiter's endpoint matching uses req.route?.path, which is undefined for unmatched routes (ratelimit.ts:35). For the 404 handler and any route not matched by Express router, the endpoint falls back to req.path.",
+ "impact": "Unmatched routes get rate-limited against their literal path (e.g., /nonexistent), which means an attacker can bypass rate limits by spraying requests at different non-existent paths. Each path gets its own counter.",
+ "file": "services/auth/src/ratelimit.ts:35",
+ "recommended_fix": "Normalize unmatched routes to a single catch-all key for rate limiting.",
+ "code_example": "const endpoint = req.route?.path ?? (req.path.match(/^\\/auth\\/[^\\/]+/) ? req.path : '/unmatched');"
+ },
+ {
+ "id": "AUDIT-022",
+ "severity": "Medium",
+ "category": "Security",
+ "description": "The bcrypt rounds constant (BCRYPT_ROUNDS = 12) is applied to both password hashing and OTP code hashing (crypto.ts:8 used by authRoutes.ts:165 and 192). OTP codes are 6-digit numeric values with very low entropy and do not need bcrypt.",
+ "impact": "Using bcrypt with 12 rounds on a 6-digit OTP is computationally expensive and provides no meaningful security benefit. An attacker with the hash still has only 1,000,000 possible values to brute-force. This wastes CPU cycles and can be a DoS vector if many OTP requests are made.",
+ "file": "services/auth/src/crypto.ts:8; services/auth/src/routes/authRoutes.ts:165,192",
+ "recommended_fix": "Use a simpler hash or HMAC for OTP codes, or store them encrypted rather than bcrypt-hashed.",
+ "code_example": "// In crypto.ts:\nexport function hashOtp(code: string): string {\n return hmacSha256(process.env.OTP_HMAC_SECRET || 'fallback-secret', code);\n}\n\nexport function verifyOtp(code: string, hash: string): boolean {\n return hmacSha256(process.env.OTP_HMAC_SECRET || 'fallback-secret', code) === hash;\n}\n\n// In authRoutes.ts, replace:\n// const codeHash = await hashPassword(otp); → const codeHash = hashOtp(otp);\n// const valid = await verifyPassword(parsed.code, otpRecord.code_hash); → const valid = verifyOtp(parsed.code, otpRecord.code_hash);"
+ },
+ {
+ "id": "AUDIT-023",
+ "severity": "Medium",
+ "category": "Security",
+ "description": "Password reset tokens are hashed with bcrypt (authRoutes.ts:238) and then looked up by re-hashing the user-provided token (authRoutes.ts:257). This means each password reset request causes a bcrypt hash computation on the submitted token, and the lookup requires a full table scan.",
+ "impact": "A password reset endpoint that iterates bcrypt on every request is an ideal timing oracle and DoS vector. An attacker sending millions of random tokens forces the server to compute bcrypt hashes, consuming CPU. The SQL query also cannot use an index on token_hash because bcrypt produces different hashes for the same input (due to random salts).",
+ "file": "services/auth/src/routes/authRoutes.ts:238,257-260",
+ "recommended_fix": "Use a deterministic hash (HMAC-SHA256) for password reset tokens so they can be indexed and looked up directly. Store the HMAC hash in the database.",
+ "code_example": "// Generate:\nconst token = crypto.randomUUID();\nconst tokenHash = hmacSha256(process.env.PASSWORD_RESET_SECRET || 'fallback', token);\n\n// Lookup:\nconst qResult = await q(\n 'SELECT id, user_id FROM password_reset_tokens WHERE token_hash = $1 AND consumed = false AND expires_at > now() LIMIT 1',\n [tokenHash]\n);"
+ }
+]

@@ -22,16 +22,16 @@ class WakeWordAvailability {
 
   final String? detail;
 
-  /// Names of the installed wake words, e.g. `['hey_jarvis']`.
+  /// Names of the installed wake words, e.g. `['hey_nova']`.
   final List<String> models;
 
   /// The installed wake word the service will actually listen for — the user's
-  /// saved choice, or the first installed classifier when nothing is saved.
-  /// Null only when no classifier is installed at all.
+  /// saved choice, or the first installed model when nothing is saved.
+  /// Null only when no wake word is installed at all.
   final String? selected;
 
-  /// True when there is more than one installed classifier, i.e. when the user
-  /// genuinely has a choice. Today's build ships exactly one (`hey_jarvis`), so
+  /// True when there is more than one installed wake word, i.e. when the user
+  /// genuinely has a choice. Today's build ships exactly one (`hey_nova`), so
   /// this is false and the UI must say so rather than offer a dead picker.
   bool get hasChoice => models.length > 1;
 
@@ -59,17 +59,26 @@ class WakeWordAvailability {
     );
   }
 
-  /// A message suitable for display to the user.
+  /// A message suitable for display when wake word detection cannot run.
   ///
-  /// Uses the raw classifier names the service reports (not a humanised form),
-  /// so it always names the exact `models.json` entry that is loaded.
+  /// This describes *availability*, not *state*: it cannot see the user's toggle or
+  /// whether the native service is running, so it must never claim the microphone is
+  /// listening. The state-aware line is `WakeWordState.statusMessage`, which the home
+  /// dashboard uses.
+  ///
+  /// Names the phrase humanised, like every other surface: `hey_nova` is an asset key,
+  /// not something to show a user.
   String get userMessage {
     switch (reason) {
       case 'ok':
-        if (selected != null) return 'Listening for $selected.';
-        return models.isEmpty
+        final phrase =
+            selectedPhrase ??
+            (models.isEmpty
+                ? null
+                : models.map(humanizeWakeWordName).join(' or '));
+        return phrase == null
             ? 'Wake word is available.'
-            : 'Listening for ${models.join(" or ")}.';
+            : 'Wake word is available: "$phrase".';
       case 'unsupported_platform':
         return 'Wake word detection is not available on this platform yet.';
       case 'missing_shared_models':
@@ -84,7 +93,7 @@ class WakeWordAvailability {
   }
 }
 
-/// `hey_jarvis` -> `Hey Jarvis`.
+/// `hey_nova` -> `Hey Nova`.
 ///
 /// Lives here rather than in a screen because the phrase is now rendered from
 /// the availability the native service reports (the settings screen, the home
@@ -137,9 +146,9 @@ abstract interface class WakeWordPlatform {
 
   Future<bool> isRunning();
 
-  /// Persists [name] as the classifier to listen for.
+  /// Persists [name] as the wake word to listen for.
   ///
-  /// Returns false when the service does not have an installed classifier with
+  /// Returns false when the service does not have an installed wake word with
   /// that name. The native layer validates against the assets it can actually
   /// load, so a phrase that is not installed is refused rather than saved.
   Future<bool> selectModel(String name);

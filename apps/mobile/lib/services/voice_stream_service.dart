@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// Connection lifecycle for the voice streaming socket.
@@ -76,9 +77,33 @@ class _ChannelVoiceSocket implements VoiceSocket {
 class DefaultVoiceSocketConnector implements VoiceSocketConnector {
   const DefaultVoiceSocketConnector();
 
+  /// Connects using the native dart:io WebSocket so we can pass the
+  /// authorization header instead of putting the token in the query string.
+  ///
+  /// Query-string tokens appear in server logs, proxy logs, and HTTP
+  /// referrer headers. Moving the token to an `Authorization` header keeps
+  /// it out of the URL entirely. The server side (`realtime/index.ts`) checks
+  /// both the `token` query parameter and the `Authorization` header, so
+  /// removing the query parameter does not break any deployment.
   @override
   Future<VoiceSocket> connect(Uri uri, {Map<String, dynamic>? headers}) async {
-    return _ChannelVoiceSocket(WebSocketChannel.connect(uri, protocols: null));
+    final wsHeaders = <String, String>{};
+    if (headers != null) {
+      for (final entry in headers.entries) {
+        if (entry.value is String) {
+          wsHeaders[entry.key] = entry.value as String;
+        }
+      }
+    }
+
+    // Strip the token query parameter: the bearer is now in the header.
+    final uriWithoutToken = uri.replace(queryParameters: <String, String>{});
+
+    final channel = IOWebSocketChannel.connect(
+      uriWithoutToken,
+      headers: wsHeaders,
+    );
+    return _ChannelVoiceSocket(channel);
   }
 }
 
@@ -96,6 +121,7 @@ class VoiceStreamService {
     this.connector = const DefaultVoiceSocketConnector(),
     this.config = const VoiceReconnectConfig(),
     this.headers,
+    this.headersResolver,
   }) : assert(
          uri != null || uriResolver != null,
          'VoiceStreamService needs either a fixed uri or a uriResolver.',
@@ -116,6 +142,11 @@ class VoiceStreamService {
   final VoiceSocketConnector connector;
   final VoiceReconnectConfig config;
   final Map<String, dynamic>? headers;
+  final Map<String, dynamic> Function()? headersResolver;
+
+  /// Resolved headers for the next connection attempt, refreshed on each
+  /// connect so that short-lived bearer tokens are always current.
+  Map<String, dynamic>? get resolvedHeaders => headersResolver?.call() ?? headers;
 
   /// The URI used for the next connection attempt.
   Uri get uri => uriResolver?.call() ?? _uri!;
@@ -162,7 +193,7 @@ class VoiceStreamService {
     );
 
     try {
-      final socket = await connector.connect(uri, headers: headers);
+      final socket = await connector.connect(uri, headers: resolvedHeaders);
       if (_closed) {
         await socket.close();
         return;

@@ -11,8 +11,8 @@
  "incremental": true,
  "baseUrl": ".",
  "paths": {
- "@nova/shared-types": ["../shared-types/src"],
- "@nova/shared-types/*": ["../shared-types/src/*"]
+ "@nova/shared-types": ["../../packages/shared-types/dist"],
+ "@nova/shared-types/*": ["../../packages/shared-types/dist/*"]
  },
  "plugins": [
  {

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,6 +9,8 @@ import '../../core/api/nova_api.dart' show NovaApiException, novaApiProvider;
 import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
 import '../tasks/reminder_composer.dart';
+import 'notifications_blocked_notice.dart';
+import 'reminder_notifications.dart';
 import 'reminder_sync.dart';
 
 /// Reminders — port of `reminders/reminders.html`: sticky top bar, "Up next" hero
@@ -46,12 +49,28 @@ class RemindersPage extends ConsumerWidget {
         _addButton(context, () => _create(context, ref)),
       ]),
       refresh: () async => _refresh(ref),
-      child: ref.watch(remindersProvider).when(
-        loading: () => const NovaStateView(loading: true, title: 'Loading reminders'),
-        error: (e, _) => NovaStateView(
-          icon: Icons.cloud_off_rounded, tone: NovaStateTone.error, title: 'Could not load reminders',
-          message: _message(e), actionLabel: 'Retry', onAction: () => ref.invalidate(remindersProvider)),
-        data: (list) => list.isEmpty ? _emptyState(context, () => _create(context, ref)) : _Groups(rows: list),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Sits above the list so the disclosure is read before the button that opens
+          // the system "Alarms & reminders" screen is ever reachable. Renders nothing
+          // on iOS, when exact alarms are allowed *and* the last pass armed them
+          // exactly, or when there was nothing to arm.
+          const _ExactAlarmNotice(),
+          // The other half of "your reminder did not arrive": a denied
+          // POST_NOTIFICATIONS makes Android discard the notification the alarm
+          // produces, so no amount of exact-alarm access helps. Driven by what the
+          // reconcile pass actually read from the OS, not by a probe that has not
+          // run.
+          const _BlockedNotificationsNotice(),
+          ref.watch(remindersProvider).when(
+            loading: () => const NovaStateView(loading: true, title: 'Loading reminders'),
+            error: (e, _) => NovaStateView(
+              icon: Icons.cloud_off_rounded, tone: NovaStateTone.error, title: 'Could not load reminders',
+              message: _message(e), actionLabel: 'Retry', onAction: () => ref.invalidate(remindersProvider)),
+            data: (list) => list.isEmpty ? _emptyState(context, () => _create(context, ref)) : _Groups(rows: list),
+          ),
+        ],
       ),
     );
   }
@@ -61,6 +80,147 @@ class RemindersPage extends ConsumerWidget {
     // `novaMutationsProvider.addReminder`. Reused, never duplicated.
     final created = await ReminderComposer.show(context);
     if (created == true) _refresh(ref);
+  }
+}
+
+// ─── Notifications blocked disclosure ───────────────────────────────────────
+
+/// The reminders screen's half of the "notifications are off" warning.
+///
+/// Driven by [ReminderReconciliation.notificationsBlocked] — what the last
+/// reconcile pass actually *read from the OS* — rather than by a permission
+/// probe. That matters for the same reason the exact-alarm card is driven by the
+/// result: the read is a prediction, and the result is what happened. It also
+/// keeps this card and the Home Status card telling the same story from one
+/// source.
+///
+/// It renders nothing when the pass has not run, when the OS is posting
+/// notifications, or when there is nothing at all for the user to miss — a
+/// warning about reminders that do not exist is noise.
+class _BlockedNotificationsNotice extends ConsumerWidget {
+  const _BlockedNotificationsNotice();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final result = ref.watch(reminderSyncProvider).lastResult;
+    if (result == null || !result.notificationsBlocked) {
+      return const SizedBox.shrink();
+    }
+
+    return const Padding(
+      padding: EdgeInsets.only(bottom: NovaSpace.md),
+      child: NotificationsBlockedNotice(
+        margin: EdgeInsets.zero,
+        title: 'Android is blocking NOVA\'s notifications',
+      ),
+    );
+  }
+}
+
+// ─── Exact alarm disclosure ─────────────────────────────────────────────────
+
+/// Prominent, in-app disclosure for the `SCHEDULE_EXACT_ALARM` special access.
+///
+/// Google Play's restricted-permission policy requires two things this widget exists to
+/// satisfy, and the previous implementation satisfied neither:
+///
+///  * the app must **direct the user** to the system settings page for a special
+///    permission rather than opening it unprompted — so the request now happens only
+///    from the button below, never from a background reconcile pass; and
+///  * the app must explain **what** the permission is for, in the app, before the system
+///    screen appears — so the card states that reminders land on time, that Android calls
+///    this access "Alarms & reminders", and that declining only makes delivery
+///    approximate.
+///
+/// It has two triggers, and the second is the one that matters. The permission read is
+/// a *prediction*; the reconcile result is what actually happened. Measured on Android
+/// 16, `SCHEDULE_EXACT_ALARM` was granted — so the read answered "allowed" and the card
+/// stayed hidden — while the OS refused every exact alarm through the
+/// `canScheduleExactAlarms()` app-op, and every reminder arrived 3.5 to 7 minutes late.
+/// The card is therefore shown whenever the last pass armed at least one reminder
+/// inexactly, whatever the permission read believes.
+///
+/// The card is Android-only and disappears as soon as an exact schedule succeeds.
+class _ExactAlarmNotice extends ConsumerWidget {
+  const _ExactAlarmNotice();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // `Permission.scheduleExactAlarm` is an Android special access; iOS has no
+    // equivalent and `permission_handler` reports it as permanently denied there.
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return const SizedBox.shrink();
+    }
+
+    final result = ref.watch(reminderSyncProvider).lastResult;
+    // `scheduled > 0` is part of the test on purpose: a pass that armed nothing
+    // never consults the permission and reports `exact: false` regardless, and a
+    // user with no due reminders must never be sent to the "Alarms & reminders"
+    // screen.
+    final scheduledInexactly = result != null && result.scheduled > 0 && !result.exact;
+
+    final allowed = ref.watch(exactAlarmAllowedProvider);
+    // While the first read is in flight, or if it failed, fall back to what the
+    // reconcile pass reported: a disclosure card that may be wrong is worse than no
+    // card, but staying silent about a schedule the OS refused is worse still.
+    final discovery = allowed.hasValue ? allowed.value == false : false;
+    if (!scheduledInexactly && !discovery) return const SizedBox.shrink();
+
+    final c = context.nova;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: NovaSpace.md),
+      child: NovaCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.alarm_rounded, size: 18, color: c.accent),
+                const SizedBox(width: NovaSpace.sm),
+                Expanded(
+                  child: Text(
+                    'Let reminders arrive on time',
+                    style: NovaTheme.sectionHeading(c).copyWith(fontSize: 15),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: NovaSpace.sm),
+            Text(
+              'By default Android may deliver a reminder a few minutes late to save '
+              'battery. To fire them at the exact time you set, NOVA needs Android\'s '
+              'special "Alarms & reminders" access.\n\n'
+              'Tapping Continue opens that Android settings screen, where you choose '
+              'whether to allow it. Reminders keep working either way — without it they '
+              'are just approximate.',
+              style: TextStyle(color: c.muted, fontSize: NovaType.bodySmall, height: 1.45),
+            ),
+            const SizedBox(height: NovaSpace.md),
+            Row(
+              children: [
+                Expanded(
+                  child: NovaPrimaryButton(
+                    label: 'Continue',
+                    onPressed: () async {
+                      // Interactive: this is the user-initiated path, so it may open the
+                      // system screen. It re-reads the status first, so a user who already
+                      // granted access in Settings never sees the screen again.
+                      await ref
+                          .read(reminderNotificationsProvider)
+                          .ensureExactAlarmPermission(interactive: true);
+                      ref.invalidate(exactAlarmAllowedProvider);
+                      // Re-run the sync so anything previously scheduled inexactly is
+                      // upgraded now that exact alarms are available.
+                      ref.invalidate(reminderSyncProvider);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

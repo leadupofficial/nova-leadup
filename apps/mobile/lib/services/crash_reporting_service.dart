@@ -60,20 +60,19 @@ class DebugConsoleCrashReporterBackend implements CrashReporterBackend {
 /// an in-memory breadcrumb trail that is attached to every report, and delegates to a
 /// pluggable [CrashReporterBackend].
 ///
-/// **Why no Firebase Crashlytics SDK is wired up yet.** The committed
-/// `android/app/google-services.json` and `ios/Runner/GoogleService-Info.plist` are
-/// placeholders (`YOUR_FIREBASE_PROJECT_ID`, `YOUR_ANDROID_API_KEY`, ...). Adding
-/// `firebase_crashlytics` against that config fails the Android build via the
-/// `google-services` plugin. To activate it:
+/// **The committed Firebase config is real, not a placeholder.** This comment used to
+/// claim `android/app/google-services.json` and `ios/Runner/GoogleService-Info.plist`
+/// were templates full of `YOUR_…` values and that Crashlytics was therefore not in
+/// play. That is false for Android: `google-services.json` has zero `YOUR_` values and
+/// carries project `nova-leadup-stagging` with a live API key, `firebase_crashlytics`
+/// is a dependency in `pubspec.yaml`, and `AndroidManifest.xml` sets
+/// `firebase_crashlytics_collection_enabled` to true. **Crash reports are live in
+/// release builds on Android.**
 ///
-/// ```bash
-/// cd apps/mobile
-/// dart pub global activate flutterfire_cli
-/// flutterfire configure --project=nova-leadup-stagging
-/// # then: flutter pub add firebase_core firebase_crashlytics
-/// ```
-///
-/// and pass a `FirebaseCrashReporterBackend()` to [initialize].
+/// What is still inert is **iOS**: `ios/Runner/GoogleService-Info.plist` remains a
+/// placeholder and is not referenced by `project.pbxproj`, so it is not bundled and
+/// `FirebaseActivation.initialize()` falls back. Run `flutterfire configure` and add
+/// the plist to the Runner Resources build phase to activate it there.
 class CrashReportingService {
   static final CrashReportingService _instance = CrashReportingService._internal();
 
@@ -85,6 +84,20 @@ class CrashReportingService {
   @visibleForTesting
   CrashReportingService.forTesting({CrashReporterBackend? backend})
       : _backend = backend ?? DebugConsoleCrashReporterBackend();
+
+  /// The process-wide instance, with collection forced on.
+  ///
+  /// Normally `enabled` is `!kDebugMode`, so [log] and [recordError] are no-ops
+  /// under `flutter test`. Startup's contract is that a bootstrap failure is
+  /// *reported* and not swallowed, so its tests need the report to actually land
+  /// somewhere they can read. This only flips the flag on the shared instance,
+  /// which is exactly what bootstrap and the widget tree both hold.
+  @visibleForTesting
+  static CrashReportingService enabledForTesting() {
+    final service = CrashReportingService();
+    service._enabled = true;
+    return service;
+  }
 
   CrashReporterBackend _backend;
 

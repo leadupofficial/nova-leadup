@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
+import '../briefing/briefing_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -5,7 +7,10 @@ import 'package:go_router/go_router.dart';
 import '../../core/api/models.dart';
 import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
+import '../../app/providers.dart';
 import '../auth/auth_controller.dart';
+import '../reminders/notification_delivery_cache.dart';
+import '../reminders/reminder_sync.dart';
 
 /// Profile & settings — port of `settings/profile.html`, `settings/privacy.html`
 /// and `settings/integrations.html`.
@@ -91,15 +96,15 @@ class MePage extends ConsumerWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(p.email, style: NovaTheme.msgLabel(c)),
-                        if (!p.emailVerified) ...[
-                          const SizedBox(height: 6),
-                          NovaStatusPill(
-                            label: 'Verify email',
-                            tone: c.warning,
-                            animate: false,
-                            icon: Icons.mark_email_unread_outlined,
-                          ),
-                        ],
+                        // A "Verify email" pill used to render here whenever
+                        // `emailVerified` was false — which was *every* account, since
+                        // registration defaults it to false — with no way to verify.
+                        // `services/api` exposes no verify-email or resend route
+                        // (`routes/auth.ts` has login/register/refresh/logout/me only),
+                        // so the pill promised an action that did not exist and could
+                        // never be cleared. It is removed until the flow does; the
+                        // account is fully usable without it, because nothing in the
+                        // product gates on the flag.
                       ],
                     ),
                   ),
@@ -178,7 +183,13 @@ class MePage extends ConsumerWidget {
                 Divider(height: 1, color: c.border),
                 NovaListRow(
                   title: 'Notification assistant',
-                  subtitle: 'Read selected notifications — off by default',
+                  // Reading the notification shade needs Android's notification
+                  // listener. Saying "Read selected notifications" on iOS described a
+                  // capability the build does not have; the row still leads to the
+                  // screen, which now states the limit itself.
+                  subtitle: defaultTargetPlatform == TargetPlatform.android
+                      ? 'Read selected notifications — off by default'
+                      : 'Android only — not available on this device',
                   icon: Icons.notifications_active_outlined,
                   onTap: () => context.push('/me/notifications'),
                 ),
@@ -240,13 +251,64 @@ class MePage extends ConsumerWidget {
                   onTap: () => context.push('/admin'),
                 ),
                 Divider(height: 1, color: c.border),
+                // Both rows below are store requirements, not conveniences:
+                // App Review 5.1.1(i) / Play's User Data policy require the privacy
+                // policy to be readable in-app, and App Review 5.1.1(v) / Play's
+                // account-deletion requirement require an in-app deletion path for an
+                // account created in the app. They sit together so a reviewer finds
+                // both in one place.
+                NovaListRow(
+                  title: 'Privacy policy',
+                  subtitle: 'What NOVA collects and who processes it',
+                  icon: Icons.privacy_tip_outlined,
+                  // Full path: these routes are children of `/me`, so a bare
+                  // `/privacy-policy` matches nothing and renders go_router's
+                  // "No screen matches" error page. Verified on a device.
+                  onTap: () => context.push('/me/privacy-policy'),
+                ),
+                Divider(height: 1, color: c.border),
+                NovaListRow(
+                  title: 'Delete account',
+                  subtitle: 'Permanently remove your account and its data',
+                  icon: Icons.delete_forever_outlined,
+                  iconTone: c.danger,
+                  onTap: () => context.push('/me/delete-account'),
+                ),
+                Divider(height: 1, color: c.border),
                 NovaListRow(
                   title: 'Sign out',
                   subtitle: 'Ends this session on this device',
                   icon: Icons.logout_rounded,
                   iconTone: c.danger,
                   trailing: const SizedBox.shrink(),
-                  onTap: () => ref.read(authStateProvider.notifier).logout(),
+                  onTap: () async {
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        icon: Icon(Icons.logout_rounded, color: c.danger),
+                        title: const Text('Sign out?'),
+                        content: const Text(
+                          'You will need to sign in again to use NOVA on this device.',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(ctx).pop(false),
+                            child: const Text('Cancel'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.of(ctx).pop(true),
+                            child: Text(
+                              'Sign out',
+                              style: TextStyle(color: c.danger),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirmed == true) {
+                      await ref.read(authStateProvider.notifier).logout();
+                    }
+                  },
                 ),
               ],
             ),
@@ -392,10 +454,19 @@ class MePage extends ConsumerWidget {
               (p) => p.saveTranscripts),
           _Toggle('saveMemories', '💭', 'Save memories',
               (p) => p.saveMemories),
+          // Both of these are refused by the API and shown here as unavailable, for
+          // the same reason: this build has no on-device speech-to-text or language
+          // model, so turning cloud processing off, or on-device processing on, would
+          // change nothing about where the audio goes. A privacy switch that cannot be
+          // honoured is worse than no switch, because the user believes it.
           _Toggle('cloudProcessing', '☁️', 'Cloud processing',
-              (p) => p.cloudProcessing),
+              (p) => p.cloudProcessing,
+              unavailableReason:
+                  'Required — NOVA transcribes and answers on its servers. Use "Save recordings" and "Save transcripts" to control what is kept.'),
           _Toggle('localProcessing', '📱', 'On-device processing',
-              (p) => p.localProcessing),
+              (p) => p.localProcessing,
+              unavailableReason:
+                  'Not available in this build — there is no on-device model yet.'),
         ],
         apply: (p, key, value) => switch (key) {
           'saveConversations' => p.copyWith(saveConversations: value),
@@ -460,20 +531,63 @@ class MePage extends ConsumerWidget {
         initial: current,
         // Field names verified against GET /api/v1/settings/preferences, which
         // nests these under `notifications`.
+        //
+        // Only the two channels the app can actually deliver are offered here.
+        // `email` and `sms` were rendered as working switches, but there is no mail
+        // or SMS provider anywhere in the monorepo — no nodemailer/SendGrid/Twilio
+        // dependency, and the only SMS code is an unreferenced stub in
+        // `services/notifications`. A user could turn "SMS notifications" on and
+        // nothing would ever be sent, which is a false capability claim under Play's
+        // Deceptive Behavior policy and App Review 2.3.1(a). `push` is relabelled:
+        // there is no `firebase_messaging` and no device-token registration, so what
+        // actually delivers a reminder is a *local* scheduled notification.
+        // The two fields still round-trip through the preferences API untouched.
         toggles: [
-          _Toggle('push', '🔔', 'Push notifications', (p) => p.push),
+          _Toggle('push', '🔔', 'Device notifications', (p) => p.push),
           _Toggle('inApp', '📱', 'In-app notifications', (p) => p.inApp),
-          _Toggle('email', '✉️', 'Email notifications', (p) => p.email),
-          _Toggle('sms', '💬', 'SMS notifications', (p) => p.sms),
         ],
+        // Both switches are now the real gate: turning them off writes the local value
+        // the reminder and briefing reconcilers read, so it cancels the alarms already
+        // armed rather than only affecting reminders created afterwards. Reminder
+        // delivery itself is a local alarm, so the device's notification permission
+        // still has to be granted for anything to appear at all.
+        note:
+            'Turning both off stops reminders and the daily briefing on this device. '
+            'They still need your notification permission in system settings to appear '
+            'at all. Email and SMS alerts are not available, so they are not offered '
+            'here.',
         apply: (p, key, value) => switch (key) {
           'push' => p.copyWith(push: value),
           'inApp' => p.copyWith(inApp: value),
-          'email' => p.copyWith(email: value),
-          'sms' => p.copyWith(sms: value),
           _ => p,
         },
-        save: (p) => ref.read(novaMutationsProvider).saveNotificationPrefs(p),
+        save: (p) async {
+          await ref.read(novaMutationsProvider).saveNotificationPrefs(p);
+          // Mirror the choice locally, because the reminder reconciler arms a *local*
+          // alarm and cannot await a network round trip to decide whether to cancel
+          // one. Without this the switches stored a preference that changed nothing.
+          await cacheNotificationDelivery(
+            ref.read(sharedPreferencesProvider),
+            push: p.push,
+            inApp: p.inApp,
+          );
+          // The gate caches its answer for the session, so it has to be told the answer
+          // changed — otherwise the reconcilers keep reading the old value and a switch
+          // turned off here would not cancel anything until a restart.
+          ref.invalidate(notificationDeliveryEnabledProvider);
+          // Re-run reconciliation so turning delivery off cancels what is already
+          // armed rather than only affecting reminders created afterwards.
+          //
+          // Both reconcilers, not just the reminder one. The daily briefing is armed by
+          // `BriefingReconciler` from `DailyBriefingController`, and the note on this
+          // sheet promises that turning both switches off "stops reminders and the daily
+          // briefing on this device". Nothing invalidated the briefing controller, so an
+          // armed briefing went on firing every morning — across restarts and sign-outs —
+          // until the user happened to open the Daily briefing screen. The promise and
+          // the code disagreed, and the promise was the one users read.
+          ref.invalidate(reminderSyncProvider);
+          ref.invalidate(dailyBriefingProvider);
+        },
       ),
     );
   }
@@ -586,12 +700,21 @@ class MePage extends ConsumerWidget {
 
 /// Declaration of one switch in a [_ToggleSheet].
 class _Toggle<T> {
-  const _Toggle(this.key, this.emoji, this.label, this.read);
+  const _Toggle(this.key, this.emoji, this.label, this.read, {this.unavailableReason});
 
   final String key;
   final String emoji;
   final String label;
   final bool Function(T) read;
+
+  /// Set when the deployment cannot honour this preference at all.
+  ///
+  /// The switch renders disabled with this text instead of toggling, and the API
+  /// refuses the same values with a 409 — both halves say the same thing, so the app
+  /// cannot imply a privacy control it does not have. "On-device processing" claims the
+  /// audio never leaves the phone, and "Cloud processing: off" claims the same, while
+  /// every turn is still sent to a provider.
+  final String? unavailableReason;
 }
 
 /// A generic settings sheet of switches that saves through [save].
@@ -711,6 +834,7 @@ class _ToggleSheet<T> extends StatefulWidget {
     required this.apply,
     required this.save,
     this.extras,
+    this.note,
   });
 
   final String title;
@@ -718,6 +842,10 @@ class _ToggleSheet<T> extends StatefulWidget {
   final List<_Toggle<T>> toggles;
   final T Function(T current, String key, bool value) apply;
   final Future<void> Function(T value) save;
+
+  /// Optional line rendered under the toggles, for sheets that have to say what
+  /// they deliberately do not offer.
+  final String? note;
 
   /// Optional extra controls rendered under the toggles, for sheets that have
   /// more than booleans. Receives the current value and a setter.
@@ -750,16 +878,38 @@ class _ToggleSheetState<T> extends State<_ToggleSheet<T>> {
           Text(widget.title, style: NovaTheme.sectionHeading(c)),
           const SizedBox(height: NovaSpace.md),
           ...widget.toggles.map((t) {
+            final blocked = t.unavailableReason != null;
             return SwitchListTile(
               contentPadding: EdgeInsets.zero,
               secondary: Text(t.emoji, style: const TextStyle(fontSize: 18)),
               title: Text(t.label),
-              value: t.read(_value),
-              onChanged: _saving
+              // A switch the deployment cannot honour is disabled and says why, rather
+              // than moving and changing nothing.
+              subtitle: blocked
+                  ? Text(
+                      t.unavailableReason!,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall!
+                          .copyWith(color: c.muted, height: 1.35),
+                    )
+                  : null,
+              value: blocked ? (t.key == 'cloudProcessing') : t.read(_value),
+              onChanged: (_saving || blocked)
                   ? null
                   : (v) => setState(() => _value = widget.apply(_value, t.key, v)),
             );
           }),
+          if (widget.note != null)
+            Padding(
+              padding: const EdgeInsets.only(top: NovaSpace.xs),
+              child: Text(
+                widget.note!,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall!.copyWith(color: c.muted, height: 1.4),
+              ),
+            ),
           if (widget.extras != null)
             widget.extras!(
               _value,

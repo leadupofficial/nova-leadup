@@ -91,7 +91,7 @@ export default function LanguagesPage() {
 							<th style={thStyle}>Native</th>
 							<th style={{ ...thStyle, textAlign: 'center' }}>TTS Provider</th>
 							<th style={{ ...thStyle, textAlign: 'center' }}>STT Provider</th>
-							<th style={{ ...thStyle, textAlign: 'center' }}>Enabled</th>
+							<th style={{ ...thStyle, textAlign: 'center' }}>Routing</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -112,15 +112,32 @@ export default function LanguagesPage() {
 										<ProviderBadge label={lang.sttProvider} color={sttC} />
 									</td>
 									<td style={{ ...tdStyle, textAlign: 'center' }}>
+										{/* The column used to be headed "Enabled" and painted a green dot
+										    for every row unconditionally — a claim about runtime config
+										    that nothing in this page checked. It now says "Routing",
+										    which is what the data can actually support: both provider
+										    mappings resolved from `@nova/shared-types`. A missing
+										    provider is amber and labelled, so the table cannot imply a
+										    language works when its routing is incomplete. */}
 										<span
 											style={{
 												display: 'inline-block',
 												width: '8px',
 												height: '8px',
 												borderRadius: '50%',
-												background: '#10b981',
+												background: lang.voiceProvider && lang.sttProvider ? '#10b981' : '#f59e0b',
 											}}
-											aria-label="Enabled"
+											role="img"
+											aria-label={
+												lang.voiceProvider && lang.sttProvider
+													? 'TTS and STT providers configured'
+													: 'Routing incomplete'
+											}
+											title={
+												lang.voiceProvider && lang.sttProvider
+													? 'TTS and STT providers configured'
+													: 'Routing incomplete'
+											}
 										/>
 									</td>
 								</tr>

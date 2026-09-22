@@ -126,18 +126,28 @@ function tableNameOf(table: unknown): string {
 
 export function makeDb(store: Record<string, Row[]>): ReturnType<typeof getDb> {
 	const select = (selection?: Record<string, unknown>): unknown => {
-		const state: { rows: Row[] } = { rows: [] };
-		const resolved = (): Row[] =>
-			selection && Object.prototype.hasOwnProperty.call(selection, 'count')
-				? [{ count: state.rows.length }]
-				: state.rows;
+		const state: { rows: Row[]; limit: number | null } = { rows: [], limit: null };
+		const resolved = (): Row[] => {
+			const rows =
+				selection && Object.prototype.hasOwnProperty.call(selection, 'count')
+					? [{ count: state.rows.length }]
+					: state.rows;
+			// `limit` is honoured because a route that fails to bound a result set
+			// returns everything here, which is exactly the regression a test needs
+			// to be able to see (the segments list on `GET /recordings/:id`).
+			return state.limit === null ? rows : rows.slice(0, state.limit);
+		};
 		const q: Record<string, unknown> = {};
-		for (const method of ['from', 'where', 'orderBy', 'limit', 'offset', 'groupBy', 'having']) {
+		for (const method of ['from', 'where', 'orderBy', 'offset', 'groupBy', 'having']) {
 			q[method] = (table?: unknown) => {
 				if (method === 'from' && table) state.rows = store[tableNameOf(table)] ?? [];
 				return q;
 			};
 		}
+		q.limit = (count?: number) => {
+			state.limit = typeof count === 'number' ? count : null;
+			return q;
+		};
 		q.then = (ok: unknown, no: unknown) => Promise.resolve(resolved()).then(ok as never, no as never);
 		q.catch = (no: unknown) => (q.then as (a: unknown, b: unknown) => Promise<unknown>)(undefined, no);
 		return q;

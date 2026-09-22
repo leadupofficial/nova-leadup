@@ -35,7 +35,7 @@ export function useVoice(options: UseVoiceOptions = {}) {
  return;
  }
 
- // @ts-ignore - Web Speech API
+ // @ts-expect-error - Web Speech API
  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
  if (!SpeechRecognition) return;
 

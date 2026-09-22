@@ -49,24 +49,29 @@ class DebugAnalyticsBackend implements AnalyticsBackend {
 
 /// Product analytics facade.
 ///
-/// **Why there is no Firebase Analytics SDK here yet.** The committed
-/// `android/app/google-services.json` and `ios/Runner/GoogleService-Info.plist`
-/// are still placeholders (`YOUR_FIREBASE_PROJECT_ID`, `YOUR_ANDROID_API_KEY`, ...).
-/// Adding `firebase_analytics` on top of an invalid config makes the Android
-/// `google-services` plugin fail the build and `Firebase.initializeApp()` throw at
-/// runtime. So the SDK is deliberately behind this backend seam.
+/// **The committed Firebase config is real, not a placeholder.** This comment used to
+/// claim `android/app/google-services.json` and `ios/Runner/GoogleService-Info.plist`
+/// were still templates full of `YOUR_…` values, and that the SDK was therefore not in
+/// play. That is false for Android: `google-services.json` has zero `YOUR_` values and
+/// carries project `nova-leadup-stagging` with a live API key for package
+/// `com.leadup.nova`, and `FirebaseActivation.initialize()` in `main.dart` does run it.
+/// **Analytics is live in release builds on Android.**
 ///
-/// To activate Firebase Analytics:
+/// What *is* still inert is **iOS**: `ios/Runner/GoogleService-Info.plist` remains a
+/// placeholder, it is not referenced by `project.pbxproj` so it is not even bundled,
+/// and `FirebaseActivation.initialize()` catches the failure and falls back. So the
+/// App Store privacy answers must not declare analytics collection that the iOS binary
+/// does not perform, while the Play Data safety form must declare it.
 ///
-/// ```bash
-/// cd apps/mobile
-/// dart pub global activate flutterfire_cli
-/// flutterfire configure --project=nova-leadup-stagging
-/// # then: flutter pub add firebase_core firebase_analytics
-/// ```
+/// The consequence for the forms is spelled out in `docs/REQUIREMENTS_VERIFICATION.md`;
+/// the short version is that both stores need "App activity / App info and
+/// performance" declared for Android, and the iOS `PrivacyInfo.xcprivacy` entries for
+/// `DeviceID` / `CrashData` / `PerformanceData` describe Android-only collection until
+/// `flutterfire configure` is run for iOS.
 ///
-/// and pass a `FirebaseAnalyticsBackend()` to [initialize]. Nothing else in the app
-/// needs to change: every call site already goes through this facade.
+/// Collection is currently gated only on build mode (`enabled: !kDebugMode`). If the
+/// app is released in the EU without a consent gate, that needs revisiting — see the
+/// outstanding items in the verification doc.
 class AnalyticsService {
   AnalyticsService({AnalyticsBackend? backend})
       : _backend = backend ?? DebugAnalyticsBackend();

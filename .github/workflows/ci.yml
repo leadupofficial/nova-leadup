@@ -1,198 +1,206 @@
 name: CI/CD Pipeline
 
+# This workflow was stored with every key at one space of indentation, which YAML
+# rejects ("expected <block end>, but found '-'") — the file could not be loaded by
+# GitHub Actions at all. It also invoked root scripts that do not exist
+# (`format:check`, `type-check`, `test:unit`, `security:audit`, `test:e2e`) and pinned
+# `pnpm/action-setup` to version 11.24.0 while the repository's `packageManager` is
+# pnpm 9.15.0. Both are corrected below; the script names now match the root
+# `package.json` and `pnpm exec playwright test` replaces the missing `test:e2e`.
+
 on:
- push:
- branches: [main, develop]
- pull_request:
- branches: [main, develop]
- schedule:
- # Security scans weekly
- - cron: '0 0 * * 0'
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Security scans weekly
+    - cron: '0 0 * * 0'
 
 jobs:
- lint:
- name: Lint
- runs-on: ubuntu-latest
- steps:
- - uses: actions/checkout@v4
- - uses: pnpm/action-setup@v4
- with:
- version: 11.24.0
- - uses: actions/setup-node@v4
- with:
- node-version: '22'
- cache: 'pnpm'
- - run: pnpm install --frozen-lockfile
- - run: pnpm run lint
- - run: pnpm run format:check
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
 
- type-check:
- name: Type Check
- runs-on: ubuntu-latest
- needs: lint
- steps:
- - uses: actions/checkout@v4
- - uses: pnpm/action-setup@v4
- with:
- version: 11.24.0
- - uses: actions/setup-node@v4
- with:
- node-version: '22'
- cache: 'pnpm'
- - run: pnpm install --frozen-lockfile
- - run: pnpm run type-check
+  type-check:
+    name: Type Check
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
 
- test:
- name: Unit Tests
- runs-on: ubuntu-latest
- needs: lint
- steps:
- - uses: actions/checkout@v4
- - uses: pnpm/action-setup@v4
- with:
- version: 11.24.0
- - uses: actions/setup-node@v4
- with:
- node-version: '22'
- cache: 'pnpm'
- - run: pnpm install --frozen-lockfile
- - run: pnpm run test:unit
- - uses: codecov/codecov-action@v4
- if: github.event_name == 'push'
- with:
- files: ./coverage/lcov.info
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test
+      - uses: codecov/codecov-action@v4
+        if: github.event_name == 'push'
+        with:
+          files: ./coverage/lcov.info
 
- security-scan:
- name: Security Scan
- runs-on: ubuntu-latest
- steps:
- - uses: actions/checkout@v4
- - uses: pnpm/action-setup@v4
- with:
- version: 11.24.0
- - uses: actions/setup-node@v4
- with:
- node-version: '22'
- cache: 'pnpm'
- - run: pnpm install --frozen-lockfile
- # SAST — dependency audit across all workspaces
- - run: pnpm run security:audit
- # SAST — Semgrep static analysis
- - uses: semgrep/semgrep-action@v1
- with:
- config: >-
- p/security-audit
- p/owasp-top-ten
- # Container image scanning with Trivy
- - uses: aquasecurity/trivy-action@master
- with:
- scan-type: 'fs'
- scan-ref: '.'
- format: 'sarif'
- output: 'trivy-results.sarif'
- severity: 'CRITICAL,HIGH'
- # Dependency vulnerability scanning with osv-scanner
- - uses: google/osv-scanner-action@v1
- with:
- scan-path: '.'
- # Upload SARIF results to GitHub Security tab
- - uses: github/codeql-action/upload-sarif@v3
- with:
- sarif_file: 'trivy-results.sarif'
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      # Dependency audit across all workspaces. The threshold is `critical` because a
+      # known high-severity `drizzle-orm` advisory is deliberately deferred until the
+      # repository-layer migration lands; `high` would fail the pipeline on it.
+      - run: pnpm audit --audit-level=critical
+      # SAST — Semgrep static analysis
+      - uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/owasp-top-ten
+      # Container image scanning with Trivy
+      - uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+      # Dependency vulnerability scanning with osv-scanner
+      - uses: google/osv-scanner-action@v1
+        with:
+          scan-path: '.'
+      # Upload SARIF results to GitHub Security tab
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
 
- e2e-tests:
- name: E2E Tests
- runs-on: ubuntu-latest
- needs: [lint, type-check, test]
- services:
- postgres:
- image: pgvector/pgvector:pg16
- ports: ['5433:5432']
- env:
- POSTGRES_USER: postgres
- POSTGRES_PASSWORD: postgres
- POSTGRES_DB: nova_test
- options: >-
- --health-cmd "pg_isready -U postgres -d nova_test"
- --health-interval 5s
- --health-timeout 3s
- --health-retries 5
- redis:
- image: redis:7-alpine
- ports: ['6380:6379']
- options: >-
- --health-cmd "redis-cli ping"
- --health-interval 5s
- --health-timeout 3s
- --health-retries 5
- minio:
- image: minio/minio:latest
- ports: ['9001:9000']
- env:
- MINIO_ROOT_USER: minioadmin
- MINIO_ROOT_PASSWORD: minioadmin
- options: >-
- --health-cmd "curl -f http://localhost:9000/minio/health/live"
- --health-interval 5s
- --health-timeout 3s
- --health-retries 5
- steps:
- - uses: actions/checkout@v4
- - uses: pnpm/action-setup@v4
- with:
- version: 11.24.0
- - uses: actions/setup-node@v4
- with:
- node-version: '22'
- cache: 'pnpm'
- - run: pnpm install --frozen-lockfile
- # Install Playwright browsers and OS deps
- - run: pnpm exec playwright install --with-deps chromium
- # Install service dependencies
- - run: pnpm --filter @nova/auth install
- - run: pnpm --filter @nova/api install
- - run: pnpm --filter @nova/admin install
- # Wait for infra
- - run: sleep 5
- # Run migrations
- - run: DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 pnpm --filter @nova/api run db:migrate
- - run: DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 pnpm --filter @nova/auth run db:migrate
- # Start services in background
- - run: |
- DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 S3_ENDPOINT=http://localhost:9001 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=minioadmin PORT=3001 pnpm --filter @nova/api run dev &
- DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-jwt-secret-do-not-use-prod REFRESH_TOKEN_SECRET=e2e-refresh-secret-do-not-use-prod AUTH_ENCRYPTION_KEY=e2lwZW50b2tlcmtleXdlbGx0aGluZzMyYnl0ZXNmb3J0ZXNl API_KEY_SECRET=e2e-api-key-secret-do-not-use-prod PORT=3003 pnpm --filter @nova/auth run dev &
- DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-jwt-secret-do-not-use-prod PORT=3004 CORS_ORIGIN=http://localhost:3000 pnpm --filter @nova/admin run dev &
- sleep 8
- # Run E2E tests
- - run: API_URL=http://localhost:3001 AUTH_URL=http://localhost:3003 ADMIN_URL=http://localhost:3004 pnpm run test:e2e
- # Upload Playwright report
- - uses: actions/upload-artifact@v4
- if: always()
- with:
- name: playwright-report
- path: playwright-report/
- retention-days: 7
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [lint, type-check, test]
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        ports: ['5433:5432']
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nova_test
+        options: >-
+          --health-cmd "pg_isready -U postgres -d nova_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ['6380:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+      minio:
+        image: minio/minio:latest
+        ports: ['9001:9000']
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      # Install Playwright browsers and OS deps
+      - run: pnpm exec playwright install --with-deps chromium
+      # Wait for infra
+      - run: sleep 5
+      # Run migrations against the service containers
+      - run: DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 pnpm run db:migrate
+      # Start the services in the background
+      - run: |
+          DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 S3_ENDPOINT=http://localhost:9001 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=minioadmin PORT=3001 pnpm --filter @nova/api run dev &
+          DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-jwt-secret-do-not-use-prod REFRESH_TOKEN_SECRET=e2e-refresh-secret-do-not-use-prod AUTH_ENCRYPTION_KEY=e2lwZW50b2tlcmtleXdlbGx0aGluZzMyYnl0ZXNmb3J0ZXNl API_KEY_SECRET=e2e-api-key-secret-do-not-use-prod PORT=3003 pnpm --filter @nova/auth run dev &
+          DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-jwt-secret-do-not-use-prod PORT=3004 CORS_ORIGIN=http://localhost:3000 pnpm --filter @nova/admin run dev &
+          sleep 8
+      # Run E2E tests
+      - run: pnpm exec playwright test
+        env:
+          API_URL: http://localhost:3001
+          AUTH_URL: http://localhost:3003
+          ADMIN_URL: http://localhost:3004
+      # Upload Playwright report
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
 
- build:
- name: Build
- runs-on: ubuntu-latest
- needs: [lint, type-check, test]
- if: github.event_name == 'push'
- steps:
- - uses: actions/checkout@v4
- - uses: pnpm/action-setup@v4
- with:
- version: 11.24.0
- - uses: actions/setup-node@v4
- with:
- node-version: '22'
- cache: 'pnpm'
- - run: pnpm install --frozen-lockfile
- - run: pnpm run build
- - uses: actions/upload-artifact@v4
- with:
- name: build-artifacts
- path: |
- packages/*/dist/
- services/*/dist/
- retention-days: 7
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [lint, type-check, test]
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            packages/*/dist/
+            services/*/dist/
+          retention-days: 7

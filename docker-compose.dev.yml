@@ -1,2 +1,12 @@
-services:
- # Development overrides — hot-reload volumes, debug ports, etc.
+# Development-only overrides for the local stack.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# Deliberately empty: every development setting currently lives in
+# `docker-compose.yml`, and this file exists so a developer has one documented place
+# to add hot-reload volumes or debug ports without touching the shared base.
+#
+# It previously read `services:` followed by a comment and nothing else, which Compose
+# rejects with "services must be a mapping" — so it could not be used as an overlay at
+# all, including by `docker-compose.e2e.override.yml`, which named it as its base.
+services: {}
