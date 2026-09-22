@@ -194,3 +194,31 @@ be undone. What was missing was any signal that it is not there.
 **Consequence for the matrix:** the `ks` row is better than the catalogue implies
 (a Sarvam voice does speak it) and the `ur`/`ne`/`bho`/`awa` rows are worse (an
 English voice does). Both are now labelled in the picker.
+
+## 9. Switching language inside one conversation (2026-09-23)
+
+§9 requires the reply language to match the input "unless the user explicitly
+switches language", so the switch is the case that matters. One conversation, three
+turns, run twice — once with the policy on `auto` and once pinned to Hindi. The
+reply's dominant script was counted rather than eyeballed.
+
+| Policy | Turn 1 — English | Turn 2 — Hindi | Turn 3 — English |
+|---|---|---|---|
+| **`auto`** | Latin ✓ | **Devanagari** ✓ | **Latin** ✓ |
+| **pinned `hi`** | Devanagari | Devanagari ✓ | Devanagari |
+
+**`auto` follows the speaker**, including switching language mid-conversation and
+switching back — the exact behaviour §9 asks for. The Hindi turn was answered in
+Devanagari with grounded content (*"कल सुबह नौ बजे आपको क्लायंट को कॉल करना है…"* —
+the client call at nine, which is a real reminder this account holds).
+
+**A pinned language holds.** With `hi` selected, an English turn is still answered
+in Hindi. That is the right reading of §9 for a user who deliberately pinned a
+language — the setting is the standing instruction — but it is worth stating
+plainly because it means the pin outranks the language the user is speaking.
+
+### What this does not cover
+
+The switch was tested through the pipeline with typed turns, not spoken ones. The
+spoken path was verified for single-language turns (§4) and for one full lifecycle
+(§28), not for a mid-conversation switch.
