@@ -2121,3 +2121,51 @@ taps and one reminder; the retraction cost a paragraph.
 
 The grant is restored (toggle on, verified by screenshot), and reminders are exact
 again.
+
+---
+
+## 46. Addendum — the exact-alarm fix delivers, measured (2026-09-23)
+
+Round 41 changed how every reminder is armed, from `exactAllowWhileIdle` to
+`alarmClock`, and verified only that the resulting alarm is **exact**
+(`windowLength 0`). It never verified that an exact alarm still *fires and
+notifies*. That is the regression this round closes, and it also measures what the
+change bought.
+
+### Regulated test
+
+A reminder titled **"Exact fire regression"** was set for **04:30:26 IST**, armed
+from a fresh launch, and its alarm confirmed exact for its own `origWhen`
+(`windowLength 0`). Then nothing touched the phone but a poll.
+
+### Result
+
+| | Target | Observed | Delay |
+|---|---|---|---|
+| **After the fix** | 04:30:26 | **04:30:28** | **2 seconds** |
+| Before the fix (§33, §40) | 03:10:04 | 03:11:31 – 03:14:58 | 87 – 294 s |
+| Armed alarm windows, before (§42) | — | — | 22 s – 454 min |
+
+**Two seconds.** The reminder arrives when it was asked for, and the notification
+is in the shade with the right text.
+
+### What this establishes
+
+1. **No regression.** An alarm-clock alarm still fires and notifies — the change
+   from the `exact*` modes did not break delivery, which was the risk in touching
+   the scheduling path at all.
+2. **The promise is now kept.** "Remind me at 6 PM" used to mean "at some point
+   between 6:00 and 6:08, and after a reboot up to 6:05 later"; it now means
+   6:00:02. This is the single largest user-visible improvement of the session, and
+   it is the difference between the app's Reminders screen copy being true and
+   being an aspiration.
+3. **The earlier measurements are historical.** Every "reminders are inexact"
+   figure in §13, §33, §40 and §42 describes the build before round 41 and should be
+   read that way.
+
+### Caveat worth keeping
+
+Two seconds on one reminder is a measurement, not a distribution. The change is
+deterministic — the alarm is now exact rather than windowed, which is a property of
+the alarm, not of the sample — but the *number* 2 s is one observation and is
+reported as such.
