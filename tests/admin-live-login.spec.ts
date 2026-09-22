@@ -72,3 +72,61 @@ test.describe('Admin Control Center — sign-in form', () => {
 		expect(body).not.toContain('Could not reach the admin API');
 	});
 });
+
+/**
+ * The console's write path, driven through the real UI.
+ *
+ * Every other test here reads. A form that renders and a server action that never fires look
+ * identical from the outside, so this fills in the "Edit account details" card and asserts the
+ * *change* is visible afterwards — the standard this suite holds itself to, because an assertion
+ * on a success banner alone passes even when nothing was written.
+ *
+ * Skipped unless ADMIN_TEST_USER_ID names a disposable account. It deliberately refuses to run
+ * against the account it signs in with: `PATCH /control/users/:id` is a real write and the point
+ * of a test is not to edit the production administrator.
+ */
+test.describe('Admin Control Center — write path', () => {
+	const TARGET = process.env.ADMIN_TEST_USER_ID ?? '';
+
+	test.skip(TARGET === '', 'ADMIN_TEST_USER_ID is required; this test writes to that account');
+
+	test('the edit form writes the change through to the API', async ({ page }) => {
+		test.setTimeout(120_000);
+
+		await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+		const submit = page.locator('button[type="submit"]').first();
+		await expect(submit).toBeEnabled({ timeout: 30_000 });
+		await page.locator('input[type="email"], input[name="email"]').first().fill(EMAIL);
+		await page.locator('input[type="password"], input[name="password"]').first().fill(PASSWORD);
+		await submit.click();
+		await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
+
+		await page.goto(`${BASE}/users/${TARGET}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+		await page.waitForSelector('h1', { timeout: 20_000 });
+
+		// The two cards the API had no caller for.
+		// Role-scoped: the card heading and the submit button carry the same words, so a text
+		// locator matches two elements and strict mode rejects it.
+		await expect(page.getByRole('heading', { name: 'Edit account details' })).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Reset account state' })).toBeVisible();
+		await expect(page.locator('input#edit-name')).toBeVisible();
+		await expect(page.locator('input#reset-confirm')).toBeVisible();
+
+		const newName = `Console Edit ${Date.now().toString().slice(-6)}`;
+		await page.locator('input#edit-name').fill(newName);
+		await page.locator('input#edit-reason').fill('automated console write-path verification');
+		await page.locator('form:has(input#edit-name) button[type="submit"]').click();
+
+		// The action redirects back with `?ok=`, and the page must show it.
+		await page.waitForURL(/[?&]ok=/, { timeout: 30_000 });
+		await page.waitForSelector('h1', { timeout: 20_000 });
+
+		// The change itself, not the banner. This must be a retrying assertion: after `redirect()`
+		// Next replaces the page via a client-side navigation, and the previous render's `<h1>` is
+		// still in the DOM while the new payload streams. Reading `innerText()` once right after
+		// `waitForSelector('h1')` therefore measured the *old* page and reported a failed write
+		// against a database that already contained the new name — a false alarm caused by the
+		// assertion, not by the write.
+		await expect(page.locator('body')).toContainText(newName, { timeout: 20_000 });
+	});
+});

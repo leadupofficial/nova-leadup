@@ -2086,3 +2086,53 @@ What is missing is not an AI provider:
 3. **Stripe — not required yet.** Nothing in the API or the mobile client charges anyone; Stripe is
    referenced only by the provider *health check* and the control-plane config, so configuring it now
    would buy an unused integration. It becomes necessary the moment subscriptions are sold.
+
+## 12. CRUD: wiring the capabilities that already existed
+
+The review in §11.4 found the cheapest correct wins were not new endpoints but existing ones with a
+permission, a validation schema, an audit record and **no caller**. Two are now wired and verified in
+production:
+
+| Capability | Route | Console |
+| --- | --- | --- |
+| Edit a user (name, locale, timezone, tri-state verified flags) | `PATCH /control/users/:id` (`users.write`) | "Edit account details" card on `/users/[id]` |
+| Reset account state (clear memory and/or cancel reminders) | `POST /control/users/:id/reset-state` (`users.write`) | "Reset account state" card, behind a typed `CLEAR` confirmation |
+
+Design decisions that came out of doing it:
+
+- **Email is not editable.** It is absent from the form *and* from the API contract. The address an
+  account signs in with is an identity change, not a support action, and a console that can silently
+  repoint it is an account-takeover primitive.
+- **Only filled-in fields are sent.** An empty input means "leave this alone", never "set it to
+  empty" — otherwise correcting a timezone would blank the name.
+- **Unticked checkboxes are tri-state.** A checkbox is absent from `FormData` when unticked, so
+  "don't change this" and "set this to false" are indistinguishable; the verified flags are selects
+  with an explicit "leave unchanged" option.
+- **Reset is destructive, so it is defended twice**: the typed confirmation the UI requires, plus the
+  reason the API requires. Targeting your own account is refused with `SELF_ESCALATION_BLOCKED`, so
+  the endpoint is not a way to erase your own trail.
+
+**Verified against production**, not against a fixture: `PATCH` returns the updated row and writes
+`user.update | success`; reset-state returns `{memoriesCleared, remindersCancelled}` and writes
+`user.reset_state | success`; a browser test signs in, fills the form, submits it, and asserts the
+**new value** appears on the page afterwards — a banner-only assertion would pass with nothing
+written. Confirmed independently against the live database, which shows the new name and the matching
+audit rows.
+
+That test also produced a false alarm worth recording, because the same mistake would have been read
+as a product bug: after `redirect()` Next swaps the page by client-side navigation, and the previous
+render's `<h1>` is still in the DOM while the new payload streams. Reading `innerText()` once right
+after `waitForSelector('h1')` measured the *old* page and reported a failed write against a database
+that already contained the new name. The assertion now retries.
+
+### Still open after this round
+
+- Two **production-build failures** in the previous commit were only caught by `next build`, not by
+  `tsc --noEmit`: the React compiler rejects reassigning a captured variable inside an async loader
+  (four pages) and rejects `setState` called synchronously in an effect (`LoginForm`). Both are fixed —
+  `loadPage` now passes the redaction flags through its result, and the hydration probe uses
+  `useSyncExternalStore`. The lesson is that `tsc --noEmit` is not a build gate for this app and the
+  typecheck step should not be treated as one.
+- The remaining unwired capabilities from §11.4: job retry, incident create, and the gated
+  conversation-content view.
+- The findings in §11.3 (the legacy `/api/v1/admin/*` bypass above all) are unchanged.
