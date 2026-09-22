@@ -888,3 +888,56 @@ in the uninterrupted one. The truncation was mine, not the product's, and the se
 run — which let the VAD end the turn — produced the complete answer above.
 
 Recorded because a single interrupted run would have been reported as a defect.
+
+## 23. Streaming STT, one real clip per language (2026-09-23)
+
+§21's fix means the pinned language now actually reaches the recogniser, so the
+matrix's STT column can be filled with transcripts instead of configuration. For
+each language a sentence was synthesised by the app's own TTS and fed through the
+same streaming endpoint the phone uses, with that language's code.
+
+| Language | Code | TTS provider | Bigram overlap | Transcript (start) |
+|---|---|---|---|---|
+| Hindi | `hi-IN` | sarvam | 77% | कल सुबह दस बजे क्लाइंट को कॉल |
+| Bengali | `bn-IN` | sarvam | 89% | আগামীকাল সকাল দশটায় ক্লায়েন্টকে কল |
+| Telugu | `te-IN` | sarvam | 83% | రేపు ఉదయం పది గంటలకు క్లయింట్కు కాల్ |
+| Marathi | `mr-IN` | sarvam | 81% | उद्या सकाळी दहा वाजता क्लायंटला |
+| Tamil | `ta-IN` | sarvam | 70% | நாளை காலை பத்து மணிக்கு கிளையன்ட்டை கூ |
+| Gujarati | `gu-IN` | sarvam | 94% | આવતીકાલે સવારે દસ વાગ્યે ક્લાયન્ટને કોલ કરો |
+| Kannada | `kn-IN` | sarvam | **100%** | ನಾಳೆ ಬೆಳಿಗ್ಗೆ ಹತ್ತು ಗಂಟೆಗೆ ಕ್ಲೈಂಟ್ಗೆ ಕರೆ ಮಾಡಿ |
+| Malayalam | `ml-IN` | sarvam | 78% | നാളെ രാവിലെ പത്ത് മണിക്ക് ക്ലയന്റിനെ |
+| Punjabi | `pa-IN` | sarvam | **100%** | ਕੱਲ੍ਹ ਸਵੇਰੇ ਦਸ ਵਜੇ ਕਲਾਇੰਟ ਨੂੰ ਕਾਲ ਕਰੋ |
+| Odia | `or-IN` | sarvam | 97% | ଆସନ୍ତା କାଲି ସକାଳ ଦଶଟାରେ କ୍ଲାଏଣ୍ଟଙ୍କୁ କଲ୍ କରନ୍ତ |
+| Assamese | `as-IN` | **sarvam-fallback** | 79% | কাইলৈ ৰাতি কোৱা দহ বজাত ক্লায়েণ্টক ফোন |
+
+**Every language produced a recognisable transcript of its own sentence**, two of
+them word for word. The overlap figure is a crude bigram measure and counts a
+truncated final word against the score, so the low end (Tamil 70%, Hindi 77%) means
+"missing tail", not "wrong words".
+
+Urdu is absent from the table because **my harness failed**, not the service: the
+`sox` conversion of its clip errored. Urdu streaming transcription was measured
+separately in §18 and was near-exact, so it is not a gap in the finding, only in
+this table.
+
+### The regression this sweep was really for
+
+§21 now sends the pinned code instead of `auto`. If any provider **rejected** a
+language it had previously been handed as `auto`, that change would have made those
+languages *worse*. Every code the app can send was opened against the streaming
+endpoint:
+
+```
+auto  hi-IN  bn-IN  te-IN  mr-IN  ta-IN  gu-IN  kn-IN
+ml-IN pa-IN  or-IN  od-IN  as-IN  ur-IN  ne-IN
+accepted: 15 / 15
+```
+
+No language is refused, so the fix introduces no rejection risk.
+
+### One thing this surfaced
+
+**Assamese TTS is served by `sarvam-fallback`**, not by Sarvam's primary path — the
+catalogue names `google` for Assamese, which is not configured (row 22). It still
+speaks Assamese, so the user hears the right language; it is the routing claim that
+is wrong, not the audio.
