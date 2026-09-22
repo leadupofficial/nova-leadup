@@ -1420,3 +1420,50 @@ This is deliberately **not** the `force-stop` case. `adb shell am force-stop`
 NOVA will not get reminders until they open it again, and no correct implementation
 can avoid that. The case tested here is the realistic one: the system reclaiming
 the process.
+
+---
+
+## 33. Addendum — a reminder across a device restart (§14/§17) (2026-09-23)
+
+§14 lists *device restart*. Android clears `AlarmManager` alarms on reboot, so the
+question is whether anything re-arms them.
+
+### What was done
+
+A reminder titled "Reboot survival check" was set for **03:10:04 IST**. The app was
+backgrounded and resumed twice to arm it, `dumpsys alarm` showed **18** entries
+referencing the app, and the phone was rebooted at **03:03:34**.
+
+### What was measured
+
+| Time | Observation |
+|---|---|
+| 03:04:29 | boot complete; `dumpsys alarm` counts **0** for the app, no process |
+| 03:11:31 | counts **18** again — the alarms are back; no notification yet, 87 s past the target |
+| 03:14:58 | notification present, text **"Reboot survival check"** |
+
+### Conclusion
+
+**The reminder survives a restart.** `ScheduledNotificationBootReceiver` — the
+flutter_local_notifications receiver, correctly declared in the manifest with
+`BOOT_COMPLETED` and `MY_PACKAGE_REPLACED` — re-registers the pending schedule,
+because the app arms reminders through the plugin's `zonedSchedule` rather than
+its own alarms.
+
+**Delivery can be several minutes late.** Due at 03:10:04, still absent at
+03:11:31, present by 03:14:58 — so it landed somewhere in the 87 s–294 s window
+after the target. That is the inexact-alarm behaviour already recorded in §13
+(`windowLength` ≈ 84 s); after a reboot the system is busy and the batching is
+worse.
+
+### A correction to my own reading
+
+My first post-boot reading was **0 alarms**, and the conclusion I was heading for
+was "reminders do not survive a reboot". That was wrong. The boot receiver simply
+had not re-registered yet 55 seconds after `sys.boot_completed` — the alarms came
+back later. The measurement was right; the inference from a single early sample
+was not. The fire time is what settled it.
+
+### Still open in this area
+
+Network interruption at the moment a reminder is due.
