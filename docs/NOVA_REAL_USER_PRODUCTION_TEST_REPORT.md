@@ -446,3 +446,45 @@ reported `hasPushToken`, and nothing ever wrote a token or sent a message — 82
 
 `NOVA_VISUAL_UI_AUDIT.md` now exists and covers every screen photographed so far,
 with the screens that were never opened listed as unaudited.
+
+---
+
+## 14. Addendum — the in-app notification inbox (2026-09-23)
+
+The push transport from §13 put a nudge in the system shade. It could not be
+found again inside NOVA: the bell showed a hardcoded `0` and went to Profile, and
+`/notifications` — list, unread count, mark-read, delete — had existed since the
+table was created with the app calling none of it.
+
+### Verified on the handset
+
+| Step | Evidence |
+|---|---|
+| Bell shows the true unread count | **4** (`bell_badge2.png`) — the account's real unread count, not a placeholder |
+| Tapping it opens the inbox | `inbox.png` — every row with title, body and relative time ("2m ago"), unread rows accented, dismiss button each |
+| Tapping a row marks it read **on the server** | database then held **1 read / 3 unread**; the row rendered as read and the badge fell to **3** (`inbox_read.png`) |
+| Dismissing a row deletes it | **4 rows → 3** in the database |
+
+### Two defects found while verifying
+
+1. **The badge could never work.** `unreadNotificationCount` read `data['data']`,
+   but the client's `_get` already unwraps the `{success, data}` envelope — so
+   every call answered 0. The first device screenshot showed the bell with *no*
+   badge at all, which is what exposed it. Now `parseUnreadCount`, which handles
+   both shapes.
+2. **The parse could throw in a build.** It cast `count` straight to `num?`; a
+   string value would have thrown inside a widget build. The test written for it
+   caught this on its first run (`type 'String' is not a subtype of type 'num?'`),
+   and the conversion is now total.
+
+Note this was found *by looking at the device*, not by the test suite — the tests
+passed both before and after the counting bug, because no test exercised the parse
+against the shape the client actually returns. That is precisely why the mandate
+insists on real-device verification.
+
+### Still open on this path
+
+The remaining gaps from §13 are unchanged: **delivery is silent** (`sound=null`),
+there is **no `delivered_at`** receipt, and the **follow-up engine has not been
+exercised through push** — what is proven is the transport and the inbox, driven
+by the same service the engines call.
