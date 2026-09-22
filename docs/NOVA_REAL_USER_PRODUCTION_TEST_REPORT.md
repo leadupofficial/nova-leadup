@@ -1348,3 +1348,34 @@ numbers come from one recording rather than two.
 
 TTS time to first audio, STT time after speech ends, reminder trigger latency, and
 background wake-up — all named in §24 and none of them measured here.
+
+---
+
+## 31. Addendum — a reminder with the screen locked (§14) (2026-09-23)
+
+§14 lists *screen locked* among the reminder cases and it had never been tested.
+It is a real user scenario — a reminder that only works when the phone is awake is
+not a reminder.
+
+### What was done
+
+A reminder titled "Locked screen check" was set for **02:51:21 IST**, two minutes
+out. The app was backgrounded and resumed twice so its reconciler would arm the
+alarm, then the screen was turned **off and locked** (`input keyevent 26`,
+confirmed `mScreenOn=false`). Nothing else touched the phone.
+
+### Result
+
+| Check | Evidence |
+|---|---|
+| Fired while locked and screen-off | `dumpsys notification`: `id=185948139 … channel=nova_reminders_v2`, `importance=4`, with the screen still off |
+| Visible to the user | the lock screen shows **"NOVA · now · NOVA reminder · Locked screen check"** |
+| In the alerting group | it sits above the silent System UI rows, consistent with the sounding channel from §16 |
+
+The whole chain therefore works on a locked device: the server row, the app's
+reconciler arming the alarm, the alarm firing with the screen off, and the
+notification landing on the lock screen in the channel that makes a sound.
+
+This also re-verifies the reminder path end to end after every change since it was
+last exercised — the sounding channel, the `update_task`/context work, the
+black-screen fix and the connect-deadline fix all shipped in between.
