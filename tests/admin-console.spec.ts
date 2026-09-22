@@ -25,7 +25,7 @@
  *     npx playwright test tests/admin-console.spec.ts
  */
 import { execFileSync } from 'node:child_process';
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { NAV_GROUPS } from '../apps/admin/src/lib/nav';
 import { describeLoadError } from '../apps/admin/src/lib/page-data';
 
@@ -121,8 +121,38 @@ test('the sweep recognises every load-failure card the console can render', asyn
 	}
 });
 
+/**
+ * Refuses to run the sweep with a token the API will not accept.
+ *
+ * An expired `ADMIN_TOKEN` fails every destination — the console bounces to `/login`, the sidebar
+ * never appears, and the run reports 34 broken pages. That is byte-for-byte what a total console
+ * outage looks like, and it briefly read as one: after a deploy, an expired token produced
+ * "34 failed" and the first conclusion was that the console had broken.
+ *
+ * One probe turns that into a single, accurate failure. The token is minted with a 15–30 minute
+ * life, so this is a routine situation rather than an exotic one.
+ */
+async function assertTokenUsable(request: APIRequestContext): Promise<void> {
+	if (TOKEN === '') return;
+	const response = await request.get(`${API_BASE}/control/me/permissions`, {
+		headers: { Authorization: `Bearer ${TOKEN}` },
+	});
+	if (response.status() === 401) {
+		throw new Error(
+			`ADMIN_TOKEN is expired or invalid: 401 from ${API_BASE}/control/me/permissions. ` +
+				'Every destination would fail for this reason alone, which is indistinguishable from a ' +
+				'console outage — mint a fresh token before reading anything into the results.',
+		);
+	}
+	if (!response.ok()) {
+		throw new Error(`The token probe itself failed with ${response.status()} from ${API_BASE}/control/me/permissions.`);
+	}
+}
+
 test.describe('Admin Control Center — destinations render', () => {
 	test.skip(TOKEN === '', 'ADMIN_TOKEN is required; mint one with services/api/scripts/mint-dev-admin-token.mjs');
+
+	test.beforeAll(async ({ request }) => assertTokenUsable(request));
 
 	for (const destination of DESTINATIONS) {
 		test(`${destination.label} (${destination.path}) renders real content`, async ({ page }) => {
@@ -188,6 +218,8 @@ test.describe('Admin Control Center — destinations render', () => {
 
 test.describe('Admin Control Center — critical paths', () => {
 	test.skip(TOKEN === '', 'ADMIN_TOKEN is required');
+
+	test.beforeAll(async ({ request }) => assertTokenUsable(request));
 
 	/**
 	 * Loads a page and returns its full rendered HTML.
