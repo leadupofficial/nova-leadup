@@ -863,3 +863,52 @@ NOVA's reply arrived at roughly half the amplitude of the MacBook's own question
 microphone, and the two sources are not equidistant from it, so this is not
 evidence of low playback volume. It is recorded as an observation only; nothing
 was changed on the strength of it.
+
+---
+
+## 22. Addendum — the task lifecycle, and three defects it exposed (2026-09-23)
+
+§13's lifecycle is create → modify → reschedule → snooze → complete → reopen →
+history. Driving it through the assistant (with real conversation history, real
+model, real database) found that **the middle of it did not exist**.
+
+### Fixed
+
+| Defect | Evidence | Fix |
+|---|---|---|
+| **Modify and reschedule had no tool** | *"move that to Friday"* → *"I need the time for Friday. What time would you like to be reminded…"* and the task never moved. The registry held only `create_task`, `complete_task`, `reopen_task`. | Added `update_task` (title, due_at, priority), same permission level as its siblings, advertised in the prompt, recorded as `task.update` |
+| **A day with no time was treated as incomplete** | *"create a task to file the insurance claim on Thursday"* → *"What time on Thursday would you like?"* → **no task created**, and the next three turns could not recover. The tool's own description told the model to ask. | The description now says a task's deadline is optional, that a bare day is a complete answer, and to file it and say which day was used — while still refusing to invent an hour |
+| **A placeholder id reached Postgres** | `reopen_task` called with `"task_id_for_warranty_claim"`; `TaskId` was `z.string().min(1).max(64)`, so it passed and the database raised `invalid input syntax for type uuid`. The turn ended *"the system rejected the request"*. | Ids are `z.string().uuid()`, so the model gets a validation failure it can retry from and the database is never asked to compare a non-uuid |
+
+Re-run after the fixes:
+
+| Turn | Reply | Stored state |
+|---|---|---|
+| "Create a task to file the passport form on Thursday" | *"Task added: file the passport form on Thursday at midnight."* | created, `pending` |
+| "Move that to Friday" | *"Moved to Friday, September twenty-fifth."* | `dueAt` = **Friday 00:00 IST** |
+| "Mark it complete" | *(action performed)* | `completed` |
+| "Actually reopen it" | *"Done—the passport form task is back on your list for Friday."* | **still `completed`** |
+
+### Left open, and why it matters
+
+**Reopen acted on the wrong task and reported success.** `reopen_task:ok` is in
+the log, the named task is still `completed`, and the user was told it had been
+reopened. An earlier run said so outright: *"I apologize — I reopened the wrong
+task. That was your gym membership, not the insurance claim."*
+
+This is the most serious thing this round found: the user is told the right record
+changed while a different one did. It is recorded as **P1 OPEN** with the
+reproduction, not described as a passing step. The likely fix is to make a status
+change confirm its target when more than one task could match, and to name the
+changed task in the confirmation so a wrong target is visible rather than silent.
+
+Also noted (P3): after a successful `complete_task` the reply was *"Got it. I'll
+treat execution logs and tool results as actual operations performed."* The action
+was real; the sentence is unrelated to it.
+
+### Method note
+
+My first two attempts at this test were wrong and said so: I sent each turn as a
+**fresh single-message request**, so "that" had nothing to refer to and every
+follow-up asked for clarification. That was the harness, not the product. The
+runs above carry the accumulated conversation, the way the app does.
