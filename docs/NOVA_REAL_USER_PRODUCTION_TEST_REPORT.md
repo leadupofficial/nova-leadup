@@ -1618,3 +1618,61 @@ the §16 work created. A second, independent source for the sounding-channel fix
 ### The device is left as found
 
 Notifications are granted again and verified, and Home shows no warning card.
+
+---
+
+## 37. Addendum — resolving the notification-card question, and a regression I caused (2026-09-23)
+
+### The open question, answered from the code path
+
+§36 left it open whether the **"Reminders cannot reach you"** card persists while
+notifications stay denied. Reading what drives it settles the *design*:
+
+```dart
+// reminder_reconciler.dart
+final osBlocked = !await notifications.osPermissionGranted();
+...
+return ReminderReconciliation(..., notificationsBlocked: osBlocked, ...);
+```
+
+`osBlocked` is read **live from the OS on every reconcile** and passed into *every*
+return path, and Home renders the card whenever the last result has
+`notificationsBlocked == true`. So while the permission is denied the condition
+stays true — the card is not transient by design.
+
+That also explains both captures in §36 without needing a third: the card was
+absent in `r33_denied.png` because no reconcile had run yet since the denial, and
+absent in the later capture because **that screenshot was at the top of Home and
+did not show the Status section at all**. The one capture that did show Status
+(`r33_status3.png`) had the card.
+
+**Stated as reasoning from the code plus one valid observation — not as a device
+result.** The two-sample confirmation was attempted twice and both times the
+notification toggle did not actually change state (`dumpsys` still reported
+`granted=true`), so those samples prove nothing.
+
+### A regression I caused, and fixed
+
+While restoring the notification permission in §33, a tap intended for **Allow
+notifications** landed on **Ringtone** instead — the two switches are on the same
+screen, one above the other. That silently turned the reminder channel's sound
+**off**, which is precisely the §16 defect: reminders arriving with no sound.
+
+Caught here because the NOVA notification page now read **Ringtone: off** and the
+Reminders category listed only *"Notification drawer, Banner, Lock screen,
+Vibrate"*. Toggled back, and it reads **Ringtone: on** with the category listing
+*"…Lock screen, Ringtone, Vibrate"* again.
+
+The lesson is recorded rather than hidden: a settings screen with two adjacent
+switches is not safe to drive by fixed coordinates, and a "restore" step needs
+its own verification — which is how this was caught.
+
+### Device state, verified at the end of this round
+
+| Permission | State |
+|---|---|
+| `POST_NOTIFICATIONS` | `granted=true` |
+| `RECORD_AUDIO` | `granted=true` |
+| `SCHEDULE_EXACT_ALARM` | `granted=false` — as documented in §32 and row 4f |
+
+The reminder channel is sounding again, and Home carries no warning card.
