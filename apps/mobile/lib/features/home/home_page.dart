@@ -11,6 +11,7 @@ import '../notifications/nova_notifications_sheet.dart';
 import '../../core/voice/voice_protocol.dart';
 import '../../core/voice/voice_realtime_controller.dart';
 import '../../core/voice/wake_word_controller.dart';
+import '../../core/voice/wake_word_session.dart';
 import '../../services/health_service.dart';
 import '../auth/auth_controller.dart';
 import '../reminders/notifications_blocked_notice.dart';
@@ -132,12 +133,31 @@ class HomePage extends ConsumerWidget {
           ),
           const SizedBox(height: 14),
           Center(
-            child: Text(
-              // The phrase comes from the installed wake word the native service
-              // reports, never from a hardcoded product name: this build listens
-              // for `hey_nova`.
-              _wakeWordLine(wakeWord),
-              style: Theme.of(context).textTheme.bodySmall,
+            // Tappable exactly when the line is a way to turn the wake word on,
+            // so the sentence the user just read is the control that acts on it.
+            child: Builder(
+              builder: (context) {
+                final line = _wakeWordLine(wakeWord);
+                // The phrase comes from the installed wake word the native
+                // service reports, never from a hardcoded product name: this
+                // build listens for `hey_nova`.
+                final text = Text(
+                  line.text,
+                  style: Theme.of(context).textTheme.bodySmall,
+                );
+                if (!line.actionable) return text;
+                return GestureDetector(
+                  onTap: () => context.push('/wakeword'),
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    child: text,
+                  ),
+                );
+              },
             ),
           ),
           const SizedBox(height: 32),
@@ -275,18 +295,17 @@ class HomePage extends ConsumerWidget {
     };
   }
 
-  /// The line under "Tap to talk".
+  /// The line under "Tap to talk". The decision itself lives in
+  /// [wakeWordHomeLine] so it is unit-tested rather than re-derived here.
   ///
-  /// When the native service reports no installed wake word there is no phrase
-  /// to name, so this says listening is off rather than advertising one.
-  String _wakeWordLine(WakeWordState wakeWord) {
-    final phrase = wakeWord.phrase;
-    if (phrase == null) return 'Wake word is off';
-    if (wakeWord.enabled && wakeWord.listening) {
-      return 'Listening for "$phrase"';
-    }
-    return 'or say "$phrase"';
-  }
+  /// It used to advertise the phrase whenever a model was installed, so a fresh
+  /// install showed "or say \"Hey Nova\"" while the wake word was off.
+  ({String text, bool actionable}) _wakeWordLine(WakeWordState wakeWord) =>
+      wakeWordHomeLine(
+        phrase: wakeWord.phrase,
+        enabled: wakeWord.enabled,
+        listening: wakeWord.listening,
+      );
 
   String _statusLabel(AsyncValue<AvatarState> avatar, WakeWordState wakeWord) {    if (wakeWord.listening) return NovaAvatarState.listening.label;
     return switch (avatar) {

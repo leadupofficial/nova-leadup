@@ -54,3 +54,31 @@ const String wakeWordConverseRoute = '/converse';
 /// much later does not, because starting to listen without being asked is worse
 /// than ignoring a stale nudge.
 const Duration wakeWordSessionFreshness = Duration(seconds: 90);
+
+/// What Home should say under "Tap to talk", and whether it should be tappable.
+///
+/// Home used to print `or say "Hey Nova"` whenever a wake-word model was
+/// *installed*, regardless of the user's choice. Measured on a fresh install: the
+/// wake word screen read **"WAKE WORD IS OFF"** while Home advertised the phrase
+/// directly above the button, so every new user was told to say something the app
+/// was not listening for.
+///
+/// The phrase is only advertised while the service is actually listening, and
+/// every other state offers the way to turn it on.
+({String text, bool actionable}) wakeWordHomeLine({
+  required String? phrase,
+  required bool enabled,
+  required bool listening,
+}) {
+  if (phrase == null || !enabled) {
+    // The status row already states that it is off, so this line is the action
+    // rather than a second announcement of the same fact.
+    return (text: 'Tap to turn on the wake word', actionable: true);
+  }
+  // Kept as "Listening for …" so the hint and the status row agree rather than
+  // saying two different things about the same state.
+  if (listening) return (text: 'Listening for "$phrase"', actionable: false);
+  // Enabled but not yet running: say that rather than promise something the
+  // service has not started doing.
+  return (text: 'Starting wake word…', actionable: false);
+}

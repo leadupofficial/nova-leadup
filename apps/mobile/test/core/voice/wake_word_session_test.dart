@@ -6,6 +6,7 @@ import 'package:nova_mobile/core/voice/wake_word_session.dart';
 /// "whatever listens to lastDetection" — nothing did. These tests pin the rule that
 /// decides when a detection opens one.
 void main() {
+  _homeLineTests();
   _freshnessTests();
   final t0 = DateTime(2026, 9, 20, 10, 0, 0);
   final t1 = t0.add(const Duration(seconds: 5));
@@ -136,5 +137,50 @@ void _freshnessTests() {
       ),
       isTrue,
     );
+  });
+}
+
+/// Home advertised `or say "Hey Nova"` whenever a model was *installed*, so a
+/// fresh install promised a phrase the app was not listening for while the wake
+/// word screen said "WAKE WORD IS OFF".
+void _homeLineTests() {
+  test('a fresh install offers the way to turn the wake word on', () {
+    final line = wakeWordHomeLine(
+      phrase: 'Hey Nova',
+      enabled: false,
+      listening: false,
+    );
+    expect(line.text, contains('turn on'));
+    expect(line.actionable, isTrue);
+  });
+
+  test('agrees with the status row while it is listening', () {
+    final line = wakeWordHomeLine(
+      phrase: 'Hey Nova',
+      enabled: true,
+      listening: true,
+    );
+    expect(line.text, 'Listening for "Hey Nova"');
+    expect(line.actionable, isFalse);
+  });
+
+  test('says it is starting rather than promising a phrase it is not on yet', () {
+    final line = wakeWordHomeLine(
+      phrase: 'Hey Nova',
+      enabled: true,
+      listening: false,
+    );
+    expect(line.text, isNot(contains('or say')));
+    expect(line.actionable, isFalse);
+  });
+
+  test('no installed model is an off state with a way to fix it', () {
+    final line = wakeWordHomeLine(
+      phrase: null,
+      enabled: true,
+      listening: false,
+    );
+    expect(line.text, contains('turn on'));
+    expect(line.actionable, isTrue);
   });
 }

@@ -63,8 +63,12 @@ void main() {
     // ...and nothing anywhere on the screen claims to be listening.
     expect(find.textContaining('Listening for'), findsNothing);
 
-    // The installed phrase is still named, humanised, by the line under "Tap to talk".
-    expect(find.text('or say "Hey Nova"'), findsOneWidget);
+    // The phrase is NOT advertised while the service is off. It used to be, so
+    // Home said `or say "Hey Nova"` directly under a row reading "Wake word is
+    // off" — a fresh install promising a phrase it was not listening for.
+    expect(find.text('or say "Hey Nova"'), findsNothing);
+    // Instead the line offers the way to turn it on.
+    expect(find.text('Tap to turn on the wake word'), findsOneWidget);
 
     // The raw asset key must not leak into the UI.
     expect(find.textContaining('hey_nova'), findsNothing);
