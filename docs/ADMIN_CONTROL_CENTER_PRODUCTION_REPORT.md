@@ -1,7 +1,7 @@
 # NOVA ADMIN CONTROL CENTER — PRODUCTION REPORT
 
 **Scope:** conversion of the existing `apps/admin` console into an operational control plane for the whole NOVA platform.
-**Verified against:** the running system — PostgreSQL on :5433 (152 users, 132 reminders, 85 tasks, 191 sessions of which 175 active, 576 admin audit rows, 1 registered device), the API on :3001, and the actual Flutter client contract.
+**Verified against:** the running system — locally, PostgreSQL on :5433 (152 users, 132 reminders, 85 tasks, 191 sessions of which 175 active, 576 admin audit rows, 1 registered device), the API on :3001, and the actual Flutter client contract — and, since §10, against the **production deployment** at `nova.leadup.in` / `api.nova.leadup.in` / `admin.nova.leadup.in` (29 real user accounts, 386 sessions).
 **Evidence standard:** every claim below is either (a) a file path, (b) a passing test, or (c) output from a live verification script run against the running API. Nothing is asserted from inspection alone.
 
 Current verified state (2026-09-21, last full pass):
@@ -19,6 +19,10 @@ Current verified state (2026-09-21, last full pass):
 | `services/api/scripts/verify-control-gates.ts` | 12 checks, 0 failed |
 | Flutter client (`apps/mobile`) | `flutter analyze` clean; `flutter test` 784 passed, 5 skipped; three on-device e2e tests passed on the emulator |
 | Android acceptance run (`adb` + debug APK, **emulator**) | **run on a Pixel emulator (Android 17), not on physical hardware.** See §4.3. |
+| Live deployment (`github.com/leadupofficial/nova-leadup` → `91.107.202.66`) | images rebuilt from `main` **on the server**; 16/16 migrations applied; 57 tables; all 29 pre-existing accounts preserved. See §10 |
+| Live browser sweep (`https://admin.nova.leadup.in`, real TLS, real API) | **34 destinations passed, 0 failed** |
+| Live control-plane API (`https://api.nova.leadup.in/api/v1/control/*`) | present and refusing anonymous requests with 401 — **404 on every route before this deploy** |
+| Physical-device acceptance run | **NOT RUN — `adb devices` reports no attached device.** The brief's final rule is still unsatisfied. See §10.6 |
 
 **On the verifier's check count.** It is not a fixed number: several sections assert inside loops over
 whatever the database currently holds (sessions, recorded AI durations, voice-usage rows), so fewer rows
@@ -1761,6 +1765,132 @@ overlay halves, and steps 4 and 7–10 on a real handset, remain §9's P1.
 | ~~P2~~ | ~~`audit.export` is a permission with no route~~ | `services/api/src/admin/audit-export.ts` | **FIXED** — a filtered, capped CSV export at `GET /control/audit-logs/export`, downloadable from the console. Verified live: 129-check script section 16, 21 unit tests, 1 browser test. |
 | ~~P2~~ | ~~`secret_fingerprint` is never populated~~ | `packages/database/drizzle/0012_provider_check_fingerprint.sql`, `admin/providers.ts`, `admin/config.ts` | **FIXED.** The check records the credential it exercised; the read model compares it against the value in force. Verified live: 20 checks (§19), 8 unit tests, 1 browser test. |
 | ~~P2~~ | ~~Cross-replica state is per process~~ | `services/api/src/middleware/token-denylist.ts`, `packages/database/drizzle/0014_revoked_tokens.sql` | **FIXED for token revocation** — a shared table plus a 5 s watermark poll, verified across two live API processes. The realtime connection registry remains per process and is documented as such. |
-| **P3** | `resetRateLimit` is dead code whose comment claims it runs after a successful login | `services/api/src/middleware/rateLimit.ts` | Nothing calls it, and the auth limiter is a hard 10-per-60s sliding window that no success resets. The behaviour is safe (stricter than documented); the comment is wrong and cost a debugging round. Delete the helper or call it — do not leave the comment claiming a reset that does not happen. |
+| ~~P3~~ | ~~`resetRateLimit` is dead code whose comment claims it runs after a successful login~~ | `services/api/src/middleware/rateLimit.ts` | **FIXED** — deleted, along with the `SlidingWindowStore.reset` it was the only caller of. The comment is replaced by one that states the opposite: nothing resets the auth limiter, and that is the property that matters against credential stuffing. The old comment had already misled a verification script into expecting a window that never clears. |
 | ~~P3~~ | ~~Console copy of the permission matrix can drift~~ | `services/api/src/routes/admin/permissions.ts`, `apps/admin/src/app/layout.tsx` | **FIXED** — worse than drift: the console resolved the token claim while the API resolves the database grant first, so it could hide pages an operator could open. The copy is deleted and the console asks the server (§7.19). |
-| **P3** | No in-page pagination for very large audit tables | `/security/audit-log` | Surface the `from`/`to` filters the API already accepts. |
+| ~~P3~~ | ~~No in-page pagination for very large audit tables~~ | `/security/audit-log` | **FIXED, and the finding was half wrong.** Pagination already existed on the page (the row was stale). The real defect underneath it was the `from`/`to` date range: the API and the CSV export both accepted one, the page had no date inputs at all, and the export button promised "exactly the rows the current filters select" while ignoring a range the operator could not set. The page now has `datetime-local` from/to inputs, the export link carries the range, and a browser test asserts the two agree. |
+
+## 10. The live deployment — what is running at nova.leadup.in now
+
+Everything before this section was verified against a local API and console. This section records the
+first run against the **production server** (`ssh root@91.107.202.66`, `ubuntu-4gb-fsn1-3`), which is
+also the deployment the brief's final rule is about.
+
+### 10.1 What was actually there
+
+The live host was two generations behind this repository, and the gap was bigger than "an older build":
+
+| Probe | Result before this deploy |
+| --- | --- |
+| `GET /api/v1/control/*` on the public API | **404 on every route** — the Control Center did not exist in the deployed binary |
+| `docker exec nova-api ls /app/dist/routes` | `admin.js` (one file), no `routes/admin/` directory |
+| `nova-admin-ui` route table | `users, organizations, usage, incidents, feature-flags, languages, audit-logs` — eight pages of an older console |
+| Database | 42 tables; **no** `admin_sessions`, `system_configs`, `job_executions`, `service_logs`, `revoked_tokens`, `admin_mfa`, `platform_admin_roles`, `provider_health_checks` |
+| Migration state | `__migrations` (a legacy runner's table) listing `0000`, `0001`, `0002`; drizzle's own `drizzle.__drizzle_migrations` did not exist |
+
+There were **29 real user accounts** and 386 sessions in that database. It is not a scratch instance, and
+nothing here was allowed to discard them.
+
+### 10.2 The deploy
+
+Source now goes through `github.com/leadupofficial/nova-leadup` — 122 local commits that had never been
+pushed, plus the Control Center body of work, are on `main` (`c466087`, then `fca1c1e`). The server
+builds from a clean clone at `/opt/nova-deploy`; nothing is rsynced from a developer machine.
+
+Two image builds were made on the server, both from that clone:
+
+- `nova-api:prod` — 1.14 GB, from `services/api/Dockerfile`.
+- `nova-admin-ui:latest` — 2.07 GB, from `apps/admin/Dockerfile` with
+  `--build-arg NEXT_PUBLIC_API_BASE=https://api.nova.leadup.in/api/v1`.
+
+`services/api/Dockerfile` had to be rewritten to build at all, and the three defects are worth naming
+because each one would have failed a deploy rather than a test:
+
+1. `CMD ["node", "dist/index.js"]` — this service has no `src/index.ts`. The entry is
+   `dist/server.js`. With `restart: unless-stopped`, that is a crash loop, not a failed build.
+2. The dependency layer copied four `packages/*/package.json` files that are not this workspace's
+   dependency graph, so `pnpm install` aborted with `ERR_PNPM_WORKSPACE_PKG_NOT_FOUND` for
+   `@nova/database` and `@nova/shared-types`.
+3. It compiled the API alone. `@nova/database` resolves through a `dist/` that is gitignored, so a
+   clean context failed with 55 × `TS2307 Cannot find module '@nova/database'`.
+
+The third one produced a genuinely instructive failure. The first build attempt failed that way; the
+*tree* it was built from had been rsynced from this machine, and the rsync carried
+`packages/database/tsconfig.tsbuildinfo`. That package sets `composite: true`, so tsc read the stale
+incremental state, reported **success**, emitted nothing, and the next package failed against a `dist/`
+that was never written. The failure looks exactly like a broken import graph. `.dockerignore` now
+excludes `**/*.tsbuildinfo`, and the build from the clean clone succeeds — the difference between the
+two builds *was* the stale artifact.
+
+`.dockerignore` itself was in `.gitignore`, which is why no clone had one. That is fixed too: a build
+from a clone previously sent the whole working tree, `apps/mobile`'s Flutter output included, as the
+Docker context.
+
+### 10.3 The database
+
+The live schema was not a prefix of this repository's migration lineage, even though it reported
+`0000`, `0001`, `0002` applied — an older custom migration runner (`/opt/nova/migrations/`, and the
+`__migrations` table) had created objects that this lineage creates later. Drizzle decides what to
+replay by comparing the newest recorded `created_at` against each journal entry's `when`, so the
+journal was seeded with the three entries' real hashes and journal timestamps, and the migration ran
+from there.
+
+That exposed exactly one collision, found by a dry run that wrapped every migration in a `SAVEPOINT`
+and rolled the whole thing back: `notification_preferences`, created by `0003`, already existed. Its
+live definition was compared column by column against the migration's and was **identical** — the only
+difference was the auto-generated constraint name. It was renamed aside, the migration created the
+table the lineage expects, its single row was copied back, and the legacy table was dropped. Nothing
+else in `0003`–`0015` collided.
+
+Result: **16 of 16 migrations applied**, 57 tables, and every pre-existing row intact — 29 users, 386
+sessions, 1 notification preference.
+
+One operational secret was generated on the server rather than inherited: `NOVA_CONFIG_ENCRYPTION_KEY`.
+`services/api/src/admin/secrets.ts` fails closed in production without it, so before this the console
+could not store a single provider credential. The compose file passed every other API secret through
+explicitly and omitted this one; it now passes it, and the key lives only in `/opt/nova/.env`.
+
+Three compose edits, all scoped to their service block (the same `JWT_REFRESH_SECRET` line appears in
+three services, so a global replace would have edited the wrong ones):
+
+| Service | Before | After | Why |
+| --- | --- | --- | --- |
+| `api` | *(absent)* | `NOVA_CONFIG_ENCRYPTION_KEY` passthrough | credentials cannot be stored without it |
+| `admin-ui` | `NEXT_PUBLIC_API_BASE=https://nova.leadup.in/api/v1` | `https://api.nova.leadup.in/api/v1` | canonical API origin |
+| `admin-ui` | `API_ORIGIN_URL=http://admin:3004` | `http://api:3001` | pointed at the **legacy** `services/admin` container, a different service with a different API |
+
+### 10.4 What was verified on the live system
+
+Read-only, against the public hostnames, with a 25-minute token minted for the existing Owner account
+(`admin@nova.leadup.in`) rather than the operator's password:
+
+| Check | Result |
+| --- | --- |
+| `https://admin.nova.leadup.in/` | 307 → `/login?next=%2F` (guard working) |
+| `https://admin.nova.leadup.in/login` | 200 |
+| Browser sweep, **every destination in `NAV_GROUPS`** | **34 passed, 0 failed** — each asserted a real `<h1>`, no failure markers, no React error digest, and no "Could not reach the admin API" card |
+| `GET https://api.nova.leadup.in/api/v1/control/users` | 401 (exists, refuses anonymous) — was 404 |
+| Job worker at boot | `handlers: ["providers.health_check","logs.reap"]` |
+| First scheduled provider check | `{"providers":["sarvam"],"msg":"[job-queue] scheduled provider check found failures"}` — a real signal from the live cron path, not a fixture |
+| `GET https://api.nova.leadup.in/healthz` | 200 `{"status":"ok"}` |
+| `/api/v1/auth/me`, `/notifications`, `/tasks` | 401 — the mobile client's contract resolves |
+
+The mutating verifiers were deliberately **not** run against production. `verify-control-plane.py`
+creates a `PROACTIVE_ASSISTANT` flag and flips `CONTROL_AI_ENABLED` to `false` mid-run; on a host with
+29 real accounts that is a user-visible outage if the run is interrupted, not a test. The full mutating
+suite stays local; the live pass is the read-only sweep above.
+
+### 10.5 Rollback
+
+Before anything was replaced: database dump to `/opt/nova/backups/nova-predeploy-20260922-065849.dump`
+(`pg_dump -Fc`), `docker-compose.yml.bak.20260922-073520`, and the previous images retained as
+`nova-api:predeploy` and `nova-admin-ui:predeploy`. Rollback is retag-and-`up`, plus a restore from the
+dump if the schema has to go back too.
+
+### 10.6 Blockers this deploy created or exposed
+
+| Class | Blocker | Evidence | What it needs |
+| --- | --- | --- | --- |
+| **P0** | The Android build served to users is **older than the backend it now talks to** | `/opt/nova/downloads/nova-arm64.apk` is dated 2026-09-19; the API it points at was replaced on 2026-09-22 | Rebuild the APK from `main` and republish it at `/download.apk`, then run the acceptance scenario on it |
+| **P1** | The physical-device acceptance run still has not happened | `adb devices` returns **no devices** — not even the emulator | A handset, `adb reverse` or a real API URL, and the run in §4.3 |
+| **P2** | The live database's history diverged from this repository's migrations | `notification_preferences` collided; `__migrations` is a legacy table | Any *other* deployment built from the old lineage needs the same documented repair. A fresh deploy from a database created by `packages/database/drizzle/0000`–`0002` alone is clean |
+| **P3** | The live console was verified with a minted token, not the operator's password | An Owner-role JWT signed with the deployment's `JWT_SECRET`, expires in 25 minutes, no `admin_sessions` row | Sign in interactively once with the real operator account to confirm the password path end to end |
