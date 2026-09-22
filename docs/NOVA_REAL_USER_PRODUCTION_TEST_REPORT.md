@@ -645,3 +645,59 @@ would have passed.
 - **Snooze and "remind me again" by voice** were not exercised — only cancel.
 - **Reminders are inexact** (row 4f): the armed alarm carries an ~84 s window, so
   a reminder set for 01:27:51 posted around 01:28:5x.
+
+---
+
+## 18. Addendum — version skew and a stuck black screen (2026-09-23)
+
+### The unexplained 400 is explained
+
+An earlier round logged an unidentified `400` from the app during the resume path
+and recorded it honestly as unexplained. It is now identified:
+
+```
+[nova] device registration failed (non-fatal): DioException … status code of 400
+```
+
+`POST /device/register` carried a `pushToken` the deployed server did not know,
+and the schema was `.strict()`:
+
+```
+{"pushToken":"abc123"} → 400  Unrecognized key(s) in object: 'pushToken'
+```
+
+The impact is not cosmetic. Registration is the **only** writer of
+`devices.push_token`, so any client newer than the server can never register,
+never stores a push token, and can never receive a proactive nudge. Fixed by
+ignoring unknown keys on this client-reporting endpoint while still validating
+every declared field — a client updates on its own schedule, so rejecting its new
+fields is the wrong failure mode. Both halves are pinned by tests.
+
+**This does not make push work on production by itself.** The API still has to be
+deployed there; until it is, the deployed build predates the push transport
+entirely.
+
+### A stuck black screen — reproduced, not yet diagnosed
+
+Approving a tool action left the app on a **fully black screen**. Reproduction, run
+twice:
+
+1. Approve an assistant action from the confirm sheet;
+2. the screen goes black — status bar visible, nothing else;
+3. Back exits to the launcher; reopening NOVA is **still** black;
+4. only `am force-stop` followed by a launch restores it, back on Home.
+
+The window in `logcat`:
+
+```
+[VoiceRealtime] tool approval granted: create_reminder (567ec710-…)
+[VoiceRealtime] socket error: WebSocketChannelException: HttpException:
+    Connection closed before full header was received, uri = …/voice/realtime
+```
+
+The widget tree does **not** throw — the app's `ErrorBoundary` would have drawn a
+message rather than black — so something renders empty rather than failing. The
+socket error is in the same window and is the obvious suspect, but I have not
+proven it is the cause, so it is recorded as **P1 OPEN** with the reproduction
+rather than closed with a guess. A user who approves an action can be left with an
+unusable app and no in-app way out.

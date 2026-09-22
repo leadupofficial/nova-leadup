@@ -56,6 +56,9 @@ root cause, and what remains. Status legend: **FIXED** (code changed + re-verifi
   perfectly-scripted Telugu sentence while nothing was created; only the reminder count
   revealed it. Outcome assertions, not reply assertions, are what caught it.
 
+| 16 | Device registration vs version skew | A newer app can still register | The app reported `pushToken` and the endpoint was `.strict()`, so against a server one version behind **the whole registration was refused**: `400 Unrecognized key(s) in object: 'pushToken'`. Since registration is the only writer of `devices.push_token`, a client that cannot register can never receive a proactive nudge. | `.strict()` on a client-reporting endpoint | **P1** | **FIXED** — unknown keys are ignored, declared fields are still validated, and a bad value is still a 400 (both pinned by tests) | **Deploy the API to production** — push does not work there at all until then | Push silently breaks for every client newer than the server |
+| 17 | Black screen after approving a tool action | The app stays usable | **P1 — REPRODUCED, NOT YET DIAGNOSED.** Approving a tool action leaves the app on a **fully black screen**: Back exits to the launcher, reopening the app is still black, and only a force-stop restores it. Seen twice, both times immediately after approving (`tool approval granted: create_reminder …` followed by `socket error: WebSocketChannelException: Connection closed before full header was received`). The widget tree does not throw — the error boundary would have shown a message — so something renders empty rather than failing. | Not established | **P1** | OPEN | Diagnose the post-approval render; the socket error in the same window is the likely trigger but is not proven to be the cause | A user who approves an action can be left with an unusable app and no in-app way out |
+
 ---
 
 ## Blocked — exact action required
