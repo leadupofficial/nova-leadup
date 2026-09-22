@@ -599,3 +599,50 @@ finding rather than counted as fixed.
 Urdu's row moves from *listed but unhearable* to **working input**, and Nepali's
 from *silent* to *demonstrably wrong*. Both are improvements in what is known; only
 one is an improvement in what a user gets.
+
+## 17. Narrowing my own claim: which path was broken (2026-09-23)
+
+§16 concluded that "Urdu voice input was transcribing to nothing". That is true of
+**one path**, and the round that found it did not say so precisely enough. Checking
+the live path revises the scope.
+
+### The two STT paths are not the same model
+
+| Path | Used for | Model | `ur-IN` |
+|---|---|---|---|
+| `transcribeAudio` (REST) | uploaded audio, meeting pipeline | Sarvam `saarika:v2.5` | **rejected** — *"Language 'ur-IN' is not supported"* |
+| `realtime/stt/sarvam.ts` (streaming) | **spoken conversation** | Sarvam `saaras:v3-realtime` | **accepted** |
+
+Measured by opening the streaming socket with each language code:
+
+```
+hi-IN    OPEN — accepted
+ur-IN    OPEN — accepted
+ne-IN    OPEN — accepted
+```
+
+So the REST model's refusal is **not** the streaming model's limitation. §16's empty
+transcript — and the fix that repaired it — concern the **upload** path. A live Urdu
+conversation reaches a recogniser that accepts the language, and the earlier claim
+overstated the damage by not distinguishing the two.
+
+### What is still not established
+
+Whether the *quality* of live Urdu or Nepali transcription is good. I tried to
+measure it by feeding a real Urdu clip through the socket and **the probe returned no
+finals for Urdu or for the Hindi control** — so the probe's protocol handling is
+wrong and it proves nothing in either direction. It is recorded as a failed attempt,
+not as a result.
+
+The next attempt needs the response shape and flush semantics from
+`sarvam.ts` (the service flushes with real silence and reads `final` events) rather
+than a guessed message format.
+
+### What this changes
+
+- **Nothing about the fix** — `transcribeAudio` was genuinely dropping the language,
+  and that is repaired and verified.
+- **Everything about the claim's reach.** "Urdu voice input is broken" becomes "the
+  REST/upload STT path discarded Urdu, and the live path's quality is unmeasured".
+- Nepali's measured gibberish stands for the upload path; the live path accepts
+  `ne-IN` and its quality is likewise unmeasured.
