@@ -17,6 +17,8 @@ import {
 } from '@nova/database';
 import { eq, desc, sql, and, count, gte, inArray } from 'drizzle-orm';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
+import { actorFromRequest, recordAdminAction } from '../admin/audit.js';
+import type { Permission } from '../admin/permissions.js';
 import { HttpError } from '../middleware/error-handler.js';
 import { validate } from '../middleware/validate.js';
 import { logger } from '../utils/logger.js';
@@ -35,6 +37,43 @@ function requireAdmin(req: Request, res: Response, next: NextFunction): void {
 		throw new HttpError(403, 'Forbidden — requires owner or admin role', 'FORBIDDEN');
 	}
 	next();
+}
+
+/**
+ * Writes an admin audit row for a legacy `/admin` mutation.
+ *
+ * This surface predates the Control Center and wrote **no** audit rows at all: six mutations —
+ * feature-flag create/update/delete, incident create and resolve, and the user patch — changed
+ * production state with no record of who did it. That contradicts the rule that every privileged
+ * action is auditable, and the gap was invisible because the console's own audit page reads
+ * `admin_audit_logs`, which the legacy routes never wrote to.
+ *
+ * `recordAdminAction` normally takes its actor from `req.adminActor`, set by `resolveAdmin`. This
+ * router never runs that (it gates on a role claim through `requireAdmin`), so the actor is built
+ * from the authenticated user instead — which is why these rows can be added without restructuring
+ * the router or changing what the mobile app sees.
+ */
+async function auditLegacy(
+	req: Request,
+	entry: {
+		action: string;
+		permission: Permission;
+		targetType?: string;
+		targetId?: string;
+		after?: Record<string, unknown>;
+		reason?: string;
+	},
+): Promise<void> {
+	await recordAdminAction({
+		actor: actorFromRequest(req),
+		action: entry.action,
+		permission: entry.permission,
+		targetType: entry.targetType,
+		targetId: entry.targetId,
+		after: entry.after,
+		reason: entry.reason,
+		outcome: 'success',
+	});
 }
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
@@ -260,6 +299,7 @@ router.patch(
 				throw new HttpError(404, 'User not found', 'NOT_FOUND');
 			}
 
+			await auditLegacy(req, { action: 'user.update', permission: 'users.write', targetType: 'user', targetId: id, after: { ...body } });
 			res.json({
 				success: true,
 				data: {
@@ -491,6 +531,7 @@ router.post(
 				})
 				.returning();
 
+			await auditLegacy(req, { action: 'feature_flag.create', permission: 'feature_flags.write', targetType: 'feature_flag', targetId: String(flag?.id ?? body.key), after: { key: body.key, enabled: body.enabled } });
 			res.status(201).json({
 				success: true,
 				data: {
@@ -533,6 +574,7 @@ router.patch(
 				throw new HttpError(404, 'Feature flag not found', 'NOT_FOUND');
 			}
 
+			await auditLegacy(req, { action: 'feature_flag.update', permission: 'feature_flags.write', targetType: 'feature_flag', targetId: id, after: { ...body } });
 			res.json({
 				success: true,
 				data: {
@@ -562,6 +604,7 @@ router.delete(
 
 			await db.delete(featureFlags).where(eq(featureFlags.id, id));
 
+			await auditLegacy(req, { action: 'feature_flag.delete', permission: 'feature_flags.write', targetType: 'feature_flag', targetId: id });
 			res.json({ success: true });
 		} catch (err) {
 			next(err);
@@ -655,6 +698,7 @@ router.post(
 				})
 				.returning();
 
+			await auditLegacy(req, { action: 'incident.create', permission: 'incidents.manage', targetType: 'incident', targetId: String(incident?.id ?? ''), after: { severity: body.severity, title: body.title } });
 			res.status(201).json({
 				success: true,
 				data: {
@@ -692,6 +736,7 @@ router.post(
 				throw new HttpError(404, 'Incident not found', 'NOT_FOUND');
 			}
 
+			await auditLegacy(req, { action: 'incident.resolve', permission: 'incidents.manage', targetType: 'incident', targetId: id, after: { resolved: true } });
 			res.json({
 				success: true,
 				data: {
