@@ -371,3 +371,16 @@ LanguageDetectionResult detectLanguage(String text) {
   primary: 'en',
  );
 }
+
+/// The selectable `languagePolicy` options: `auto`, every language in the
+/// catalogue, and the mixed/code-switched styles.
+///
+/// Shared by the onboarding companion page and the in-app settings sheet so the
+/// two lists can never disagree, and so a language the pipeline routes on is a
+/// language the user can actually pin.
+List<(String, String)> languagePolicyOptions() => <(String, String)>[
+  ('auto', 'Auto (detect)'),
+  for (final language in kSupportedLanguages) (language.code, language.name),
+  for (final mixed in MixedLanguageCode.values)
+    (mixed.name, mixed.name[0].toUpperCase() + mixed.name.substring(1)),
+];

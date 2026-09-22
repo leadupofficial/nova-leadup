@@ -126,6 +126,10 @@ export {
 	getLanguageByCode,
 	getLanguageName,
 	getLanguageCodeMap,
+	// The mixed/code-switched codes as a runtime list, so the settings schema can
+	// accept exactly the languages the pipeline routes on rather than a hand-copied
+	// subset that drifts.
+	MIXED_LANGUAGE_CODES,
 } from './languages.js';
 
 export type {

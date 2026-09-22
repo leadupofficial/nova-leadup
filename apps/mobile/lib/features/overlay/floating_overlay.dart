@@ -35,6 +35,12 @@ import '../../core/voice/wake_word_controller.dart';
 /// recorder dependency), so the action enters the session that does exist.
 ///
 /// Not ported (DESIGN-HANDOFF.md: no OpenDesign chrome in product UI):
+/// Where the summon orb sits: clear of `NovaScaffold`'s top bar.
+///
+/// The bar is `topInset` (44) + a 44px control row + 16px of bottom padding, so
+/// anything above 104 sits on top of the bell and gear buttons.
+const double _kOrbTopBelowTopBar = 112;
+
 /// `.simulated-app` (the mocked WhatsApp backdrop) and `.theme-toggle`.
 class FloatingOverlay extends ConsumerStatefulWidget {
   const FloatingOverlay({
@@ -172,7 +178,12 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
           // prominent one; every other screen keeps the orb.
           if (_currentPath(context) != '/')
             Positioned(
-              top: 60,
+              // Below the shared top bar, not through it. `NovaScaffold` puts the bar
+              // at `topInset` (44) + a 44px control row + 16px bottom padding, and the
+              // orb at `top: 60` overlapped the controls on every screen that has one
+              // — the notification bell and settings gear on Home, the gear on
+              // Profile. The gap also keeps the orb clear of the status bar.
+              top: _kOrbTopBelowTopBar,
               right: NovaSpace.gutter,
               child: _orb(c, live, face),
             ),

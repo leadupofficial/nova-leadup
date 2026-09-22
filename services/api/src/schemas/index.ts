@@ -8,6 +8,7 @@
  * or had incomplete validation on query params / sub-resources.
  */
 import { z } from 'zod';
+import { SUPPORTED_LANGUAGES, MIXED_LANGUAGE_CODES } from '@nova/shared-types';
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
@@ -404,12 +405,33 @@ export const UpdateProfileSchema = z.object({
 	timezone: z.string().max(50).optional(),
 });
 
+/**
+ * Every language a user may pin the assistant to: the provider-backed catalogue,
+ * the mixed/code-switched styles, and `auto`.
+ *
+ * Derived from the catalogue the voice pipeline routes on. The hand-written
+ * `['auto','en','ta','tanglish']` that used to sit here (and again, separately, in
+ * `routes/settings.ts`) refused Hindi, Telugu and every other Indian language the
+ * pipeline already served.
+ */
+const LANGUAGE_POLICIES: ReadonlySet<string> = new Set<string>([
+	'auto',
+	...SUPPORTED_LANGUAGES.map((l) => l.code),
+	...MIXED_LANGUAGE_CODES,
+]);
+
+export const LanguagePolicySchema = z
+	.string()
+	.refine((value) => LANGUAGE_POLICIES.has(value), {
+		message: `Unsupported language policy. Expected one of: ${[...LANGUAGE_POLICIES].join(', ')}`,
+	});
+
 export const PersonaSchema = z.object({
 	name: z.string().min(1).max(100).optional(),
 	personality: z.string().max(50).optional(),
 	voiceSpeed: z.coerce.number().int().min(50).max(200).optional(),
 	voiceTone: z.string().max(50).optional(),
-	languagePolicy: z.enum(['auto', 'en', 'ta', 'tanglish']).optional(),
+	languagePolicy: LanguagePolicySchema.optional(),
 	wakeWordEnabled: z.boolean().optional(),
 });
 

@@ -163,10 +163,25 @@ String _baseLanguage(String tag) =>
     tag.replaceAll('_', '-').split('-').first.trim().toLowerCase();
 
 /// BCP-47 tags for the languages NOVA ships, keyed by the app's language policy.
+///
+/// Every Indian language here has an Android TTS locale (`te-IN`, `bn-IN`, …).
+/// If the handset has not installed one, the engine uses its own default, which
+/// is the honest outcome; anything not listed is resolved from the reply's script.
 const Map<String, String> _kDeviceLanguageByPolicy = <String, String>{
   'en': 'en-IN',
-  'ta': 'ta-IN',
   'hi': 'hi-IN',
+  'ta': 'ta-IN',
+  'te': 'te-IN',
+  'kn': 'kn-IN',
+  'ml': 'ml-IN',
+  'mr': 'mr-IN',
+  'bn': 'bn-IN',
+  'gu': 'gu-IN',
+  'pa': 'pa-IN',
+  'or': 'or-IN',
+  'as': 'as-IN',
+  'ur': 'ur-IN',
+  'ne': 'ne-NP',
 };
 
 /// Resolves the BCP-47 tag the device engine should use.

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nova_mobile/core/i18n/supported_languages.dart';
 import 'package:nova_mobile/core/voice/voice_protocol.dart';
 
 /// Decoding is verified against synthetic frames rather than a live socket, so
@@ -286,13 +287,93 @@ void main() {
       expect(normalizeVoiceLanguage('auto'), 'auto');
     });
 
-    test('maps app-only policies and junk onto auto', () {
-      // `tanglish` is a persona setting with no wire code.
-      expect(normalizeVoiceLanguage('tanglish'), 'auto');
+    test('passes through every Indian language the pipeline routes on', () {
+      // These used to be silently rewritten to `auto`, so a user who pinned
+      // Telugu or Bengali got whatever the detector guessed instead.
+      for (final code in <String>[
+        'te',
+        'kn',
+        'ml',
+        'mr',
+        'bn',
+        'gu',
+        'pa',
+        'or',
+        'as',
+        'ur',
+      ]) {
+        expect(normalizeVoiceLanguage(code), code, reason: code);
+      }
+    });
+
+    test('passes the mixed styles through instead of dropping them to auto', () {
+      // The server's `isSupportedLanguage` accepts these and routes them to the
+      // Indic recogniser, which is the whole point of code-switching support.
+      expect(normalizeVoiceLanguage('tanglish'), 'tanglish');
+      expect(normalizeVoiceLanguage('hinglish'), 'hinglish');
+      expect(normalizeVoiceLanguage('benglish'), 'benglish');
+      expect(normalizeVoiceLanguage('gujlish'), 'gujlish');
+    });
+
+    test('maps junk onto auto', () {
       expect(normalizeVoiceLanguage('TA'), 'ta');
       expect(normalizeVoiceLanguage(null), 'auto');
       expect(normalizeVoiceLanguage('  '), 'auto');
       expect(normalizeVoiceLanguage('klingon'), 'auto');
+    });
+
+    test('every offered option survives normalisation', () {
+      // The pickers and the socket can no longer disagree: if a language is
+      // selectable, the wire code for it is the code itself.
+      for (final (code, _) in languagePolicyOptions()) {
+        expect(normalizeVoiceLanguage(code), code, reason: code);
+      }
+    });
+  });
+
+  group('languagePolicyOptions', () {
+    test('offers every language the mandate requires', () {
+      final codes = languagePolicyOptions().map((e) => e.$1).toSet();
+      // The minimum list the product spec names, plus `auto`.
+      for (final required in <String>[
+        'auto',
+        'hi',
+        'bn',
+        'te',
+        'mr',
+        'ta',
+        'gu',
+        'kn',
+        'ml',
+        'pa',
+        'or',
+        'as',
+        'ur',
+        'en',
+      ]) {
+        expect(codes, contains(required), reason: required);
+      }
+      // Code-switching is a stated requirement, not a bonus.
+      for (final mixed in <String>[
+        'hinglish',
+        'tanglish',
+        'benglish',
+        'gujlish',
+      ]) {
+        expect(codes, contains(mixed), reason: mixed);
+      }
+    });
+
+    test('offers nothing that is not in the catalogue', () {
+      final catalogue = kSupportedLanguages.map((l) => l.code).toSet();
+      final mixed = MixedLanguageCode.values.map((m) => m.name).toSet();
+      for (final (code, _) in languagePolicyOptions()) {
+        expect(
+          code == 'auto' || catalogue.contains(code) || mixed.contains(code),
+          isTrue,
+          reason: code,
+        );
+      }
     });
   });
 }

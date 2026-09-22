@@ -6,6 +6,7 @@ import '../../app/providers.dart';
 import '../../core/api/models.dart';
 import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
+import '../../core/i18n/supported_languages.dart';
 import 'onboarding_service.dart';
 
 /// Create Your Companion — port of `onboarding/companion.html` (blueprint §5.4).
@@ -42,12 +43,11 @@ class _CompanionPageState extends ConsumerState<CompanionPage> {
     ('companion', 'Companion', 'Chatty and encouraging'),
   ];
 
-  static const _speechStyles = <(String, String)>[
-    ('auto', 'Auto Tamil–English'),
-    ('ta', 'Tamil'),
-    ('en', 'English'),
-    ('tanglish', 'Tanglish'),
-  ];
+  /// The assistant's pinned language. The export drew four chips (Auto
+  /// Tamil–English / Tamil / English / Tanglish), which left Hindi, Telugu,
+  /// Bengali and the rest of the Indian languages unselectable even though the
+  /// pipeline already served them.
+  List<(String, String)> get _speechStyles => languagePolicyOptions();
 
   @override
   void initState() {

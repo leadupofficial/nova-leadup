@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../i18n/supported_languages.dart';
+
 /// Frames the realtime voice server sends over `/api/v1/voice/realtime`.
 ///
 /// The protocol is frozen and shared with the server team, so this file is the
@@ -359,13 +361,23 @@ class VoiceProtocolEncoder {
 }
 
 /// The bare language codes the frozen protocol accepts in `start`.
-const Set<String> kVoiceProtocolLanguages = <String>{'en', 'ta', 'hi', 'auto'};
+///
+/// Derived from the same catalogue the pickers and the server's
+/// `isSupportedLanguage` use, so any language a user can choose is a language the
+/// socket is actually told about. The hand-written `{'en','ta','hi','auto'}`
+/// silently downgraded every other Indian language to `auto`, which meant a user
+/// who pinned Telugu heard whatever the detector guessed.
+final Set<String> kVoiceProtocolLanguages = <String>{
+  'auto',
+  for (final language in kSupportedLanguages) language.code,
+  for (final mixed in MixedLanguageCode.values) mixed.name,
+};
 
 /// Maps a `NovaAvatarPrefs.languagePolicy` onto a protocol language code.
 ///
-/// The persona setting also carries app-only policies such as `tanglish`,
-/// which has no wire code: those fall back to `auto` so the server detects the
-/// language itself instead of the client inventing one.
+/// `auto` and every catalogue or mixed code pass through; anything the catalogue
+/// does not name falls back to `auto`, so the server detects the language itself
+/// instead of the client inventing one.
 String normalizeVoiceLanguage(String? languagePolicy) {
   final value = (languagePolicy ?? 'auto').trim().toLowerCase();
   return kVoiceProtocolLanguages.contains(value) ? value : 'auto';

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/api/models.dart';
+import '../../core/i18n/supported_languages.dart';
 import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
 import '../../app/providers.dart';
@@ -646,12 +647,7 @@ class MePage extends ConsumerWidget {
               const SizedBox(height: NovaSpace.xs),
               Wrap(
                 spacing: NovaSpace.xs,
-                children: const [
-                  ('auto', 'Auto Tamil–English'),
-                  ('ta', 'Tamil'),
-                  ('en', 'English'),
-                  ('tanglish', 'Tanglish'),
-                ]
+                children: languagePolicyOptions()
                     .map(
                       (e) => NovaChip(
                         label: e.$2,

@@ -12,6 +12,7 @@ import { authenticate, requireAdmin, requireRole, type AuthenticatedRequest } fr
 import { HttpError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
 import { validate } from '../middleware/validate.js';
+import { LanguagePolicySchema } from '../schemas/index.js';
 
 const escapeHtml = (str: string): string => {
 	if (typeof str !== 'string') return '';
@@ -60,7 +61,7 @@ const PersonaSchema = z.object({
 	personality: z.string().max(50).optional(),
 	voiceSpeed: z.coerce.number().int().min(50).max(200).optional(),
 	voiceTone: z.string().max(50).optional(),
-	languagePolicy: z.enum(['auto', 'en', 'ta', 'tanglish']).optional(),
+	languagePolicy: LanguagePolicySchema.optional(),
 	wakeWordEnabled: z.boolean().optional(),
 });
 

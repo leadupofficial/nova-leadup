@@ -21,7 +21,7 @@ void main() {
     });
 
     test(
-      'connects, sends start with a normalised language, then listens',
+      'connects, sends start with the normalised language, then listens',
       () async {
         await harness.controller.startTurn(language: 'tanglish');
         await settle();
@@ -30,13 +30,25 @@ void main() {
         expect(harness.socket.sent.first, isA<String>());
         expect(
           jsonDecode(harness.socket.sent.first as String),
-          <String, dynamic>{'type': 'start', 'language': 'auto'},
+          // `tanglish` is a real wire code now: the server's `isSupportedLanguage`
+          // accepts the mixed styles and routes them to the Indic recogniser, so
+          // rewriting it to `auto` threw away the user's explicit choice.
+          <String, dynamic>{'type': 'start', 'language': 'tanglish'},
         );
         expect(harness.state.phase, VoiceRealtimePhase.listening);
         expect(harness.state.micActive, isTrue);
         expect(harness.capture.startCalls, 1);
       },
     );
+
+    test('an unknown policy still falls back to auto', () async {
+      await harness.controller.startTurn(language: 'klingon');
+      await settle();
+      expect(jsonDecode(harness.socket.sent.first as String), <String, dynamic>{
+        'type': 'start',
+        'language': 'auto',
+      });
+    });
 
     test('sends a bare protocol code for a supported policy', () async {
       await harness.controller.startTurn(language: 'ta');
