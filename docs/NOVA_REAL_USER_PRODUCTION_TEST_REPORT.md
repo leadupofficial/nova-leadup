@@ -1199,3 +1199,53 @@ The multi-turn spoken lifecycle on the handset — modify, complete, reopen by
 voice — was verified at the API level (§23) but only the **create** step has been
 driven through speech on the device. The remaining steps need the Converse mic
 control rather than the Home CTA.
+
+---
+
+## 28. Addendum — the task lifecycle, by voice, on the handset (2026-09-23)
+
+§13's full lifecycle is now demonstrated through speech on the physical phone,
+with the MacBook speaking and every transition approved in the sheet and then
+read back from the API rather than taken from the reply.
+
+| # | Spoken (MacBook → phone mic) | Tool the server ran | Verified state |
+|---|---|---|---|
+| 1 | *"Create a task to renew the domain in Thursday"* | `create_task:ok` | `pending`, due **Thu 24 Sep** |
+| 2 | *"Move that task to Friday"* | `update_task:ok` | due **Fri 25 Sep 00:00 IST** |
+| 3 | *"Mark the domain task as complete"* | `complete_task:ok` | `completed` |
+| 4 | *"Actually reopen it, I have not done it yet"* | `reopen_task:ok` | **`pending`** |
+
+The history recorded all four, in order, as the agent acting on the user's behalf:
+
+```
+task.create · task.create · task.update · task.complete · task.reopen   (all success)
+```
+
+### Why this is new
+
+Three earlier rounds could not do this, for reasons that were all real and are now
+fixed:
+
+- **The black screen** (§26) ended the app at the first approval. Every step here
+  passes through one.
+- **`update_task` did not exist** (§23). "Move that to Friday" had nothing to call.
+- **Reopening missed its target** (§23) because completed tasks were invisible to
+  the assistant, so it either gave up or bound a pending task's id.
+
+### Two details worth keeping
+
+**The pronoun resolved across turns.** Turn 2 said "that task" and turn 4 said
+"it", with no task named, and the server acted on the right id both times — the
+one created in turn 1, shown in the sheet as
+`38d68a4a-897d-4ddb-aaab-e6f1e36e9014`.
+
+**A sloppy utterance was handled correctly.** Turn 1 was *"renew the domain in
+Thursday"* — not grammatical — and resolved to Thursday 24 September, the right
+day, without inventing anything or asking a question it did not need to ask.
+
+### Method note
+
+Last round I mistook the Home CTA's coordinates for the Converse mic and twice
+reported "a second turn produced no tool call". The mic control on Converse is at
+the bottom-right of the composer; used properly, every turn here started and
+completed. The earlier observation was my error and remains withdrawn.
