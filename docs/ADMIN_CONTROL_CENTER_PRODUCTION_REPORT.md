@@ -1886,6 +1886,63 @@ Before anything was replaced: database dump to `/opt/nova/backups/nova-predeploy
 `nova-api:predeploy` and `nova-admin-ui:predeploy`. Rollback is retag-and-`up`, plus a restore from the
 dump if the schema has to go back too.
 
+### 10.6 The production password leak, found by signing in
+
+Everything above seeded a token into the cookie. That is what a *finished* login leaves behind, and
+it says nothing about whether a human can get in — so the deployed sign-in form was driven for real,
+with a real password, against `https://admin.nova.leadup.in`. It did not work, and the reason was
+worse than "it does not work":
+
+```
+https://admin.nova.leadup.in/login?email=admin%40nova.leadup.in&password=<the actual password>
+```
+
+`LoginForm.tsx` had `onSubmit={handleSubmit}` (which calls `preventDefault`) and **no `method`
+attribute**. An HTML form with no `method` submits as GET. Until React attaches, the browser owns
+the submit, so every field is serialised into the query string — into the address bar, the browser
+history, every `Referer` header, and nginx's access log. That is not a test artifact: a JavaScript
+chunk that is slow to load, a hydration failure, or JavaScript disabled outright all take that path.
+
+**It had already happened to a real operator.** The rotated nginx log for **2026-09-18** holds two
+entries from a real browser:
+
+```
+165.99.72.182 - - [18/Sep/2026:10:17:08 +0000] "GET /login?email=admin%40nova.leadup.in&password=<MASKED>" 200 2438
+    "https://nova.leadup.in/login?next=%2F" "Mozilla/…"
+```
+
+So the platform's own administrator had their password written to a log file by using the login
+form — on the *old* console, before this work started. The defect was inherited, not introduced
+here, and it is the kind that survives review because the symptom is an empty-looking form rather
+than an error.
+
+**The fix has two independent guards**, because the leak and the race are different problems:
+
+1. `method="post"` on the form. An unhydrated submit now posts a body; the credentials never reach
+   the URL.
+2. The submit button is `disabled` until a `useEffect` confirms hydration, so that submit does not
+   happen at all. `title` explains why while it is inert.
+
+Two tests cover it, on purpose:
+
+| Test | What it proves |
+| --- | --- |
+| `tests/admin-console.spec.ts` → *the sign-in form cannot leak credentials before React hydrates* | Loads `/login` with **JavaScript disabled** and asserts the server's own HTML: `method="post"` and an inert submit button. JavaScript-disabled is the exact state in which the `onSubmit` handler does not exist, so this is the only check that covers the failure. |
+| `tests/admin-live-login.spec.ts` | Drives the real form against a real deployment; skipped unless `ADMIN_EMAIL`/`ADMIN_PASSWORD` are set, because it is the one test that needs a real password. |
+
+Both pass against production. The second one also failed once for a reason worth recording: it typed
+into the inputs before hydration, and because they are controlled, React rendered them from its own
+empty state on hydration and the API answered `400 VALIDATION_ERROR: Password is required` against a
+form that looked filled in on screen. The test now waits for the submit button — the same hydration
+signal an operator gets — before typing.
+
+**Credential hygiene, done as part of this:** the password used during the failing run was exposed in
+a URL and in `access.log`. It was rotated. All five occurrences in the live access log and all three
+in the rotated archives are redacted in place, the pre-scrub archive is quarantined at
+`/root/nova-log-quarantine/` (mode 700, root only) as evidence, and the account was given a fresh
+password that has never been in a URL. The password leaked on 2026-09-18 is the one this rotation
+retired.
+
 ### 10.6 Blockers this deploy created or exposed
 
 | Class | Blocker | Evidence | What it needs |
@@ -1893,4 +1950,4 @@ dump if the schema has to go back too.
 | **P0** | The Android build served to users is **older than the backend it now talks to** | `/opt/nova/downloads/nova-arm64.apk` is dated 2026-09-19; the API it points at was replaced on 2026-09-22 | Rebuild the APK from `main` and republish it at `/download.apk`, then run the acceptance scenario on it |
 | **P1** | The physical-device acceptance run still has not happened | `adb devices` returns **no devices** — not even the emulator | A handset, `adb reverse` or a real API URL, and the run in §4.3 |
 | **P2** | The live database's history diverged from this repository's migrations | `notification_preferences` collided; `__migrations` is a legacy table | Any *other* deployment built from the old lineage needs the same documented repair. A fresh deploy from a database created by `packages/database/drizzle/0000`–`0002` alone is clean |
-| **P3** | The live console was verified with a minted token, not the operator's password | An Owner-role JWT signed with the deployment's `JWT_SECRET`, expires in 25 minutes, no `admin_sessions` row | Sign in interactively once with the real operator account to confirm the password path end to end |
+| ~~P3~~ | ~~The live console was verified with a minted token, not the operator's password~~ | `tests/admin-live-login.spec.ts` | **FIXED** — and it found a P0. The deployed sign-in form submitted as **GET** before hydration, putting the password in the URL and in nginx's access log; a real operator hit it on 2026-09-18. Fixed with `method="post"` plus a hydration-gated submit, and the password is verified working end to end. See §10.6 |
