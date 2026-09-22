@@ -701,3 +701,48 @@ socket error is in the same window and is the obvious suspect, but I have not
 proven it is the cause, so it is recorded as **P1 OPEN** with the reproduction
 rather than closed with a guess. A user who approves an action can be left with an
 unusable app and no in-app way out.
+
+---
+
+## 19. Addendum — the black screen, narrowed but not solved (2026-09-23)
+
+The reproduced P1 from §18 was investigated. It is **not** fixed, and this entry
+records what was ruled out so the next attempt does not repeat it.
+
+### Ruled out
+
+| Hypothesis | Why it is wrong |
+|---|---|
+| The confirm sheet is what fills the screen | Its background is `c.surface` (dark grey), and the sheet renders a "Confirm action" header and two buttons. The screen was uniformly black with no shell nav bar and no top bar. |
+| `decideApproval` hangs, so the sheet never pops | It is `void`, not a `Future` — the `async` wrapper returns immediately, so `Navigator.pop` is always reached. |
+| A widget threw | The app's `ErrorBoundary` would have drawn a message. Nothing was caught, and `logcat` shows no Flutter exception. |
+
+What is still true and still unexplained: after approving, the app renders a
+full-screen black surface with **no shell chrome at all** — no bottom nav, no top
+bar — while the process stays alive and focused. Only `am force-stop` restores it.
+The one signal in the same window is a dead voice socket:
+
+```
+tool approval granted: create_reminder (567ec710-…)
+socket error: WebSocketChannelException: HttpException: Connection closed
+    before full header was received, uri = …/voice/realtime
+```
+
+That is 18 seconds after the approval and is the obvious suspect, but correlation
+is not causation and no fix was written against it.
+
+### What was fixed
+
+The sheet was `isDismissible: false` and `enableDrag: false` — a modal the user
+cannot close. That is what turned a rendering fault into an unusable app. Both
+call paths already treat a dismissal as "deny", so making it closable is safe and
+well-defined, and the user now always has a way out. On-device verification of the
+escape hatch was not performed: reaching the sheet needs a full voice turn with a
+side-effecting tool, and the black screen is not reproducible on demand.
+
+### Consequence for this round
+
+The task lifecycle (§13) and the MacBook's capture of NOVA's spoken reply were the
+planned work and were **not** completed: every attempt runs through a voice turn
+that ends at the approval sheet, which is where the app becomes unusable. They
+remain untested and are not claimed.
