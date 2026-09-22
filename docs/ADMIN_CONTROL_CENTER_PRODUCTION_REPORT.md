@@ -1951,3 +1951,138 @@ retired.
 | **P1** | The physical-device acceptance run still has not happened | `adb devices` returns **no devices** — not even the emulator | A handset, `adb reverse` or a real API URL, and the run in §4.3 |
 | **P2** | The live database's history diverged from this repository's migrations | `notification_preferences` collided; `__migrations` is a legacy table | Any *other* deployment built from the old lineage needs the same documented repair. A fresh deploy from a database created by `packages/database/drizzle/0000`–`0002` alone is clean |
 | ~~P3~~ | ~~The live console was verified with a minted token, not the operator's password~~ | `tests/admin-live-login.spec.ts` | **FIXED** — and it found a P0. The deployed sign-in form submitted as **GET** before hydration, putting the password in the URL and in nginx's access log; a real operator hit it on 2026-09-18. Fixed with `method="post"` plus a hydration-gated submit, and the password is verified working end to end. See §10.6 |
+
+## 11. Security review: end-user content, CRUD coverage, and provider readiness
+
+### 11.1 The exposure, and what it actually was
+
+The report claim to test here was "sensitive user data (conversations, tasks, reminders) is being
+exposed". It was, but not where the UI suggests. The permission *catalogue* already separated metadata
+from content (`conversations.read` vs `conversations.content_read`) and the role table already stated
+the policy in prose — `ANALYTICS_ADMIN` is "metrics and cost, no personal data", `SUPPORT_ADMIN` is "no
+conversation content". Three routes did not honour it:
+
+| # | Path | Gate it used | What it returned | Proof |
+| --- | --- | --- | --- | --- |
+| 1 | `GET /control/users/:id` | `users.read` | memory **bodies** verbatim, task titles + descriptions, reminder titles, notification titles | `routes/admin/users.ts` (route + the SQL and response assembly below it) |
+| 2 | `GET /control/conversations` | `conversations.read` | `title` — and `routes/chat.ts` writes that title as the **first 100 characters of the user's own message**, so `conversations.read`'s own catalogue entry ("No message text") was false | `routes/chat.ts` (write) → `routes/admin/operations.ts` (read) → `apps/admin/src/app/conversations/page.tsx` |
+| 3 | `GET /control/tasks`, `GET /control/reminders` | `tasks.read`, `reminders.read` | `title` and `description` | `routes/admin/operations.ts`, rendered at `tasks/page.tsx:189,191` and `reminders/page.tsx:193` |
+
+Measured against the running API before the fix, with a real token per role:
+
+```
+analytics_admin    tasks 200 CONTENT:title    reminders 200 CONTENT:title
+operations_admin   tasks 200 CONTENT:title    reminders 200 CONTENT:title    conversations 200 CONTENT:title
+```
+
+`ANALYTICS_ADMIN` is the sharpest case: its documented purpose is metrics with no personal data, and it
+held a path to every user's task text and, through the user-detail route, their stored memory bodies.
+None of those reads wrote an audit row — while the console told the operator they had
+("Personal data. Listing memory is an audited action") on the very page that leaked them.
+
+**Fixed.** Three permissions were added — `tasks.content_read`, `reminders.content_read`,
+`memory.content_read` — granted to `SUPER_ADMIN` and `DEVELOPER` only, mirroring
+`conversations.content_read` exactly so all four domains follow one rule instead of four. The
+endpoints now return the same rows, the same `totalItems` and the same pagination either way, with the
+user's words removed and a `contentRedacted` flag the console renders as an explicit notice.
+Verified after the fix, same probes, same tokens:
+
+```
+analytics_admin    memory=redacted tasks=redacted   user-detail: memories=0, all four domains withheld
+operations_admin   memory=redacted tasks=redacted   user-detail: memories=0, all four domains withheld
+developer          memory=content  tasks=content    user-detail: nothing withheld (intended)
+```
+
+API suite 1058/1058, deployed to production and re-verified there.
+
+### 11.2 A 500 the browser sweep had been passing
+
+`GET /control/memory` returned **500 on every request**, locally *and* in production: its SQL selected
+`m.type` and `m.metadata`, and `memories` has neither (the columns are `category` and
+`normalized_facts`). The console page rendered its heading plus an error card under a **200**, and the
+earlier sweep's failure markers did not match that card, so "34/34 destinations passed" included a page
+that could not load its data at all. That is a hole in the verification, not just in the endpoint:
+**the sweep must assert that a page's data arrived, not only that it has an `<h1>`.** The endpoint is
+fixed (production now answers 200); tightening the sweep accordingly is recorded as open work.
+
+### 11.3 Findings from the same review, not yet fixed
+
+| Class | Finding | Where |
+| --- | --- | --- |
+| **P2** | The legacy `/api/v1/admin/*` router bypasses the control-plane gate entirely: it resolves no database grant, writes no admin audit row, and does not run the admin-session liveness check — so revoking a console session does **not** end access to it until the 15-minute access token expires. It can still `PATCH /users/:id` and write feature flags and incidents. | `services/api/src/server.ts` (mount), `services/api/src/routes/admin.ts` (`requireAdmin`) |
+| **P2** | Notification `title`/`body`/`payload` are composed from the user's task and reminder titles, and are returned under `notifications.read`/`proactive.read` — a second route to the same content for a role like `OPERATIONS_ADMIN`. | `routes/admin/operations.ts` (`/notifications`, `/proactive`) |
+| **P3** | Admin audit `before`/`after` snapshots carry reminder titles, so `audit.read` is a third channel to the same text. | `routes/admin/operations.ts` (reminder update), `system.ts` (audit read/export) |
+| **P3** | No tenant boundary is enforced on any content read. `tenant_id` exists on `conversations`, `tasks` and `memories` and is never applied; `platform_admin_roles` has no organization column. Latent while the deployment is single-tenant, a cross-tenant read the moment a second organization is populated. | every content query in `routes/admin/operations.ts` and `users.ts` |
+| **P3** | Three control routers (`sessions`, `admin-sessions`, `security`) do not mount `adminGate` and work only because an earlier router's `use()` runs first; and the gate (a grant read plus a session upsert) therefore executes once per mounted router, up to eleven times per request. | `services/api/src/server.ts` |
+
+### 11.4 CRUD coverage
+
+A full resource-by-resource matrix (API create/update/delete vs console create/update/delete, with
+`file:line` for every "yes") was produced as part of this review. The headline:
+
+- **Complete:** feature flags and their overrides; configuration entries; provider secrets; operator
+  role grants; admin sessions; admin MFA (self-service); maintenance and kill switches; session
+  revocation; deletion-request completion.
+- **Update-only:** tasks, reminders, users.
+- **Delete-only:** memories.
+- **Read-only at both layers:** conversations, organizations, notifications, proactive events, jobs,
+  languages/translations, voice, avatar, tool executions.
+- **Absent everywhere** (no route, and in several cases no table): user creation, user deletion,
+  organization create/update/delete, plans and subscriptions, notification templates, retention
+  policies, integrations, lead pipeline, provider-registry writes.
+
+Nine permission strings are declared but referenced by no route at all, so the catalogue advertises
+capability the API does not have: `users.delete`, `users.impersonate`, `proactive.manage`,
+`ai.secrets`, `voice.configure`, `avatar.configure`, `notifications.send`, `incidents.manage`,
+`environment.manage`.
+
+**Backend capabilities that exist but have no console caller** — the cheapest correct wins, because the
+route, the permission and the audit already work:
+
+| Capability | Route | Where the UI goes |
+| --- | --- | --- |
+| Edit a user (name, verified flags, locale, timezone) | `PATCH /control/users/:id` | user detail page, beside the existing suspend form |
+| Reset user state (clear memories, cancel reminders) | `POST /control/users/:id/reset-state` | same page |
+| Retry a failed job | `POST /control/jobs/:id/retry` | the read-only jobs page |
+| Create an incident | `POST /api/v1/admin/incidents` | the incidents page (route exists, never called) |
+| Open a conversation's content | `GET /control/users/:id/conversations/:conversationId` | user detail — content is gated and audited, but unreachable from the UI |
+
+### 11.5 AI providers: what is configured, what is actually broken, and what is missing
+
+Measured from the running deployment's own provider health checks, not from configuration intent:
+
+| Provider | Status | Detail |
+| --- | --- | --- |
+| Anthropic (AI credits gateway) | **pass** | authenticated; 423 models visible |
+| Deepgram (STT) | **pass** | authenticated, one project visible |
+| ElevenLabs (TTS) | **pass** | authenticated, pay-as-you-go tier |
+| Sarvam (STT/TTS) | **fail** | `Model 'bulbul:v2' has been deprecated. Please use 'bulbul:v3'` |
+| PostgreSQL / Redis | **pass** | PG 16.15; Redis PONG |
+| Object storage (MinIO) | **degraded** | "Endpoint answered 400" |
+| Firebase Cloud Messaging | **not configured** | `FIREBASE_SERVICE_ACCOUNT_JSON` absent |
+| Stripe | **not configured** | `STRIPE_SECRET_KEY` absent |
+
+Two of those are *false alarms produced by the checks themselves*, which is worse than no check — they
+train an operator to ignore provider warnings:
+
+- The Sarvam probe hard-codes `model: 'bulbul:v2'` (`services/api/src/admin/providers.ts`), a model
+  Sarvam has retired. The actual realtime TTS path uses `bulbul:v3`
+  (`services/api/src/realtime/tts.ts`). So voice works while the console reports it down.
+- The object-storage probe sends `HEAD {endpoint}/`. Measured on the live host: `HEAD http://minio:9000/`
+  answers **400**, while `HEAD http://minio:9000/nova-assets` answers **403** — reachable and correctly
+  demanding credentials. The probe tests the wrong URL and reports `degraded` permanently.
+
+**Provider recommendation.** The four chosen providers cover the product's AI, STT and TTS needs, and
+no additional *AI* provider is required: the Anthropic gateway alone advertises 423 models, which is
+the usual reason to add a second vendor (model diversity and fallback) and it already provides both.
+What is missing is not an AI provider:
+
+1. **Firebase Cloud Messaging — required, and currently the top product blocker.** Reminders are a core
+   NOVA behaviour, delivery is the OS alarm, and `apps/mobile` has no `firebase_messaging` and no
+   device-token registration (its own settings page says so). Without FCM the platform cannot notify a
+   user whose app is closed, which is most of the value of a reminder.
+2. **Object storage (already self-hosted MinIO)** — no new vendor; the credentials and the probe URL
+   need fixing, and it is on the path for audio recordings and avatars.
+3. **Stripe — not required yet.** Nothing in the API or the mobile client charges anyone; Stripe is
+   referenced only by the provider *health check* and the control-plane config, so configuring it now
+   would buy an unused integration. It becomes necessary the moment subscriptions are sold.
