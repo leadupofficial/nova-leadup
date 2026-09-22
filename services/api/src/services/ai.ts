@@ -1032,11 +1032,28 @@ export async function synthesizeSpeechDeepgram(
 
 // ─── Text-to-Speech (ElevenLabs — English default) ────────────────────
 
+// Languages `eleven_flash_v2_5` has no voice for but `eleven_v3` does, measured
+// against the account's own `/v1/models` on 2026-09-23: Flash covers 32
+// languages, v3 covers 74, and Urdu and Nepali are in v3 and absent from Flash.
+// Asking Flash for them returned audio that read the script in **English
+// phonetics** — the long-standing "wrong voice" defect for those languages.
+//
+// Round-tripped through Deepgram `detect_language` on the same Urdu sentence:
+//   Flash, no code : "कल सुबह ten बजे कल आईंड को call करें"   (mangled)
+//   v3 + ur        : "कल सुबह दस बजे client को call करें"    (the number read aloud)
+//
+// Only the gap goes to v3: it is the costlier model, and the languages Flash
+// already serves were verified working.
+export const ELEVENLABS_V3_ONLY_LANGUAGES: Record<string, string> = {
+	ur: 'ur', ne: 'ne', as: 'as', bn: 'bn', gu: 'gu', te: 'te',
+	kn: 'kn', ml: 'ml', mr: 'mr', pa: 'pa', or: 'or',
+};
 export async function synthesizeSpeech(
 	text: string,
 	voiceId: string,
-	options?: { speed?: number; stability?: number; signal?: AbortSignal }
+	options?: { speed?: number; stability?: number; signal?: AbortSignal; language?: string }
 ): Promise<{ audioBuffer: Buffer; contentType: string; durationMs: number }> {
+	const v3Code = options?.language ? ELEVENLABS_V3_ONLY_LANGUAGES[options.language] : undefined;
 	const elevenLabsApiKey = env.ELEVENLABS_API_KEY;
 	if (!elevenLabsApiKey) {
 		throw new Error('ELEVENLABS_API_KEY is not configured');
@@ -1073,7 +1090,10 @@ export async function synthesizeSpeech(
 						// The original `eleven_turbo_v2` was English-only, which is why
 						// a Tamil reply came back as mangled English phonetics. Flash
 						// v2.5 covers 32 languages including Tamil and Hindi.
-						model_id: 'eleven_flash_v2_5',
+						model_id: v3Code ? 'eleven_v3' : 'eleven_flash_v2_5',
+						// Omitted for Flash, which infers the language; v3 must be told, and is
+						// only asked when Flash has no voice for the language at all.
+						...(v3Code ? { language_code: v3Code } : {}),
 						voice_settings: {
 							stability: options?.stability ?? 0.5,
 							similarity_boost: 0.75,

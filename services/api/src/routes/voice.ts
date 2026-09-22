@@ -368,7 +368,7 @@ router.post('/tts', authenticate, validate(TtsSchema), async (req: Authenticated
 				contentType = result.contentType;
 				provider = 'google';
 			} else {
-				const result = await synthesizeSpeech(body.text, voiceId);
+				const result = await synthesizeSpeech(body.text, voiceId, { language });
 				audioBuffer = result.audioBuffer;
 				contentType = result.contentType;
 				provider = 'elevenlabs';
@@ -470,7 +470,8 @@ router.post('/tts', authenticate, validate(TtsSchema), async (req: Authenticated
 				try {
 					const fallback = await synthesizeSpeech(
 						body.text,
-						body.voiceId || '21m00Tcm4TlvDq8ikWAM'
+						body.voiceId || '21m00Tcm4TlvDq8ikWAM',
+						{ language }
 					);
 					logger.warn(
 						{ language, primary: voiceProvider, fallback: 'elevenlabs', reason: ttsErr },
