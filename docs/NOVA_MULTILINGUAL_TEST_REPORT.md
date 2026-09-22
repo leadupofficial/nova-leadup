@@ -789,3 +789,67 @@ speech burst   10.0 s → 25.5 s       (~15 s of speech)
 The burst begins *after* the MacBook stopped speaking, so it is the phone. Direction
 one is proven by the transcript, direction two by the level, and neither is inferred
 from the code.
+
+## 21. The pinned language never reached the microphone (2026-09-23)
+
+Testing code-switching on the handset turned up a defect bigger than the thing being
+tested: **the language the user selected was not the language the recogniser used.**
+
+### How it showed
+
+The persona was pinned to `hinglish`, the app was rebuilt and launched, and the
+MacBook spoke *"Kal subah mera kya schedule hai, batao na please"*. The app's own
+server log said which language the turn ran with:
+
+```
+"language":"auto"
+```
+
+Not `hinglish`. The recogniser returned *"Cal Subamericaia schedule high, bateo na
+please."* — Latin-script mangling of Hindi words — and NOVA answered:
+
+> *"I'm not quite sure what you're asking for… **Feel free to write in English,
+> Portuguese, or mix them however feels natural.**"*
+
+It did not answer the question, and it suggested **Portuguese**: a language with no
+connection to the user, the input, or the catalogue.
+
+### The cause
+
+Every voice entry point took the language like this:
+
+```dart
+ref.read(personaProvider).asData?.value.languagePolicy
+```
+
+`personaProvider` was a lazy `FutureProvider.autoDispose`. A **read** of a lazy
+provider that has not loaded returns `asData == null` — and nothing had watched it,
+so it never loaded. `null` normalises to `'auto'` by design, so the pinned language
+was discarded on the **first turn of every app run**. There was corroborating
+evidence in the log: **no `/settings/persona` request at all** between app launch
+and the turn.
+
+### The fix
+
+The provider is no longer `autoDispose`, and all four voice entry points (Converse,
+Home, the floating orb, and the wake-word path) **await** `personaProvider.future`
+instead of reading a possibly-cold value.
+
+### Verified, one build apart, same sentence and voice
+
+| | Language sent | Transcript | Reply |
+|---|---|---|---|
+| before | `auto` | *"Cal Subamericaia schedule high, bateo na please."* | *"I'm not quite sure… Portuguese…"* |
+| **after** | **`hinglish`** | *"कै सब अमेरिका ये स्केजुल हाई बात है ना प्लीज।"* | **"हाँ, बिल्कुल। आपके पास कल (गुरुवार) को एक बहुत busy दिन है — सब कुछ दोपहर बारह बजे तक due है: वेंडर को कॉल करना, क्वार्टरली रिपोर्ट भेजना, लाइसेंस रिन्यू करना…"** |
+
+The reply after the fix is **Hinglish** (Devanagari with English words), **correct**,
+and **grounded** — the vendor call, quarterly report and licence renewal are this
+account's real tasks.
+
+### What is still not good
+
+**The transcript is still imperfect** — *"कै सब अमेरिका ये स्केजुल हाई"* for *"Kal
+subah mera kya schedule hai"*. The assistant recovered the meaning and answered
+correctly, so the outcome is right, but the words are not. Recognising romanised
+Hindi spoken by an English voice is a genuinely hard case and this is recorded as a
+**quality** limitation, not a pass.
