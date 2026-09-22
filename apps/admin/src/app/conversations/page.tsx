@@ -18,22 +18,29 @@ import { StatusBadge, formatDateTime, formatNumber, formatRelative } from '../..
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * These keys are the API's, which are camelCase — the response is mapped field by field in
+ * `routes/admin/operations.ts`. This type previously declared snake_case names, so the
+ * compiler was told to expect `row.user_id` and every one of them type-checked while
+ * evaluating to `undefined` at runtime: the User column, the user/NOVA message split and both
+ * timestamps rendered empty on a page that a browser sweep reported as healthy.
+ */
 type ConversationRow = {
 	id: string;
-	user_id: string;
-	user_email: string | null;
-	user_name: string | null;
+	userId: string;
+	userEmail: string | null;
+	userName: string | null;
 	title: string | null;
 	mode: string;
 	messages: number;
-	user_messages: number;
-	assistant_messages: number;
+	userMessages: number;
+	assistantMessages: number;
 	models: string[] | null;
 	tokens: number;
-	created_at: string;
-	updated_at: string;
-	ended_at: string | null;
-	last_message_at: string | null;
+	createdAt: string;
+	updatedAt: string;
+	endedAt: string | null;
+	lastMessageAt: string | null;
 };
 
 export default async function ConversationsPage({
@@ -77,7 +84,7 @@ export default async function ConversationsPage({
 						{/* The link is always rendered, even for an operator without content permission:
 						    the destination explains the refusal by name, which is more useful than a
 						    hidden link they cannot account for. */}
-						<Link href={`/conversations/${row.id}?userId=${row.user_id}`} style={{ color: '#2563eb' }}>
+						<Link href={`/conversations/${row.id}?userId=${row.userId}`} style={{ color: '#2563eb' }}>
 							{row.title ?? '(untitled)'}
 						</Link>
 					</div>
@@ -90,8 +97,8 @@ export default async function ConversationsPage({
 		{
 			header: 'User',
 			render: (row) => (
-				<Link href={`/users/${row.user_id}`} style={{ fontSize: '0.78rem', color: '#2563eb' }}>
-					{row.user_email ?? row.user_name ?? shortId(row.user_id)}
+				<Link href={`/users/${row.userId}`} style={{ fontSize: '0.78rem', color: '#2563eb' }}>
+					{row.userEmail ?? row.userName ?? shortId(row.userId)}
 				</Link>
 			),
 		},
@@ -103,7 +110,7 @@ export default async function ConversationsPage({
 				<span style={{ fontSize: '0.8rem' }}>
 					{formatNumber(row.messages)}
 					<div style={{ fontSize: '0.68rem', color: '#9ca3af' }}>
-						{formatNumber(row.user_messages)} user / {formatNumber(row.assistant_messages)} NOVA
+						{formatNumber(row.userMessages)} user / {formatNumber(row.assistantMessages)} NOVA
 					</div>
 				</span>
 			),
@@ -125,8 +132,8 @@ export default async function ConversationsPage({
 			header: 'Last activity',
 			render: (row) => (
 				<span style={{ fontSize: '0.78rem' }}>
-					{row.last_message_at ? formatRelative(row.last_message_at) : formatRelative(row.created_at)}
-					<div style={{ fontSize: '0.68rem', color: '#9ca3af' }}>started {formatDateTime(row.created_at)}</div>
+					{row.lastMessageAt ? formatRelative(row.lastMessageAt) : formatRelative(row.createdAt)}
+					<div style={{ fontSize: '0.68rem', color: '#9ca3af' }}>started {formatDateTime(row.createdAt)}</div>
 				</span>
 			),
 		},
