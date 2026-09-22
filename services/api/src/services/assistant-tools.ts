@@ -30,12 +30,12 @@ import {
  */
 export const ASSISTANT_TOOLS_PROMPT =
 	'You can manage the user\'s own things with tools: create_reminder, update_reminder, ' +
-	'cancel_reminder, create_task, complete_task, reopen_task, resolve_follow_up, save_memory ' +
-	'and forget_memory. ' +
+	'cancel_reminder, create_task, update_task, complete_task, reopen_task, resolve_follow_up, ' +
+	'save_memory and forget_memory. ' +
 	'Creation and management are both yours — never tell them to edit, cancel or complete ' +
 	'something themselves, and never say you are unable to create, edit, cancel, complete, ' +
 	'reopen, remember or forget things. When they ask you to remind them of something, change ' +
-	'or cancel a reminder, add a task, tick a task off, bring a task back, remember something ' +
+	'or cancel a reminder, add a task, move or rename a task, tick a task off, bring a task back, remember something ' +
 	'about them or forget something, call the matching tool. ' +
 	'When they correct something you already knew, call save_memory with the new fact exactly ' +
 	'as they stated it: a memory that states the same thing differently is replaced ' +
@@ -165,6 +165,7 @@ export const ASSISTANT_TOOL_LEVELS = {
 	update_reminder: TOOL_LEVEL_PERSONAL_WRITE,
 	cancel_reminder: TOOL_LEVEL_PERSONAL_WRITE,
 	create_task: TOOL_LEVEL_PERSONAL_WRITE,
+	update_task: TOOL_LEVEL_PERSONAL_WRITE,
 	complete_task: TOOL_LEVEL_PERSONAL_WRITE,
 	reopen_task: TOOL_LEVEL_PERSONAL_WRITE,
 	save_memory: TOOL_LEVEL_PERSONAL_WRITE,
@@ -313,10 +314,21 @@ const CREATE_REMINDER_DESCRIPTION = [
 
 const CREATE_TASK_DESCRIPTION = [
 	'Add a task to the user\'s task list.',
-	'Use this when the user asks to add, note down or keep track of something to do but gives no specific time to be alerted',
-	'("add a task to send the invoice"). If they give a deadline, put it in `due_at` as an ISO 8601 date-time.',
-	'When they name a day but no time ("due tomorrow"), do not choose an hour for them: leave `due_at` out,',
-	'send a date on its own, or ask them what time they mean in one short question. An hour they did not give is refused.',
+	'Use this when the user asks to add, note down or keep track of something to do ("add a task to send the invoice").',
+	'If they give a deadline, put it in `due_at`.',
+	'A task\'s deadline is optional, so a day on its own is a complete answer: "file the insurance claim on Thursday"',
+	'means `due_at` is that Thursday. Send the date without a time and say which day you used.',
+	'Never ask which hour they meant for a task, and never leave the task uncreated while you wait for one —',
+	'a task filed against a day is useful, and one that was never filed is not. An hour they did not give is still',
+	'refused, so the value stays a bare date.',
+].join(' ');
+
+const UPDATE_TASK_DESCRIPTION = [
+	'Change a task that already exists: rename it, move its deadline, or change its priority.',
+	'Use this for "move that to Friday", "push the claim task to next week", "rename it to X".',
+	'A deadline of a day and no time is a complete answer for a task — send the date on its own rather than',
+	'asking which hour they meant, and say which day you used. Rescheduling is a change, not a new task:',
+	'create_task here would leave the old one behind and the user with two.',
 ].join(' ');
 
 const SAVE_MEMORY_DESCRIPTION = [
@@ -527,11 +539,42 @@ export const ASSISTANT_TOOLS: ToolDefinition[] = [
 					type: 'string',
 					description:
 						'Optional deadline, ISO 8601, e.g. "2026-09-19T17:00:00+05:30". A value with no offset is read in the user timezone. ' +
-						'If the user gave a day but no time, do not choose an hour for them: leave this out, send a date on its own, ' +
-						'or ask them what time they mean.',
+						'When the user gave a day but no time, send a date on its own (e.g. "2026-09-24"). Do not invent an hour, and do not ' +
+						'ask for one — the deadline is optional and the task must still be created.',
 				},
 			},
 			required: ['title'],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: 'update_task',
+		description: UPDATE_TASK_DESCRIPTION,
+		input_schema: {
+			type: 'object',
+			properties: {
+				task_id: {
+					type: 'string',
+					description: `The id of the task to change. ${TARGET_ID_RULE}`,
+				},
+				title: {
+					type: 'string',
+					description: 'New task text. Omit to leave the current title unchanged.',
+				},
+				due_at: {
+					type: 'string',
+					description:
+						'New deadline, ISO 8601, e.g. "2026-09-19T17:00:00+05:30". A value with no offset is read in the ' +
+						'user timezone. Omit to leave the current deadline unchanged. A day on its own is a complete answer — ' +
+						'send the date and do not invent or ask for an hour.',
+				},
+				priority: {
+					type: 'string',
+					enum: ['low', 'medium', 'high', 'urgent'],
+					description: 'New priority. Omit to leave the current one unchanged.',
+				},
+			},
+			required: ['task_id'],
 			additionalProperties: false,
 		},
 	},

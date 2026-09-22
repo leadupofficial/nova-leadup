@@ -113,8 +113,19 @@ export const ForgetMemoryInput = z
 // Mummy" are indistinguishable, and a fuzzy match is how a tool edits the
 // wrong row.
 
-const ReminderId = z.string().min(1).max(64);
-const TaskId = z.string().min(1).max(64);
+/**
+ * Ids the model may send for a row it was shown.
+ *
+ * Validated as UUIDs on purpose. These columns are Postgres `uuid`, so a
+ * non-uuid string is not a miss — it is a type error the database raises, and the
+ * model gets a raw `DatabaseError` it cannot act on. Measured: `reopen_task` was
+ * called with the placeholder `"task_id_for_warranty_claim"`, and the turn ended
+ * with "the system rejected the request" and a task left completed. Rejecting the
+ * shape here turns that into an ordinary validation failure the model can retry
+ * from, and keeps a malformed id away from the database entirely.
+ */
+const ReminderId = z.string().uuid();
+const TaskId = z.string().uuid();
 
 export const UpdateReminderInput = z
 	.object({
@@ -151,6 +162,43 @@ export const CancelReminderInput = z.object({ reminder_id: ReminderId }).strict(
 export const CompleteTaskInput = z.object({ task_id: TaskId }).strict();
 
 export const ReopenTaskInput = z.object({ task_id: TaskId }).strict();
+
+/**
+ * Rescheduling or renaming an existing task.
+ *
+ * The lifecycle the product promises is create → modify → reschedule → complete
+ * → reopen, and there was no tool for the middle two: a task could be created,
+ * completed and reopened, but never moved. Measured: "move that to Friday" was
+ * answered with "I need the time for Friday" and the task never moved, because
+ * the model had nothing to call.
+ */
+export const UpdateTaskInput = z
+	.object({
+		task_id: TaskId,
+		title: z.string().min(1).max(500).optional(),
+		due_at: z.string().min(1).optional(),
+		priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+	})
+	.strict();
+
+/** Renames and/or moves a task, keeping everything else as it is. */
+async function changeTask(
+	userId: string,
+	taskId: string,
+	patch: { title?: string; dueAt?: Date | null; priority?: string },
+): Promise<{ existing: typeof tasks.$inferSelect; updated: typeof tasks.$inferSelect }> {
+	const db = getDb();
+	const where = ownedBy(userId, 'task', taskId);
+	const [existing] = await db.select().from(tasks).where(where).limit(1);
+	if (!existing) throw new ToolTargetError('task');
+
+	const [updated] = await db
+		.update(tasks)
+		.set({ ...patch, updatedAt: new Date() })
+		.where(where)
+		.returning();
+	return { existing, updated };
+}
 
 /**
  * The user's answer to a follow-up (§18).
@@ -844,6 +892,51 @@ async function executeAssistantToolAs(
 			}
 		}
 
+		case 'update_task': {
+			const parsed = UpdateTaskInput.safeParse(toolUse.input);
+			if (!parsed.success) return failed(toolUse, `Invalid update_task input — ${describeIssues(parsed.error)}`);
+
+			const patch: { title?: string; dueAt?: Date | null; priority?: string } = {};
+			if (parsed.data.title !== undefined) patch.title = parsed.data.title;
+			if (parsed.data.priority !== undefined) patch.priority = parsed.data.priority;
+			if (parsed.data.due_at !== undefined) {
+				// A bare date is read in the user's timezone, exactly as a reminder's
+				// time is; a task with a day and no hour keeps that day.
+				const parsedDate = parseDateTime(parsed.data.due_at, USER_TIMEZONE);
+				if (!parsedDate) {
+					return failed(toolUse, `I could not read "${parsed.data.due_at}" as a date`);
+				}
+				patch.dueAt = parsedDate;
+			}
+
+			if (Object.keys(patch).length === 0) {
+				return failed(toolUse, 'update_task needs a new title, due_at or priority — none was given');
+			}
+
+			try {
+				const { existing, updated } = await changeTask(userId, parsed.data.task_id, patch);
+				const title = updated?.title ?? existing.title;
+				return {
+					toolUseId: toolUse.id,
+					name: toolUse.name,
+					input: toolUse.input,
+					ok: true,
+					summary: `Task "${title}" updated.`,
+					data: {
+						task_id: existing.id,
+						title,
+						status: updated?.status ?? existing.status,
+						due_at: (updated?.dueAt ?? null)?.toISOString?.() ?? null,
+						priority: updated?.priority ?? existing.priority,
+					},
+				};
+			} catch (err) {
+				if (err instanceof ToolTargetError) throw err;
+				logger.warn({ err, userId }, 'Assistant failed to update a task');
+				return failed(toolUse, 'the task could not be updated');
+			}
+		}
+
 		case 'complete_task': {
 			const parsed = CompleteTaskInput.safeParse(toolUse.input);
 			if (!parsed.success) return failed(toolUse, `Invalid complete_task input — ${describeIssues(parsed.error)}`);
@@ -1140,6 +1233,7 @@ const HISTORY_ACTIONS: Record<string, { action: string; targetType: string }> = 
 	update_reminder: { action: 'reminder.update', targetType: 'reminder' },
 	cancel_reminder: { action: 'reminder.cancel', targetType: 'reminder' },
 	create_task: { action: 'task.create', targetType: 'task' },
+	update_task: { action: 'task.update', targetType: 'task' },
 	complete_task: { action: 'task.complete', targetType: 'task' },
 	reopen_task: { action: 'task.reopen', targetType: 'task' },
 	save_memory: { action: 'memory.save', targetType: 'memory' },
