@@ -1825,3 +1825,63 @@ Airplane mode is off, Wi-Fi is on, and connectivity is confirmed (2/2 ping, 0%
 packet loss) — the first check after disabling airplane mode still showed *"Network
 is unreachable"* because the route had not come up yet, which is why it was checked
 again rather than assumed.
+
+---
+
+## 41. Addendum — the exact-alarm grant, and a correction to my own evidence (2026-09-23)
+
+Row 4f says reminders are inexact until the user grants *Alarms & reminders*, and
+that the app offers the grant. This round tried to prove the grant improves
+punctuality. It did not get there, and along the way it invalidated evidence I had
+already recorded.
+
+### What was verified
+
+**The app's prompt opens the right screen.** Tapping **Continue** on the Reminders
+notice opened the system's own **"Alarms & reminders"** page — not a general
+settings list — and that page states the stakes itself: *"If this permission is off,
+existing alarms and time-based events scheduled by this app won't work."* So the
+disclosure, the button and the destination all line up, and the wording matches the
+measurement in §33.
+
+### A correction to my earlier evidence
+
+After switching the toggle on, two probes disagreed:
+
+```
+dumpsys package com.leadup.nova | grep SCHEDULE_EXACT_ALARM
+  -> android.permission.SCHEDULE_EXACT_ALARM: granted=false
+
+adb shell appops query-op SCHEDULE_EXACT_ALARM allow
+  -> SCHEDULE_EXACT_ALARM: allow        (the package is listed)
+```
+
+**`dumpsys package … granted=false` is not a valid probe for this permission.** It
+is an app-op-backed special permission, not a granted runtime permission, so it
+reads `false` whether or not the user has allowed it. §32 and row 4f cite that
+`granted=false` reading as evidence the access was not held — **that citation is
+wrong**, and the grant may have been irrelevant to it. The app-op is the
+authoritative check, and the app itself consults `scheduleExactAlarm.status`.
+
+The screen's toggle was on and the app-op listed the package, so the grant appears
+to have taken; the earlier `appops get` showing *"No operations. Default mode:
+default"* was taken before, and is consistent with an op that had not been
+explicitly set.
+
+### What was not shown
+
+**That the grant makes reminders punctual.** A reminder was set for 03:49:55 IST
+and had not fired by 03:50:30, and only **1** alarm was registered for the package
+where earlier runs showed 30 — so the arming itself is in doubt and the run cannot
+distinguish "still inexact" from "never armed". Recorded as inconclusive rather
+than as either result.
+
+### A false lead, disproved
+
+The app's notifications read **"Sign in required"** (several) and **"Configuration
+message"**, which looked like a session that had expired — a serious finding, since
+re-authentication needs Firebase OTP, which is blocked. It was wrong: after a clean
+start the route trace reads `uri=/` and `PUSH home`, so the session is valid. Those
+notifications are almost certainly stale, posted while the API was unreachable
+during the offline and dead-port tests. Nothing was signed out, and nothing was
+lost by checking before writing it down.
