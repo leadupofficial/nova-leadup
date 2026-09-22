@@ -20,6 +20,7 @@
 import { providerHealthChecks } from '@nova/database';
 import { getDb } from '../db/connection.js';
 import { logger } from '../utils/logger.js';
+import { DEFAULT_SPEAKER, DEFAULT_TTS_MODEL } from '../realtime/tts.js';
 import { providerConfigurationFingerprint, resolveConfig } from './config.js';
 import { decryptSecret } from './secrets.js';
 
@@ -286,8 +287,14 @@ export async function testSarvam(): Promise<ProviderTestResult> {
 				body: JSON.stringify({
 					text: 'a',
 					target_language_code: 'en-IN',
-					speaker: 'anushka',
-					model: 'bulbul:v2',
+					// Imported from the module that actually synthesises speech rather than written
+					// out again here. The literal `bulbul:v2` sat in this file while
+					// `realtime/tts.ts` had already moved to `bulbul:v3`, so this probe tested a
+					// model Sarvam had retired and reported `fail` every five minutes against a
+					// voice path that worked. A duplicated model id made a working integration
+					// look broken; sharing the constant removes the drift for good.
+					speaker: DEFAULT_SPEAKER,
+					model: DEFAULT_TTS_MODEL,
 				}),
 				signal,
 			}),
@@ -362,7 +369,7 @@ export async function testPostgres(): Promise<ProviderTestResult> {
 
 /** Object storage: a `HeadBucket` against the configured endpoint. */
 export async function testObjectStorage(): Promise<ProviderTestResult> {
-	const method = 'HeadBucket against the configured S3-compatible endpoint';
+	const method = 'HeadBucket (HEAD /<bucket>) against the configured S3-compatible endpoint';
 	const endpoint = await resolveConfig('S3_ENDPOINT');
 	const bucket = await resolveConfig('S3_BUCKET');
 	const accessKey = await credential('S3_ACCESS_KEY');
@@ -374,7 +381,13 @@ export async function testObjectStorage(): Promise<ProviderTestResult> {
 
 	const started = Date.now();
 	try {
-		const response = await withTimeout((signal) => fetch(endpoint, { method: 'HEAD', signal }));
+		// HeadBucket, not the endpoint root. Measured against the live MinIO: `HEAD /` answers
+		// **400** (MinIO rejects a request for the root path) while `HEAD /<bucket>` answers
+		// **403**, which is the healthy signal here — the endpoint is reachable and correctly
+		// refusing an unsigned request. This check does not sign, so 403 is success, and probing
+		// the root made a working object store report `degraded` on every scheduled run.
+		const bucketUrl = `${endpoint.replace(/\/+$/, '')}/${encodeURIComponent(bucket)}`;
+		const response = await withTimeout((signal) => fetch(bucketUrl, { method: 'HEAD', signal }));
 		return {
 			provider: 'object-storage',
 			kind: 'storage',
@@ -382,7 +395,7 @@ export async function testObjectStorage(): Promise<ProviderTestResult> {
 			latencyMs: Date.now() - started,
 			message:
 				response.ok || response.status === 403
-					? `Endpoint reachable (bucket "${bucket}").${accessKey && secretKey ? ' Credentials present.' : ' Credentials not fully configured.'}`
+					? `Bucket "${bucket}" reachable (HEAD /${bucket} answered ${response.status}, i.e. refusing an unsigned request).${accessKey && secretKey ? ' Credentials present.' : ' Credentials not fully configured.'}`
 					: `Endpoint answered ${response.status}.`,
 			method,
 			checkedAt: new Date().toISOString(),
