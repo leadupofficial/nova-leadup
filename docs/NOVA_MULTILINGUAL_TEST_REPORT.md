@@ -164,3 +164,33 @@ been.
 | Telugu reply audio, 291 KB | `/tmp/nova-val/te_reply.mp3` |
 | Widen picker, on device | `/tmp/nova-val/lang_sheet.png` |
 | Language setting persisted | `/tmp/nova-val/lang_e2e.py` |
+
+## 8. Why seven languages go through a fallback (2026-09-23)
+
+The catalogue routes seven languages to Google Cloud TTS. This deployment has no
+`GOOGLE_CLOUD_API_KEY` — Sarvam, ElevenLabs and Deepgram are configured — so all
+seven fall through the chain, and nothing said so.
+
+Measured directly rather than inferred:
+
+```
+google refused ur -> GOOGLE_CLOUD_API_KEY is not configured
+provider for ks   -> sarvam-fallback        (google was its primary)
+provider for ur   -> elevenlabs-fallback    (English voice)
+```
+
+The API now logs one line at boot per unrouted provider:
+
+```
+Voice provider "google" is routed for 7 language(s) [as, mai, sa, sd, ks, doi, mni]
+but GOOGLE_CLOUD_API_KEY is not set — every one of them will fall through the TTS
+chain to whichever provider is configured.
+```
+
+Routing is deliberately **not** changed. Google serves Urdu and Nepali natively,
+so the catalogue is right if the credential is added; a code change would have to
+be undone. What was missing was any signal that it is not there.
+
+**Consequence for the matrix:** the `ks` row is better than the catalogue implies
+(a Sarvam voice does speak it) and the `ur`/`ne`/`bho`/`awa` rows are worse (an
+English voice does). Both are now labelled in the picker.
