@@ -341,3 +341,61 @@ was a transient device state rather than a broken request path.
 | `93c1c48` | Stop the floating orb covering the Home top bar |
 
 `flutter analyze` clean; `flutter test` **789 passed, 5 skipped, 0 failed**.
+
+---
+
+## 12. Addendum — Indian language selection (2026-09-23)
+
+Full detail and the per-language matrix are in
+[`NOVA_MULTILINGUAL_TEST_REPORT.md`](./NOVA_MULTILINGUAL_TEST_REPORT.md).
+
+### The defect
+
+The app offered **four** language options — Auto Tamil–English, Tamil, English,
+Tanglish — so Hindi, Telugu, Bengali, Marathi, Kannada, Malayalam, Gujarati,
+Punjabi, Odia, Assamese and Urdu could not be chosen at all, even though the
+recogniser and voice layers were already routed for them. A choice was also
+impossible to express on the wire: the client rewrote anything outside
+`{en, ta, hi, auto}` to `auto`, so the socket was never told what the user picked.
+The four-value enum existed **twice** in the API — `routes/settings.ts` and
+`schemas/index.ts` — which is how both copies drifted from the pipeline.
+
+### The fix, at each layer, from one source of truth
+
+- `LanguagePolicySchema` in `schemas/index.ts` is derived from the shared
+  catalogue; `routes/settings.ts` imports it instead of defining its own.
+- `kVoiceProtocolLanguages` is derived from `kSupportedLanguages` plus the mixed
+  styles, so every offered language survives to the socket.
+- Both pickers render one shared `languagePolicyOptions()`.
+- Device-TTS fallback gained BCP-47 tags for the Indian languages.
+
+### Verified on the handset and against a live API
+
+| Check | Evidence |
+|---|---|
+| Picker lists 27 options covering every language the mandate names, plus Hinglish / Tanglish / Benglish / Gujlish | `lang_sheet.png` |
+| **Telugu shows as selected** after being persisted via the API — a full round trip | `lang_sheet.png` |
+| `PUT /settings/persona {languagePolicy:'te'}` | `200` |
+| `GET /settings/persona` | returns `te` |
+| `PUT {languagePolicy:'klingon'}` | `400` |
+| Real Telugu turn via `/voice/chat` | `200` in 4.6 s, reply **60 Telugu characters / 0 Latin** |
+| The reminder the turn claimed | **actually created** — 0 → 1 rows, `triggerAt 2026-09-24T09:00 Asia/Kolkata` |
+| Real Telugu speech out | `/voice/tts` → `200`, **291,250 bytes** |
+
+### Also fixed in this addendum
+
+The summon orb still covered a control after the previous round's fix. Excluding
+Home was not enough: on Profile it hid the **sign-out button**. The orb's
+`top: 60` sits inside `NovaScaffold`'s top bar (`topInset` 44 + a 44px control row
++ 16px padding, ending at 104), so it now sits at 112 — a structural fix rather
+than a list of routes to avoid. Re-verified on Home and Profile
+(`home_fixed.png`, `profile_orb.png`).
+
+### Still open on languages
+
+Five languages (`ur`, `ne`, `ks`, `bho`, `awa`) return a correct reply in their own
+script that is then **spoken by an English voice**. The catalogue claims Sarvam for
+`ur`, `ne`, `bho` and `awa`, so the routing and the observed behaviour disagree and
+must be reconciled; until then the picker should mark those as partial. Real
+speech was sampled for seven languages only — the rest were driven as text through
+the live pipeline and must not be described as verified.
