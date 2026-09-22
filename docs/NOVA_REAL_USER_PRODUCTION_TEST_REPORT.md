@@ -2074,3 +2074,50 @@ one-reminder-one-alarm measurement.
 The Reminders screen still tells the user that exact delivery *requires* the
 *Alarms & reminders* grant. With `alarmClock` it no longer does. That notice is now
 asking for something the app does not need, and should be revisited.
+
+---
+
+## 45. Addendum — the grant IS required, and a claim I had to retract (2026-09-23)
+
+Round 41 fixed reminder punctuality with `AndroidScheduleMode.alarmClock` and
+recorded a second claim alongside it: that the alarm-clock mode *also* sidestepped
+the exact-alarm permission, so a user who never granted *Alarms & reminders* would
+still get a punctual reminder. That claim came from reading the plugin — it checks
+`canScheduleExactAlarms()` only on the `exact*` modes — and **the device says
+otherwise.**
+
+### The measurement
+
+One reminder per state, each matched to its own alarm by `origWhen` epoch:
+
+| Mode requested | Grant | Alarm window |
+|---|---|---|
+| `exactAllowWhileIdle` | **on** | `windowLength 1839803` — ~31 min (round 41) |
+| **`alarmClock`** | **on** | **`windowLength 0`** — exact |
+| **`alarmClock`** | **off** | `windowLength 1614977` — ~27 min |
+
+With the grant off, NOVA held **zero** exact alarms; with it restored, **13**.
+
+### What follows
+
+1. **The round-41 fix stands.** `alarmClock` is exact where `exactAllowWhileIdle`
+   was batched — that half was measured both ways and holds.
+2. **The permission is still required.** The code comment making the opposite claim
+   is corrected, because it was a statement in the source that the device
+   contradicts.
+3. **Row 37 is retracted.** It said the Reminders screen's *"Alarms & reminders"*
+   notice had become unnecessary and should be reworded or removed. It is
+   necessary. Had I acted on it, I would have deleted a correct warning and sent
+   users away from the one setting that makes their reminders punctual.
+
+### Why this is worth writing down
+
+The notice was going to be removed on the strength of a source reading — the exact
+failure mode the mandate names. What caught it was refusing to change user-facing
+copy until the behaviour behind it had been measured. The measurement cost four
+taps and one reminder; the retraction cost a paragraph.
+
+### Device state
+
+The grant is restored (toggle on, verified by screenshot), and reminders are exact
+again.
