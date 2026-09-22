@@ -75,6 +75,14 @@ fi
 
 cd "$REPO_DIR"
 echo "[build] docker build -f $DOCKERFILE -t $IMAGE ${EXTRA_ARGS[*]:-}"
-docker build -f "$DOCKERFILE" -t "$IMAGE" "${EXTRA_ARGS[@]:-}" .
+
+# `"${EXTRA_ARGS[@]:-}"` is not equivalent to an empty array: when the array is empty it expands to
+# one empty-string argument, and docker reads that as a missing build context and prints its usage
+# instead of building. The api target has no extra args, so it hit exactly that.
+if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
+	docker build -f "$DOCKERFILE" -t "$IMAGE" "${EXTRA_ARGS[@]}" .
+else
+	docker build -f "$DOCKERFILE" -t "$IMAGE" .
+fi
 
 echo "[build] $IMAGE built; $(free_gb)GB free after build"
