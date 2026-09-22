@@ -61,6 +61,19 @@ class AuthApi {
     );
   }
 
+  /// Trades a Firebase ID token for a NOVA session.
+  ///
+  /// The device has already verified the phone number with Firebase; this hands the
+  /// resulting ID token to our own server, which verifies it and answers with the same
+  /// `access_token`/`refresh_token`/`user` shape as every other sign-in, so the rest of
+  /// the client does not know or care which method was used.
+  Future<AuthSession> exchangeFirebaseToken(String idToken) {
+    return _authenticate(
+      ApiConfig.authFirebaseExchange,
+      <String, dynamic>{'idToken': idToken},
+    );
+  }
+
   /// Exchanges a refresh token for a new token pair.
   ///
   /// The server rotates refresh tokens, so the caller must persist the returned

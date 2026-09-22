@@ -17,6 +17,24 @@ typedef OtpRequestCode = Future<void> Function(String phone);
 typedef OtpVerifyCode =
     Future<Map<String, dynamic>> Function(String phone, String code);
 
+/// What the caller supplies when it routes here with a live transport.
+///
+/// The screen is transport-agnostic by design, so the wiring (which provider, which
+/// persistence) belongs to whoever navigates to it rather than to the screen.
+class OtpPageArgs {
+  const OtpPageArgs({
+    required this.phone,
+    required this.requestCode,
+    required this.verifyCode,
+    this.onVerified,
+  });
+
+  final String phone;
+  final OtpRequestCode requestCode;
+  final OtpVerifyCode verifyCode;
+  final ValueChanged<Map<String, dynamic>>? onVerified;
+}
+
 /// `.otp-cell` digit: JetBrains Mono at the export's 28px.
 TextStyle _digit(BuildContext context, Color color) => Theme.of(context)
     .textTheme

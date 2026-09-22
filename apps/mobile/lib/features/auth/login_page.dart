@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/router.dart' show routerProvider;
 import '../../core/design/widgets/index.dart';
+import '../onboarding/otp_page.dart';
 import '../onboarding/splash_page.dart' show NovaGradientText;
+import 'firebase_phone_auth.dart';
 import 'auth_controller.dart';
 
 /// `onboarding/auth.html` — the sign-in screen, on the OpenDesign tokens.
@@ -41,12 +43,16 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final _emailFocus = FocusNode();
   final _passwordFocus = FocusNode();
 
+  final _phone = TextEditingController();
+
   String? _emailError;
   String? _passwordError;
+  String? _phoneError;
+  bool _phoneBusy = false;
 
-  /// Shown under the disabled OTP action; no OTP route exists on this API.
-  static const _phoneUnavailable =
-      'Phone sign-in is not available on this server.';
+  /// Firebase Phone Authentication. Firebase verifies the number and returns an ID
+  /// token; the server trades that for a NOVA session.
+  final _phoneAuth = FirebasePhoneAuth();
 
   @override
   void dispose() {
@@ -54,6 +60,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     _password.dispose();
     _emailFocus.dispose();
     _passwordFocus.dispose();
+    _phone.dispose();
     super.dispose();
   }
 
@@ -231,8 +238,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     context.go('/register');
   }
 
-  /// The export's country + phone fields and its `.btn-primary` "Continue with
-  /// OTP", all disabled: no OTP endpoint exists on the API this client targets.
+  /// Country + phone, wired to Firebase Phone Authentication.
+  ///
+  /// This section used to be disabled outright — "Phone sign-in is not available on this
+  /// server" — because the OTP routes the client knew about are mounted only in the
+  /// standalone `@nova/auth` service and genuinely 404 against this API. Firebase is the
+  /// real mechanism: it verifies the number and returns an ID token, which
+  /// `POST /api/v1/auth/firebase/exchange` trades for a NOVA session.
   Widget _phoneSection(BuildContext context) {
     final c = context.nova;
 
@@ -244,18 +256,21 @@ class _LoginPageState extends ConsumerState<LoginPage> {
           child: NovaTextField(hint: 'India (+91)', enabled: false),
         ),
         const SizedBox(height: NovaSpace.md),
-        const _LabelledField(
+        _LabelledField(
           label: 'Phone number',
           child: NovaTextField(
             hint: '+91 XXXXX XXXXX',
             keyboardType: TextInputType.phone,
-            enabled: false,
+            controller: _phone,
+            enabled: !_phoneBusy,
+            errorText: _phoneError,
           ),
         ),
         const SizedBox(height: NovaSpace.md),
-        const _DisabledGradientButton(
+        NovaPrimaryButton(
           label: 'Continue with OTP',
-          reason: _phoneUnavailable,
+          busy: _phoneBusy,
+          onPressed: _phoneBusy ? null : _startPhoneSignIn,
         ),
         const SizedBox(height: NovaSpace.sm),
         Row(
@@ -265,7 +280,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             const SizedBox(width: NovaSpace.xs),
             Expanded(
               child: Text(
-                _phoneUnavailable,
+                'We will text a six-digit code to confirm the number.',
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall!.copyWith(color: c.muted),
@@ -275,6 +290,69 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         ),
       ],
     );
+  }
+
+  /// Sends the code, then hands the user to the six-digit screen.
+  ///
+  /// The code is requested *before* navigating, so a refusal — a bad number, an SMS
+  /// quota, or a build whose signing certificate is not registered with the provider —
+  /// is reported next to the field that caused it rather than on a screen the user
+  /// reached for nothing.
+  Future<void> _startPhoneSignIn() async {
+    final digits = _phone.text.replaceAll(RegExp(r'[^0-9+]'), '');
+    if (digits.replaceAll('+', '').length < 8) {
+      setState(() => _phoneError = 'Enter a phone number with its country code.');
+      return;
+    }
+    // The field takes the national part; E.164 wants the country code exactly once.
+    final e164 = digits.startsWith('+') ? digits : '+91$digits';
+
+    setState(() {
+      _phoneBusy = true;
+      _phoneError = null;
+    });
+
+    try {
+      await _phoneAuth.sendCode(e164);
+      if (!mounted) return;
+      setState(() => _phoneBusy = false);
+      final router = ref.read(routerProvider);
+      router.push(
+        '/onboarding/otp',
+        extra: OtpPageArgs(
+          phone: e164,
+          requestCode: _phoneAuth.sendCode,
+          verifyCode: (String _, String code) async {
+            final idToken = await _phoneAuth.signIn(code);
+            final ok = await ref
+                .read(authStateProvider.notifier)
+                .loginWithFirebaseIdToken(idToken);
+            if (!ok) {
+              throw const PhoneAuthFailure(
+                'Your number is verified, but the account could not be opened. '
+                'Please try again.',
+              );
+            }
+            return <String, dynamic>{'verified': true};
+          },
+          onVerified: (_) {
+            if (mounted) router.go('/');
+          },
+        ),
+      );
+    } on PhoneAuthFailure catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _phoneBusy = false;
+        _phoneError = error.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _phoneBusy = false;
+        _phoneError = 'Could not start phone verification. Please try again.';
+      });
+    }
   }
 
   // The export's `.sso-notice` ("Enterprise SSO available for org domains · ask your
@@ -356,38 +434,6 @@ class _LabelledField extends StatelessWidget {
 /// The export's `.btn-primary` in its unavailable state: the gradient is kept
 /// so the screen still reads as the design, at reduced opacity and with no glow
 /// and no tap handler — never a fake action.
-class _DisabledGradientButton extends StatelessWidget {
-  const _DisabledGradientButton({required this.label, required this.reason});
-
-  final String label;
-  final String reason;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.nova;
-    return Semantics(
-      button: true,
-      enabled: false,
-      label: label,
-      hint: reason,
-      child: Opacity(
-        opacity: 0.5,
-        child: Container(
-          padding: const EdgeInsets.all(NovaSpace.md),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            gradient: c.accentGradient,
-            borderRadius: BorderRadius.circular(NovaRadius.bubble),
-          ),
-          child: Text(
-            label,
-            style: NovaTheme.cta(c).copyWith(color: c.onAccent),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 /// Inline danger banner for `AuthState.error`, so a rejected sign-in is visible
 /// rather than only in the log.

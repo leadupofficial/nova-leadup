@@ -121,7 +121,20 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/onboarding/otp',
         name: 'onboarding-otp',
-        builder: (context, state) => const OtpPage(),
+        // The screen is transport-agnostic; the caller supplies the live Firebase
+        // transport (or nothing, for the standalone @nova/auth service).
+        builder: (context, state) {
+          final args = state.extra;
+          if (args is OtpPageArgs) {
+            return OtpPage(
+              phone: args.phone,
+              requestCode: args.requestCode,
+              verifyCode: args.verifyCode,
+              onVerified: args.onVerified,
+            );
+          }
+          return const OtpPage();
+        },
       ),
       GoRoute(
         path: '/translate',

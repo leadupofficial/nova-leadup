@@ -62,6 +62,19 @@ class AuthController extends Notifier<AuthState> {
     );
   }
 
+  /// Completes a phone sign-in that Firebase has already verified.
+  ///
+  /// The ID token proves the phone number to Google; the server verifies it and returns
+  /// a NOVA session, which is then persisted exactly as an email sign-in would be — the
+  /// client has one session model, not two.
+  Future<bool> loginWithFirebaseIdToken(String idToken) {
+    return _submit(
+      () => ref.read(authApiProvider).exchangeFirebaseToken(idToken),
+      analyticsEvent: AnalyticsService.eventLogin,
+      failureReason: 'firebase-phone-login',
+    );
+  }
+
   Future<bool> register({
     required String email,
     required String password,

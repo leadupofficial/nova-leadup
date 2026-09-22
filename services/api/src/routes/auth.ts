@@ -29,6 +29,10 @@ import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { tokenDenylist } from '../middleware/token-denylist.js';
 import { logger } from '../utils/logger.js';
 import { recordLoginAttempt } from '../services/auth-events.js';
+import {
+	FirebaseTokenError,
+	verifyFirebaseIdToken,
+} from '../services/firebase-tokens.js';
 import { requiresSecondFactor, verifySecondFactor } from '../admin/mfa.js';
 import {
 	accessTokenTtlSeconds,
@@ -147,6 +151,18 @@ interface UserRow {
 /** The extra columns the login/refresh paths need. */
 interface UserCredentialsRow extends UserRow {
 	passwordHash: string | null;
+	disabled: boolean;
+}
+
+/**
+ * The extra columns Firebase phone sign-in needs.
+ *
+ * `phone` is uniquely indexed, so it is the key this path looks a user up by; a
+ * phone-only account has `passwordHash = NULL` and no email.
+ */
+interface UserPhoneRow extends UserRow {
+	phone: string | null;
+	phoneVerified: boolean;
 	disabled: boolean;
 }
 
@@ -292,6 +308,127 @@ router.post('/register', async (req, res, next) => {
 		const issued = await issueSession(created, req);
 		logger.info({ userId: created.id }, 'User registered');
 		res.status(201).json({ success: true, data: issued });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * POST /auth/firebase/exchange — trade a Firebase ID token for a NOVA session.
+ *
+ * This is the second half of phone sign-in. The device verifies the phone number with
+ * Firebase and is handed a Firebase ID token; that token proves the number to Google, not
+ * to us, and it is not a NOVA session. Here we verify it (see `services/firebase-tokens.ts`)
+ * and mint the access/refresh pair the rest of the API already understands.
+ *
+ * Two deliberate refusals:
+ *
+ *  * **A token that is not a phone sign-in is rejected, not downgraded.** An anonymous or
+ *    social Firebase session carries no verified number, and letting one create a NOVA
+ *    account here would mean the phone column records something nobody proved.
+ *  * **No password is ever set.** These accounts have `password_hash = NULL`, which the
+ *    login route already treats as "cannot sign in this way" and answers with the same
+ *    generic error as an unknown email, so the phone path cannot be used to probe for
+ *    accounts.
+ */
+const FirebaseExchangeSchema = z.object({
+	idToken: z.string().min(20),
+});
+
+router.post('/firebase/exchange', async (req, res, next) => {
+	try {
+		const body = FirebaseExchangeSchema.parse(req.body);
+
+		let identity;
+		try {
+			identity = await verifyFirebaseIdToken(body.idToken);
+		} catch (error) {
+			if (error instanceof FirebaseTokenError) {
+				// A misconfigured server is our fault and deserves a 5xx; a bad token is
+				// the caller's and deserves a 401.
+				const status = error.code === 'FIREBASE_NOT_CONFIGURED' ? 503
+					: error.code === 'FIREBASE_UNAVAILABLE' ? 503
+						: 401;
+				throw new HttpError(status, error.message, error.code);
+			}
+			throw error;
+		}
+
+		if (!identity.phoneVerified || !identity.phoneNumber) {
+			throw new HttpError(
+				400,
+				'That sign-in did not verify a phone number',
+				'FIREBASE_PHONE_REQUIRED',
+			);
+		}
+
+		// E.164 as Firebase reports it, with the leading `+` kept because that is what
+		// makes the value unambiguous across countries.
+		const phone = identity.phoneNumber.trim().replace(/\s+/g, '');
+		const db = getDb();
+
+		let [user] = (await db
+			.select()
+			.from(users)
+			.where(eq(users.phone, phone))
+			.limit(1)) as UserPhoneRow[];
+
+		if (!user) {
+			// `users.name` is NOT NULL. Onboarding asks for the real name; until then the
+			// number is the only honest label we have, and inventing "there" for a person
+			// who never typed anything is worse than showing what they signed in with.
+			const name = identity.email?.split('@')[0]?.trim() || phone;
+			try {
+				[user] = (await db
+					.insert(users)
+					.values({
+						phone,
+						name,
+						phoneVerified: true,
+						email: identity.email ?? null,
+						emailVerified: false,
+					})
+					.returning()) as UserPhoneRow[];
+			} catch (error) {
+				// Two devices signing in with the same number at once: the pre-check loses
+				// the race, the unique index does not. Re-read rather than fail.
+				if (!isUniqueViolation(error)) throw error;
+				[user] = (await db
+					.select()
+					.from(users)
+					.where(eq(users.phone, phone))
+					.limit(1)) as UserPhoneRow[];
+			}
+		}
+
+		if (!user) {
+			throw new HttpError(500, 'Failed to create account', 'INTERNAL_ERROR');
+		}
+
+		if (user.disabled) {
+			await recordLoginAttempt({
+				email: user.email ?? phone,
+				ipAddress: req.ip ?? null,
+				userAgent: (req.headers['user-agent'] as string | undefined) ?? null,
+				requestId: (req.headers['x-request-id'] as string | undefined) ?? null,
+				reason: 'account-disabled',
+				userId: user.id,
+			});
+			throw new HttpError(403, 'This account has been disabled', 'ACCOUNT_DISABLED');
+		}
+
+		// Firebase re-verifies the number on every sign-in, so a row that was created
+		// before verification (or by an operator) is brought up to date here.
+		if (!user.phoneVerified) {
+			await db.update(users).set({ phoneVerified: true }).where(eq(users.id, user.id));
+			user = { ...user, phoneVerified: true };
+		}
+
+		await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
+
+		const issued = await issueSession(user, req);
+		logger.info({ userId: user.id, provider: identity.signInProvider }, 'User signed in with Firebase');
+		res.status(200).json({ success: true, data: issued });
 	} catch (error) {
 		next(error);
 	}

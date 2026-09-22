@@ -152,6 +152,9 @@ class ApiConfig {
   static String get authLogin => '$baseUrl/api/v1/auth/login';
   static String get authRegister => '$baseUrl/api/v1/auth/register';
   static String get authRefresh => '$baseUrl/api/v1/auth/refresh';
+  /// Trades a Firebase ID token (minted by phone sign-in) for a NOVA session.
+  static String get authFirebaseExchange =>
+      '$baseUrl/api/v1/auth/firebase/exchange';
   static String get authLogout => '$baseUrl/api/v1/auth/logout';
   static String get me => '$baseUrl/api/v1/auth/me';
   static String get conversations => '$baseUrl/api/v1/conversations';
