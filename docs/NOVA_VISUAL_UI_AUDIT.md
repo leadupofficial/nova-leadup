@@ -87,3 +87,13 @@ briefing, the reminders list, and every error/empty state other than those noted
 - **The avatar is duplicated** wherever the orb is shown: the hero card on Home
   and the floating orb elsewhere. Only the Home collision was a defect, but the
   product should decide whether the orb is a second presence or a shortcut.
+
+## 8. Home — wake word line (2026-09-23)
+
+| Screen | Screenshot | Issue | Sev | Root cause | Fix | Verification |
+|---|---|---|---|---|---|---|
+| Home, fresh install | `r17_home2.png` | Home printed **`or say "Hey Nova"`** while the row above it read "Wake word is off". The wake word is off until opted in, so every new user was told to say something the app was not listening for. | **P2** | The line advertised the phrase whenever a wake-word model was *installed*, which is true even when the user has never enabled it | `wakeWordHomeLine` decides it in one tested place: off → "Tap to turn on the wake word" (tappable), listening → "Listening for …", enabled-but-arming → "Starting wake word…" | `r17_home2.png` — the line reads "Tap to turn on the wake word"; tapping it opens the wake word screen (`r17_tap.png`) |
+
+An existing widget test had encoded the contradiction — it required `or say "Hey
+Nova"` while the switch was off. It was updated, not deleted, and now asserts the
+opposite.
