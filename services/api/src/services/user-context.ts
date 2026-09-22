@@ -20,6 +20,7 @@ import type { EmbeddingResult } from './ai.js';
 
 export interface UserContextLimits {
 	maxTasks: number;
+	recentlyCompletedTasks: number;
 	maxReminders: number;
 	maxMemories: number;
 	/** Per-item character cap, so one long memory cannot crowd out the rest. */
@@ -30,6 +31,8 @@ export interface UserContextLimits {
 
 const DEFAULT_LIMITS: UserContextLimits = {
 	maxTasks: 12,
+	/** How many recently-completed tasks stay visible so they can be reopened. */
+	recentlyCompletedTasks: 5,
 	maxReminders: 12,
 	maxMemories: 12,
 	maxCharsPerItem: 180,
@@ -382,19 +385,40 @@ export async function buildUserContext(
 			try {
 				// `tasks` has no priority column — CreateTaskSchema accepts one, but
 				// the table does not store it, so selecting it would be a lie.
-				const rows = await db
-					.select({
-						id: tasks.id,
-						title: tasks.title,
-						status: tasks.status,
-						dueAt: tasks.dueAt,
-						createdAt: tasks.createdAt,
-						completedAt: tasks.completedAt,
-					})
+				const columns = {
+					id: tasks.id,
+					title: tasks.title,
+					status: tasks.status,
+					dueAt: tasks.dueAt,
+					createdAt: tasks.createdAt,
+					completedAt: tasks.completedAt,
+				};
+				const openRows = await db
+					.select(columns)
 					.from(tasks)
 					.where(and(eq(tasks.userId, userId), inArray(tasks.status, ['pending', 'in_progress'])))
 					.orderBy(asc(tasks.dueAt), desc(tasks.createdAt))
 					.limit(l.maxTasks);
+				// Recently completed tasks, on their own bounded query.
+				//
+				// They used to be excluded entirely, and the assistant could not
+				// reopen one by voice: it is shown task ids in this context, so a task
+				// that is not here has no id it can send. Measured — "actually reopen
+				// it" was answered with "I don't have the task ID … in my list", and
+				// on another run the model bound a *pending* task's id instead and
+				// silently reopened the wrong record. The reminder section directly
+				// above carries the same lesson: hiding a row the user can ask about
+				// makes the assistant answer wrongly about it.
+				//
+				// Bounded by count and ordered by completion time, so this is the
+				// recent past rather than a permanent list of everything ever done.
+				const doneRows = await db
+					.select(columns)
+					.from(tasks)
+					.where(and(eq(tasks.userId, userId), eq(tasks.status, 'completed')))
+					.orderBy(desc(tasks.completedAt))
+					.limit(l.recentlyCompletedTasks);
+				const rows = [...openRows, ...doneRows];
 				counts.tasks = rows.length;
 				facts.tasks = rows.map((t) => ({
 					id: t.id,
@@ -405,13 +429,25 @@ export async function buildUserContext(
 					completedAt: t.completedAt ?? null,
 				}));
 				if (!rows.length) return null;
-				return `Open tasks:\n${rows
-					.map((t) => {
-						const due = t.dueAt ? ` (due ${formatWhen(t.dueAt)})` : ' (no due date)';
-						const state = t.status === 'in_progress' ? 'in progress' : 'pending';
-						return `- ${truncate(t.title, l.maxCharsPerItem)} — ${state}${due} ${idTag(t.id)}`;
-					})
-					.join('\n')}`;
+				const line = (t: (typeof rows)[number]) => {
+					const due = t.dueAt ? ` (due ${formatWhen(t.dueAt)})` : ' (no due date)';
+					// `completed` has to be named. The old branch fell through to
+					// "pending" for anything that was not in progress, which would now
+					// describe a finished task as outstanding.
+					const state =
+						t.status === 'in_progress'
+							? 'in progress'
+							: t.status === 'completed'
+								? 'completed'
+								: 'pending';
+					return `- ${truncate(t.title, l.maxCharsPerItem)} — ${state}${due} ${idTag(t.id)}`;
+				};
+				const blocks: string[] = [];
+				if (openRows.length) blocks.push(`Open tasks:\n${openRows.map(line).join('\n')}`);
+				if (doneRows.length) {
+					blocks.push(`Recently completed tasks:\n${doneRows.map(line).join('\n')}`);
+				}
+				return blocks.join('\n\n');
 			} catch {
 				return 'Open tasks: unavailable right now.';
 			}

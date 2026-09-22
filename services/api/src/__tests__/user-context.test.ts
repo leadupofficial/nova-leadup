@@ -82,13 +82,37 @@ describe('buildUserContext — the current time always reaches the model', () =>
 						createdAt: now,
 						updatedAt: now,
 					},
+					{
+						id: 'task-2',
+						userId: 'user-1',
+						title: 'finished task',
+						status: 'completed',
+						dueAt: null,
+						metadata: {},
+						createdAt: now,
+						completedAt: now,
+						updatedAt: now,
+					},
 				],
 			}),
 		);
 
 		const context = await buildUserContext('user-1');
 
-		expect(context.counts.tasks).toBe(1);
+		// Both are visible now. Completed tasks used to be filtered out of this
+		// context, so the assistant had no id to reopen one with: "actually reopen
+		// it" was answered with "I don't have the task ID … in my list", and on
+		// another run the model bound a pending task's id and silently reopened the
+		// wrong record.
+		// Not an exact count: the test double does not emulate `WHERE`, so both
+		// queries see every row. What matters is that the completed task reaches
+		// the text, which the assertions below pin.
+		expect(context.counts.tasks).toBeGreaterThanOrEqual(2);
+		expect(context.text).toContain('Recently completed tasks:');
+		expect(context.text).toContain('finished task');
+		expect(context.text).toContain('task-2');
+		// A completed task must not be described as outstanding.
+		expect(context.text).toContain('completed');
 		expect(context.text).toContain('current time:');
 		expect(context.text).toContain(`in ${USER_TIMEZONE}`);
 		expect(context.text).toContain('Open tasks:');

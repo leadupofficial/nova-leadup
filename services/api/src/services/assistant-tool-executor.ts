@@ -531,6 +531,32 @@ async function changeReminder(
  * is invented here, and `completed_at` is stamped on completion and cleared on
  * reopen so the two columns cannot disagree about whether the task is open.
  */
+/**
+ * A status change that would change nothing, because the task is already in that
+ * state.
+ *
+ * Carries the task's real title on purpose. Measured: `reopen_task` was called
+ * with the id of a task that was never completed — the model had bound the wrong
+ * row — and the executor reported `reopen_task:ok` while the named task stayed
+ * completed and a *different* task was silently reopened. The user was told the
+ * right task was back on the list. Reopening a task that is not completed cannot
+ * be a success, so it now fails and names the task it actually received, which
+ * makes a mis-target visible instead of invisible.
+ */
+class TaskStateError extends Error {
+	constructor(
+		readonly title: string,
+		readonly current: string,
+		readonly wanted: 'pending' | 'completed',
+	) {
+		super(
+			wanted === 'pending'
+				? `"${title}" is not completed (it is ${current}), so there is nothing to reopen. Check the task id — this may be the wrong task.`
+				: `"${title}" is already completed.`,
+		);
+	}
+}
+
 async function setTaskStatus(
 	userId: string,
 	taskId: string,
@@ -540,6 +566,15 @@ async function setTaskStatus(
 	const where = ownedBy(userId, 'task', taskId);
 	const [existing] = await db.select().from(tasks).where(where).limit(1);
 	if (!existing) throw new ToolTargetError('task');
+
+	// A transition that reverses nothing is not a success. Refusing it is what
+	// turns a wrong target into a visible error rather than a silent edit.
+	if (status === 'completed' && existing.status === 'completed') {
+		throw new TaskStateError(existing.title, existing.status, 'completed');
+	}
+	if (status === 'pending' && existing.status !== 'completed') {
+		throw new TaskStateError(existing.title, existing.status, 'pending');
+	}
 
 	const now = new Date();
 	const [updated] = await db
@@ -959,6 +994,7 @@ async function executeAssistantToolAs(
 				};
 			} catch (err) {
 				if (err instanceof ToolTargetError) throw err;
+				if (err instanceof TaskStateError) return failed(toolUse, err.message);
 				logger.warn({ err, userId }, 'Assistant failed to complete a task');
 				return failed(toolUse, 'the task could not be marked as completed');
 			}
@@ -981,6 +1017,7 @@ async function executeAssistantToolAs(
 				};
 			} catch (err) {
 				if (err instanceof ToolTargetError) throw err;
+				if (err instanceof TaskStateError) return failed(toolUse, err.message);
 				logger.warn({ err, userId }, 'Assistant failed to reopen a task');
 				return failed(toolUse, 'the task could not be reopened');
 			}

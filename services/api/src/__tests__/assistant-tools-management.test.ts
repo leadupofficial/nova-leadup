@@ -256,6 +256,32 @@ describe('reopen_task — a completed task can be brought back', () => {
 		expect(row.completedAt).toBeNull();
 	});
 
+	it('refuses to reopen a task that is not completed, naming the task it got', async () => {
+		// The wrong-target guard. Measured against the live model: `reopen_task` was
+		// called with a pending task's id, the executor reported `reopen_task:ok`,
+		// the named task stayed completed, a different task was silently reopened,
+		// and the user was told the right one was back on the list. Reopening
+		// something that is not completed reverses nothing, so it is refused — and
+		// the message carries the title so a mis-target is visible.
+		const store = dbWith({ tasks: [taskRow({ title: 'Call the dentist', status: 'pending' })] });
+
+		const result = await executeAssistantTool(USER_A, callFor('reopen_task', { task_id: TASK_A }));
+
+		expect(result.ok).toBe(false);
+		expect(result.error).toContain('Call the dentist');
+		expect(result.error).toMatch(/not completed/i);
+		expect(theRow(store, 'tasks').status).toBe('pending');
+	});
+
+	it('refuses to complete a task that is already completed', async () => {
+		const store = dbWith({ tasks: [taskRow({ status: 'completed', completedAt: new Date() })] });
+
+		const result = await executeAssistantTool(USER_A, callFor('complete_task', { task_id: TASK_A }));
+
+		expect(result.ok).toBe(false);
+		expect(result.error).toMatch(/already completed/i);
+	});
+
 	it('refuses an id that does not exist', async () => {
 		const store = dbWith({ tasks: [taskRow({ status: 'completed' })] });
 
