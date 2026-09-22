@@ -41,7 +41,25 @@ import '../../core/voice/wake_word_controller.dart';
 ///
 /// The bar is `topInset` (44) + a 44px control row + 16px of bottom padding, so
 /// anything above 104 sits on top of the bell and gear buttons.
-const double _kOrbTopBelowTopBar = 112;
+/// Where the summon orb sits: above the bottom navigation, not over the content.
+///
+/// It used to sit below the top bar (`top: 112`), which cleared the controls but
+/// landed on the first card of every screen. Measured on the Reminders screen: it
+/// covered the tail of three lines of the exact-alarm notice — `deliver a
+/// reminde…`, `fire them at the…`, `Android's…`. A floating control that hides
+/// the text beneath it is an obstruction, not prominence. Above the nav bar is
+/// the conventional slot for it, and that strip belongs to chrome rather than to
+/// content.
+///
+/// 12px nav padding + ~40px of icon and label + the gesture inset the nav's own
+/// `SafeArea` consumes.
+const double _kOrbBottomAboveNav = 98;
+
+/// The corner the orb must stay out of, because a screen already owns it.
+///
+/// Converse puts its microphone exactly there. Two controls in one corner is a
+/// worse collision than the one this position was moved to fix.
+bool _routeOwnsBottomRight(String path) => path.startsWith('/converse');
 
 /// `.simulated-app` (the mocked WhatsApp backdrop) and `.theme-toggle`.
 class FloatingOverlay extends ConsumerStatefulWidget {
@@ -195,14 +213,10 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
           // there too put it straight through the notification bell and the settings
           // icon — two avatars, one of them on top of the controls. Home keeps the
           // prominent one; every other screen keeps the orb.
-          if (_currentPath(context) != '/')
+          if (_currentPath(context) != '/' &&
+              !_routeOwnsBottomRight(_currentPath(context)))
             Positioned(
-              // Below the shared top bar, not through it. `NovaScaffold` puts the bar
-              // at `topInset` (44) + a 44px control row + 16px bottom padding, and the
-              // orb at `top: 60` overlapped the controls on every screen that has one
-              // — the notification bell and settings gear on Home, the gear on
-              // Profile. The gap also keeps the orb clear of the status bar.
-              top: _kOrbTopBelowTopBar,
+              bottom: _kOrbBottomAboveNav,
               right: NovaSpace.gutter,
               child: _orb(c, live, face),
             ),
