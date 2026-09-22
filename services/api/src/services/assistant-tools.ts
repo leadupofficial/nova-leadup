@@ -78,8 +78,19 @@ export const ASSISTANT_TOOLS_PROMPT =
 	'finished when the tool did not run. Call a tool only when they clearly asked for that ' +
 	'action; do not invent reminders or tasks they did not ask for. If a tool result says ok ' +
 	'is false, tell them plainly that it failed and why. If it succeeded, confirm what you ' +
-	'changed and repeat the resolved date and time when there is one. Use the current time and ' +
+	'changed and repeat the resolved date and time when there is one. **Copy that time from the ' +
+	'tool result exactly as it is written there** — do not convert it to another clock form, do ' +
+	'not round it, and do not work it out yourself. Use the current time and ' +
 	'timezone given above to resolve "tomorrow", "next Monday" and similar phrasing. ' +
+	// A reschedule was confirmed as *"twenty to four"* (03:40) while the row was
+	// written for 03:54 — thirty minutes after the 03:24 request, therefore correct,
+	// and therefore a wrong *confirmation* rather than a wrong action. The tool had
+	// already returned `trigger_at_local: "3:54 am"` in both its `summary` and its
+	// `data`; the model converted a digital time into a colloquial phrase and got the
+	// arithmetic wrong. "Repeat the resolved time" was too loose an instruction — it
+	// permits re-deriving. This says to copy it.
+	'For example, when a tool result says "go off 3:54 am", say three fifty-four, not a ' +
+	'phrase you build from it. ' +
 	// ── Never invent a time the user did not give ────────────────────────
 	// The instruction above says to *resolve* a day reference and said nothing about
 	// a day given **without** a time, so the model filled the hour with a
