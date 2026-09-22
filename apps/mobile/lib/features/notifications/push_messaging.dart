@@ -71,9 +71,14 @@ class NovaPush {
 /// accepted, the shade stayed empty with NOVA in the foreground, and the same
 /// message appeared immediately once the app was backgrounded.
 class PushForegroundHandler {
-  PushForegroundHandler(this._notifications);
+  PushForegroundHandler(this._notifications, {this.onPush});
 
   final ReminderNotifications _notifications;
+
+  /// Called once a foreground push has been drawn, so the caller can refresh
+  /// whatever lists it — without this the bell keeps the count it fetched at
+  /// startup and the new nudge is missing from the inbox until a restart.
+  final VoidCallback? onPush;
   StreamSubscription<RemoteMessage>? _subscription;
 
   /// Notification id for foreground pushes. Fixed so a second push replaces the
@@ -102,6 +107,7 @@ class PushForegroundHandler {
         body: body ?? '',
         payload: message.data['notificationId'] as String?,
       );
+      onPush?.call();
     } catch (error) {
       debugPrint('[NovaPush] could not show a foreground push: $error');
     }

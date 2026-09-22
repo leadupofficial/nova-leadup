@@ -14,6 +14,29 @@ import 'models.dart';
 /// The app previously let pages swallow exceptions and render "nothing found",
 /// which made a 401 indistinguishable from an empty list. Screens should render
 /// [NovaApiException.message] instead.
+/// Reads the unread count out of whatever `GET /notifications/unread-count`
+/// returned.
+///
+/// `_get` already unwraps the `{success, data}` envelope, so the answer arrives as
+/// `{count: N}` — reading `data['data']` instead returned null on every call and
+/// the bell silently showed nothing. A raw envelope is still tolerated, so this
+/// cannot quietly answer zero if that unwrapping ever changes.
+int parseUnreadCount(dynamic data) {
+  if (data is Map) {
+    final body = Map<String, dynamic>.from(data);
+    final nested = body['data'];
+    final map = nested is Map ? Map<String, dynamic>.from(nested) : body;
+    // Total on purpose: a missing or unexpected value must leave the badge empty,
+    // never throw inside a widget build. `count(*)::int` has been a number every
+    // time it has been seen, and a string is still read rather than rejected.
+    final value = map['count'];
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
+  }
+  return 0;
+}
+
 class NovaApiException implements Exception {
   const NovaApiException(this.message, {this.statusCode});
 
@@ -616,6 +639,25 @@ class NovaApi {
   }
 
   // ─── Activity centre (audit_logs) ─────────────────────────────────────────
+
+  /// NOVA's own notifications, newest first.
+  Future<List<NovaNotification>> listNotifications({int limit = 50}) async {
+    final data = await _get(
+      ApiConfig.notifications,
+      query: {'pageSize': limit},
+    );
+    return _list(data, 'notifications', NovaNotification.fromJson);
+  }
+
+  /// How many are unread — what the Home bell should actually show.
+  Future<int> unreadNotificationCount() async =>
+      parseUnreadCount(await _get('${ApiConfig.notifications}/unread-count'));
+
+  Future<void> markNotificationRead(String id) =>
+      _patch('${ApiConfig.notifications}/$id/read', const <String, dynamic>{});
+
+  Future<void> deleteNotification(String id) =>
+      _delete('${ApiConfig.notifications}/$id');
 
   Future<List<NovaActivityItem>> listActivity({
     int limit = 50,

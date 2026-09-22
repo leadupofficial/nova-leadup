@@ -1370,3 +1370,53 @@ class NovaBriefing {
     };
   }
 }
+
+// ─── NOVA's own notifications ─────────────────────────────────────────────────
+
+/// A nudge NOVA itself produced: a reminder coming due, a follow-up, a briefing.
+///
+/// Distinct from `notification_models.dart`, which models the *assistant* that
+/// reads other apps' notifications. The server has served `/notifications`
+/// (list, read, delete, unread count) since the table existed, and the app called
+/// none of it — so the only record of a nudge was the system notification, and
+/// dismissing the shade lost it for good.
+class NovaNotification {
+  const NovaNotification({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.type,
+    required this.read,
+    this.category,
+    this.actionUrl,
+    this.occurredAt,
+    this.readAt,
+  });
+
+  final String id;
+  final String title;
+  final String body;
+  final String type;
+  final bool read;
+  final String? category;
+  final String? actionUrl;
+  final DateTime? occurredAt;
+  final DateTime? readAt;
+
+  factory NovaNotification.fromJson(Map<String, dynamic> j) {
+    final payload = j['payload'] is Map
+        ? Map<String, dynamic>.from(j['payload'] as Map)
+        : const <String, dynamic>{};
+    return NovaNotification(
+      id: (j['id'] ?? '').toString(),
+      title: (j['title'] ?? '').toString(),
+      body: (j['body'] ?? '').toString(),
+      type: (j['type'] ?? 'info').toString(),
+      read: j['read'] == true,
+      category: (payload['category'] ?? j['category']) as String?,
+      actionUrl: (payload['actionUrl'] ?? j['actionUrl']) as String?,
+      occurredAt: _parseDate(j['occurredAt'] ?? j['occurred_at']),
+      readAt: _parseDate(j['readAt'] ?? j['read_at']),
+    );
+  }
+}

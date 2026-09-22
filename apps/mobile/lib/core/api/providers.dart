@@ -400,6 +400,28 @@ final novaMutationsProvider = Provider<NovaMutations>(NovaMutations.new);
 
 // ─── Activity centre ──────────────────────────────────────────────────────────
 
+// ─── NOVA's own notifications ─────────────────────────────────────────────────
+
+/// The nudges NOVA produced: reminders coming due, follow-ups, briefings.
+///
+/// These rows have existed since the table was created, and the app never asked
+/// for them — so the only trace of a nudge was the system notification, and
+/// dismissing the shade lost it permanently.
+final notificationsProvider =
+    FutureProvider.autoDispose<List<NovaNotification>>((ref) async {
+  final api = ref.watch(novaApiProvider);
+  return api.listNotifications();
+});
+
+/// What the Home bell should show. A hardcoded `0` sat there while the server
+/// held a real unread count nobody read.
+final unreadNotificationCountProvider = FutureProvider.autoDispose<int>((
+  ref,
+) async {
+  final api = ref.watch(novaApiProvider);
+  return api.unreadNotificationCount();
+});
+
 final activityProvider = FutureProvider.autoDispose<List<NovaActivityItem>>((
   ref,
 ) async {

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/providers.dart';
 import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
+import '../notifications/nova_notifications_sheet.dart';
 import '../../core/voice/voice_realtime_controller.dart';
 import '../../core/voice/wake_word_controller.dart';
 import '../../services/health_service.dart';
@@ -68,8 +69,11 @@ class HomePage extends ConsumerWidget {
           NovaIconButton(
             icon: Icons.notifications_none_rounded,
             tooltip: 'Notifications',
-            badge: '0',
-            onTap: () => context.go('/me'),
+            // The real unread count. A hardcoded `0` sat here while the server
+            // held the true number, so the badge could never tell the user
+            // anything — and the bell went to Profile rather than to the nudges.
+            badge: _unreadBadge(ref.watch(unreadNotificationCountProvider)),
+            onTap: () => showNovaNotificationsSheet(context),
           ),
           const SizedBox(width: 8),
           NovaIconButton(
@@ -226,6 +230,13 @@ class HomePage extends ConsumerWidget {
   /// The rig state for the hero card: the shared [avatarStateProvider], lifted
   /// to the wake-word "listening" face while the wake word is armed, and
   /// `warning` when that provider itself failed.
+  /// The badge is hidden at zero rather than drawn as `0`, which is what the
+  /// hardcoded value read as — a count of nothing that looked like a count.
+  String? _unreadBadge(AsyncValue<int> count) {
+    final value = count.asData?.value ?? 0;
+    return value > 0 ? '$value' : null;
+  }
+
   NovaAvatarFaceState _avatarFaceState(
     AsyncValue<AvatarState> avatar,
     WakeWordState wakeWord,

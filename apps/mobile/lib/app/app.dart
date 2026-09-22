@@ -84,6 +84,10 @@ class _NovaAppState extends ConsumerState<NovaApp> {
       // appeared the moment the app was backgrounded.
       PushForegroundHandler(
         ref.read(reminderNotificationsProvider),
+        onPush: () {
+          ref.invalidate(notificationsProvider);
+          ref.invalidate(unreadNotificationCountProvider);
+        },
       ).start();
     });
     // **`listenManual`, not `read`.** These notifiers are built once for the app
