@@ -488,3 +488,55 @@ The remaining gaps from §13 are unchanged: **delivery is silent** (`sound=null`
 there is **no `delivered_at`** receipt, and the **follow-up engine has not been
 exercised through push** — what is proven is the transport and the inbox, driven
 by the same service the engines call.
+
+---
+
+## 15. Addendum — wake word, and the MacBook acoustic loop (2026-09-23)
+
+This round tested the product's flagship affordance with the MacBook acting as
+the human, and **corrected a P0 the previous rounds had recorded wrongly**.
+
+### The correction
+
+Earlier rounds recorded *"the wake word responds to nothing; `WakeWordService` is
+never started"* as a P0. That was **not** the defect. `WakeWordController.arm()`
+returns early when `state.enabled` is false, and the wake word is **off until the
+user opts in** — the earlier checks simply never opted in. Enabling it on the
+handset (Profile → Wake word listening → *Turn on*) started the service
+immediately and correctly.
+
+### Verified on the handset
+
+| Step | Evidence |
+|---|---|
+| Enabling it starts the service | `ServiceRecord{com.leadup.nova/.WakeWordService}` `isForeground=true types=00000080` (microphone), channel `nova_wake_word` |
+| The real model loads | `sherpa-onnx KWS started (model=wakeword/kws, keywords=wakeword/kws/keywords.txt, threshold=0.25)` / `Wake word engine started (models: hey_nova)` |
+| **MacBook speaker → phone mic, foreground** | `SherpaWakeWord: DETECTION! hey_nova (keyword=HEY NOVA)` |
+| **MacBook speaker → phone mic, app backgrounded** | two detections with NOVA on the launcher, 4 s apart |
+| The foreground detection was acted on | NOVA opened a conversation, transcribed the speech ("Painover" — a mis-hearing of "Hey Nova"), and answered **in Telugu**, the pinned language, asking for clarification. Real STT, real model, real reply. |
+| The background detection was announced | shade: **"NOVA — Heard \"Hey Nova\" — tap to talk"** |
+| Tapping it after the fix | lands on **Converse, already LISTENING**, mic live (`tap_converse.png`) |
+
+The acoustic loop the mandate asks for — **MacBook speaker → physical phone
+microphone → NOVA → phone speaker/screen → MacBook** — is therefore proven end to
+end: every detection in this run came from speech synthesised on the MacBook and
+heard by the phone's microphone, with no injection or API substitution.
+
+### What this round changed
+
+Tapping "tap to talk" opened NOVA on Home and started nothing — the notification's
+intent only launches the app. `_onResume` now honours a fresh background
+detection, opening Converse and starting the session, bounded by a 90-second
+freshness window so an old detection cannot ambush a later, unrelated visit.
+
+### Still open
+
+- **The wake word is never offered in onboarding** (P1). It works, and a new user
+  has no reason to find it.
+- **Three notification channels are silent** (`sound=null`, `nova_reminders`,
+  `nova_wake_word`, `nova_wake_word_detection`). For a reminder in particular,
+  silence defeats the purpose.
+- **One unexplained `400`** was logged by the app during the resume path that
+  starts the wake session. The session still started and the UI was correct, so it
+  is not blocking — but it is unexplained and is recorded as such rather than
+  waved away (P2).
