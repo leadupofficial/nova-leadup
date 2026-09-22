@@ -1522,3 +1522,51 @@ testing around a revoked permission.
 The App info screen reports **"Alarms & reminders — Denied"**, which is the system
 UI's own statement of the finding in §32 from `dumpsys`. Two independent sources,
 same conclusion.
+
+---
+
+## 35. Addendum — responding to a reminder that already fired (§15) (2026-09-23)
+
+§15 is specific: a push is not a reminder unless the user can answer it. Three
+answers were tested against a reminder created with a `triggerAt` **five minutes
+in the past**, so it had already fired.
+
+| User said | What happened | Verdict |
+|---|---|---|
+| *"I just took the medicine, but remind me again in 30 minutes"* | triggerAt moved **03:19 → 03:54** — thirty minutes from the request — and it persisted | **action PASS** |
+| *"What time is the medicine reminder set for now?"* | *"three fifty-four in the morning"* — matches the record exactly | **PASS** |
+| *"Actually cancel that medicine reminder"* | *"Done. I've cancelled the medicine reminder."* and `dismissed = true` on the row | **PASS** |
+
+So a fired reminder can be rescheduled and cancelled after the fact, the state
+persists, and reading the time back is accurate.
+
+### But the confirmation named the wrong time
+
+The reschedule reply was:
+
+> *"Done. I'll remind you again at **twenty to four** in the morning."*
+
+**Twenty to four is 03:40. The reminder was stored for 03:54.** The action was
+correct — 03:54 is exactly thirty minutes after the 03:24 request — so the
+*confirmation* is what is wrong, by fourteen minutes.
+
+This matters more than a stray word: for a time-based commitment the sentence the
+user hears is the whole product. "Remind me again in 30 minutes" answered with a
+time fourteen minutes off is the app disagreeing with itself about the one fact
+that matters. It is also the *opposite* of the read-back case above, where the
+same assistant stated 03:54 correctly — so the model can read the true value and
+still mis-state it when confirming.
+
+### Recommended fix
+
+The time is computed twice: once in the tool (correctly, in code) and once in the
+model's prose (incorrectly). The confirmation should quote the value the tool
+returned — or state that the reminder moved without naming a clock time — rather
+than let the model re-derive it. Not attempted here; it is a prompt/response
+change whose effect needs its own verification.
+
+### Also noted
+
+The read-back reply opened with *"You're right — I apologize. I didn't call any
+tool."* in response to a plain question, which reads as a wobble even though the
+information that followed was correct. Noted as a coherence defect, not chased.
