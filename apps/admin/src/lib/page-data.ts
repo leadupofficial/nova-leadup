@@ -18,7 +18,19 @@
  */
 
 export type PageLoad<T> =
-	| { ok: true; rows: T[]; totalItems: number | null; totalPages: number | null }
+	| {
+			ok: true;
+			rows: T[];
+			totalItems: number | null;
+			totalPages: number | null;
+			/**
+			 * True when the API withheld end-user content from this response because the operator's
+			 * role does not hold the matching `*.content_read` permission. Pages must say so; an
+			 * empty cell reads as missing data rather than withheld data.
+			 */
+			contentRedacted: boolean;
+			contentPermission?: string;
+	  }
 	| { ok: false; message: string; status: number | null };
 
 const MESSAGES: Record<number, string> = {
@@ -57,7 +69,13 @@ export function describeLoadError(error: unknown): { message: string; status: nu
  * that only have an array can pass `{ rows, totalItems: null, totalPages: null }`.
  */
 export async function loadPage<T>(
-	loader: () => Promise<{ rows: T[]; totalItems?: number | null; totalPages?: number | null }>,
+	loader: () => Promise<{
+		rows: T[];
+		totalItems?: number | null;
+		totalPages?: number | null;
+		contentRedacted?: boolean;
+		contentPermission?: string;
+	}>,
 ): Promise<PageLoad<T>> {
 	try {
 		const result = await loader();
@@ -66,6 +84,8 @@ export async function loadPage<T>(
 			rows: result.rows,
 			totalItems: result.totalItems ?? null,
 			totalPages: result.totalPages ?? null,
+			contentRedacted: result.contentRedacted === true,
+			contentPermission: result.contentPermission,
 		};
 	} catch (error) {
 		if (process.env.NODE_ENV !== 'production') {

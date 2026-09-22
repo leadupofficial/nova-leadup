@@ -96,11 +96,6 @@ export default async function RemindersPage({
 	const errorMessage = single(resolved.error);
 	const returnTo = `/reminders?${new URLSearchParams({ state, page: String(page), ...(search ? { search } : {}) }).toString()}`;
 
-	// Captured out of the loader so the note below can report withheld content. The API
-	// still returns every row and the same total; only the user's own words are removed.
-	let contentRedacted = false;
-	let contentPermission: string | undefined;
-
 	const result = await loadPage<ReminderRow>(async () => {
 		const envelope = await getOperations<ReminderRow>('reminders', {
 			page,
@@ -108,10 +103,20 @@ export default async function RemindersPage({
 			...(state !== 'all' ? { state } : {}),
 			...(search ? { search } : {}),
 		});
-		contentRedacted = Boolean(envelope.contentRedacted);
-		contentPermission = envelope.contentPermission;
-		return { rows: envelope.data, totalItems: envelope.totalItems, totalPages: envelope.totalPages };
+		return {
+			rows: envelope.data,
+			totalItems: envelope.totalItems,
+			totalPages: envelope.totalPages,
+			// Passed through rather than assigned to a captured variable: the React compiler
+			// rejects reassignment inside the loader, and it was the wrong shape anyway.
+			contentRedacted: Boolean(envelope.contentRedacted),
+			contentPermission: envelope.contentPermission,
+		};
 	});
+
+	// True when the API withheld the user's own words because this operator's role does not
+	// hold the matching content permission.
+	const contentRedacted = result.ok && result.contentRedacted === true;
 
 	if (!result.ok) {
 		return (

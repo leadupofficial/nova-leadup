@@ -35,7 +35,7 @@ import {
 	formatNumber,
 	formatRelative,
 } from '../../../components/ui';
-import { revokeSessionsAction, suspendUserAction } from '../actions';
+import { resetUserStateAction, revokeSessionsAction, suspendUserAction, updateUserAction } from '../actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -578,6 +578,89 @@ export default async function UserDetailPage({
 						There is no push channel to the app, so a server-initiated logout is a revoke-and-wait. The console
 						does not claim otherwise.
 					</p>
+				</Card>
+				<Card
+					title="Edit account details"
+					subtitle="Corrects the safe per-account fields. Email is not editable here: the address an account signs in with is an identity change, not a support action."
+				>
+					<form action={updateUserAction} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+						<input type="hidden" name="id" value={user.id} />
+						<input type="hidden" name="returnTo" value={returnTo} />
+						<label style={labelStyle} htmlFor="edit-name">
+							Name
+						</label>
+						<input id="edit-name" name="name" defaultValue={user.name ?? ''} style={inputStyle} placeholder="leave blank to keep the current name" />
+						<div style={{ display: 'flex', gap: '0.5rem' }}>
+							<div style={{ flex: 1 }}>
+								<label style={labelStyle} htmlFor="edit-locale">
+									Locale
+								</label>
+								<input id="edit-locale" name="locale" defaultValue={user.locale ?? ''} style={inputStyle} placeholder="en-IN" />
+							</div>
+							<div style={{ flex: 1 }}>
+								<label style={labelStyle} htmlFor="edit-timezone">
+									Timezone
+								</label>
+								<input id="edit-timezone" name="timezone" defaultValue={user.timezone ?? ''} style={inputStyle} placeholder="Asia/Kolkata" />
+							</div>
+						</div>
+						{/* Tri-state: a blank value means "leave as it is". An unticked checkbox is absent
+						    from FormData entirely, so a plain checkbox could not express "set to false". */}
+						<div style={{ display: 'flex', gap: '1rem' }}>
+							<label style={{ fontSize: '0.78rem', color: '#374151' }}>
+								Email verified
+								<select name="emailVerified" defaultValue="" style={{ ...inputStyle, marginLeft: '0.4rem' }}>
+									<option value="">leave unchanged</option>
+									<option value="true">mark verified</option>
+									<option value="false">mark unverified</option>
+								</select>
+							</label>
+							<label style={{ fontSize: '0.78rem', color: '#374151' }}>
+								Phone verified
+								<select name="phoneVerified" defaultValue="" style={{ ...inputStyle, marginLeft: '0.4rem' }}>
+									<option value="">leave unchanged</option>
+									<option value="true">mark verified</option>
+									<option value="false">mark unverified</option>
+								</select>
+							</label>
+						</div>
+						<label style={labelStyle} htmlFor="edit-reason">
+							Reason (recorded in the audit log)
+						</label>
+						<input id="edit-reason" name="reason" style={inputStyle} placeholder="e.g. user asked us to fix their display name" />
+						<button type="submit" style={restoreButton}>
+							Save account details
+						</button>
+					</form>
+				</Card>
+
+				<Card
+					title="Reset account state"
+					subtitle="Erases stored memory and/or cancels pending reminders. Irreversible, so it needs a typed confirmation as well as the reason the API requires."
+				>
+					<form action={resetUserStateAction} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+						<input type="hidden" name="id" value={user.id} />
+						<input type="hidden" name="returnTo" value={returnTo} />
+						<label style={{ fontSize: '0.78rem', color: '#374151', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+							<input type="checkbox" name="clearMemories" />
+							Clear stored memory ({detail.memories.length} entr{detail.memories.length === 1 ? 'y' : 'ies'})
+						</label>
+						<label style={{ fontSize: '0.78rem', color: '#374151', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+							<input type="checkbox" name="cancelReminders" />
+							Cancel pending reminders
+						</label>
+						<label style={labelStyle} htmlFor="reset-reason">
+							Reason (required — audited)
+						</label>
+						<input id="reset-reason" name="reason" required style={inputStyle} placeholder="e.g. GDPR erasure request, ticket #1234" />
+						<label style={labelStyle} htmlFor="reset-confirm">
+							Type CLEAR to confirm
+						</label>
+						<input id="reset-confirm" name="confirm" required style={inputStyle} placeholder="CLEAR" />
+						<button type="submit" style={dangerButton}>
+							Reset account state
+						</button>
+					</form>
 				</Card>
 			</div>
 

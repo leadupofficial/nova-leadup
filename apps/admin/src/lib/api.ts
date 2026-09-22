@@ -978,6 +978,51 @@ export async function setUserSuspended(
 	);
 }
 
+/**
+ * `PATCH /control/users/:id` — the safe per-account fields.
+ *
+ * This route existed with a permission and an audit record and no caller: the console could
+ * suspend an account but not correct a misspelled name or a wrong timezone. Email is
+ * deliberately absent from the contract, because changing the address an account signs in with
+ * is an identity change, not a support action.
+ */
+export async function updateUser(
+	id: string,
+	body: {
+		name?: string;
+		emailVerified?: boolean;
+		phoneVerified?: boolean;
+		locale?: string;
+		timezone?: string;
+		reason?: string;
+	},
+): Promise<UserMutationResult> {
+	return unwrap<UserMutationResult>(
+		await request<unknown>(`/control/users/${encodeURIComponent(id)}`, {
+			method: 'PATCH',
+			body: JSON.stringify(body),
+		}),
+	);
+}
+
+/**
+ * `POST /control/users/:id/reset-state` — clear stored memory and/or cancel pending reminders.
+ *
+ * Both are destructive to user-visible state, so the route requires an explicit reason and
+ * reports what it actually touched; this helper passes that through unchanged.
+ */
+export async function resetUserState(
+	id: string,
+	body: { reason: string; clearMemories?: boolean; cancelReminders?: boolean },
+): Promise<UserMutationResult> {
+	return unwrap<UserMutationResult>(
+		await request<unknown>(`/control/users/${encodeURIComponent(id)}/reset-state`, {
+			method: 'POST',
+			body: JSON.stringify(body),
+		}),
+	);
+}
+
 export async function revokeUserSessions(
 	id: string,
 	body: { reason?: string; deviceId?: string },

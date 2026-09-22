@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, useState, useSyncExternalStore } from 'react';
 import { adminLogin, MfaInvalidError, MfaRequiredError, writeTokens } from '../../lib/api';
 
 type FormState = 'idle' | 'loading' | 'error' | 'success';
@@ -22,8 +22,17 @@ export default function LoginForm() {
  //   /login?email=admin%40nova.leadup.in&password=<the actual password>
  // and nginx wrote it to its access log. The `method="post"` below stops the URL leak, and this
  // flag stops the submit happening at all before the handler that calls `preventDefault` exists.
- const [hydrated, setHydrated] = useState(false);
- useEffect(() => setHydrated(true), []);
+ //
+ // `useSyncExternalStore` is the canonical hydration probe: the server snapshot is `false` and the
+ // client snapshot is `true`, so it needs no state and no effect. The first version used
+ // `useEffect(() => setHydrated(true), [])`, which the React compiler rejects outright ("calling
+ // setState synchronously within an effect can trigger cascading renders") and which failed the
+ // production build.
+ const hydrated = useSyncExternalStore(
+  () => () => {},
+  () => true,
+  () => false,
+ );
 
  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
  e.preventDefault();
