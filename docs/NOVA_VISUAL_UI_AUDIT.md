@@ -97,3 +97,14 @@ briefing, the reminders list, and every error/empty state other than those noted
 An existing widget test had encoded the contradiction — it required `or say "Hey
 Nova"` while the switch was off. It was updated, not deleted, and now asserts the
 opposite.
+
+## 9. Onboarding — the wake word step (2026-09-23)
+
+| Screen | Screenshot | Issue | Sev | Root cause | Fix | Verification |
+|---|---|---|---|---|---|---|
+| Onboarding, step 5 of 7 | `r28_step.png` | Onboarding never asked about the wake word, so every new user finished setup with it off and had to find it under Profile. | **P1** | The step simply did not exist | New `WakeWordStepPage` between *companion* and *health* | Renders on the handset: title "Wake word", the phrase explanation, a state card reading **"Wake word is off"** with a **Turn on** action, and **"Not now"** as the CTA. Reached by advancing from the companion step (`PUSH onboarding-wakeword prev=onboarding-companion`). |
+| Onboarding, companion (speech style) | `r28_companion.png` | — | — | — | — | **Also closes a round-16 gap:** the picker's honest labels are visible on the device — **"Urdu (basic voice)"** and **"Nepali (basic voice)"** among the chips. |
+
+The step keeps a full-screen layout with the CTA pinned to the bottom, which
+leaves a large empty middle. That is consistent with the other onboarding steps
+and was left alone.
