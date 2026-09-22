@@ -1,0 +1,41 @@
+# Docker build-context hygiene.
+#
+# On a developer machine this monorepo is ~13G (Flutter build output, APKs and
+# pnpm node_modules), so an unpruned context is impractically slow to send to
+# the daemon and would leak a host `node_modules` into images.
+#
+# IMPORTANT: services/*/dist and packages/*/dist are deliberately NOT ignored.
+# services/Dockerfile.multi copies those prebuilt artifacts into the final
+# images, so ignoring `dist` would produce images with no compiled code.
+
+.git
+.gitignore
+**/.DS_Store
+**/*.log
+
+# Dependency and bundler output — every Dockerfile installs/compiles what it needs.
+**/node_modules
+**/.next
+**/.turbo
+**/coverage
+
+# TypeScript incremental state. A `tsconfig.tsbuildinfo` copied from a developer machine is
+# worse than useless in a build context: packages/database sets `composite: true`, so tsc reads
+# the stale file, decides the project is already built, reports success *without emitting*, and
+# the next package to compile fails with TS2307 "Cannot find module '@nova/database'" against a
+# dist/ that was never written. The failure looks like a broken import graph and is really a
+# stale artifact, which is why this line exists rather than a note in a README.
+**/*.tsbuildinfo
+
+# Flutter / Android build output (apps/mobile)
+apps/mobile/build
+apps/mobile/.dart_tool
+apps/mobile/android/build
+apps/mobile/android/.gradle
+apps/mobile/android/app/build
+**/*.apk
+**/*.aab
+**/*.apk.sha1
+
+# Expo / React Native leftovers in apps/mobile are not built
+apps/mobile/.expo
