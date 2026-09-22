@@ -941,3 +941,57 @@ No language is refused, so the fix introduces no rejection risk.
 catalogue names `google` for Assamese, which is not configured (row 22). It still
 speaks Assamese, so the user hears the right language; it is the routing claim that
 is wrong, not the audio.
+
+## 24. Seven languages are asked for in English, and every native code is gated (2026-09-23)
+
+§23 noticed Assamese TTS arriving from `sarvam-fallback` instead of Sarvam primary.
+Following that through produced a precise, if uncomfortable, picture.
+
+### The code path
+
+The catalogue routes `as`, `mai`, `sa`, `sd`, `ks`, `doi` and `mni` to **Google**,
+which is not configured (row 22), so each request fails over to the Sarvam fallback.
+That fallback passes the language through `toSarvamCode`, whose map has entries for
+14 languages and **no entry for any of these seven** — and its last line is
+`return map[code] ?? 'en-IN'`.
+
+So the request that actually goes out for Assamese is **`target_language_code:
+'en-IN'`** — an English (India) voice.
+
+Measured, on one Assamese sentence:
+
+| Request | Result |
+|---|---|
+| through the app for `as` | 158 098 bytes, provider `sarvam-fallback` |
+| direct Sarvam `as-IN` | **400** — *"Please request beta access to as-IN"* |
+| direct Sarvam `en-IN` | **158 098 bytes** — the same size as the app's audio |
+| direct Sarvam `bn-IN` | 150 572 bytes — different |
+
+The size match with `en-IN`, and the difference from `bn-IN`, is what makes this
+conclusive rather than inferred from the code.
+
+### Every native code exists and every one is gated
+
+Sarvam's own validation lists them, and refuses them all:
+
+```
+as-IN  mai-IN  sa-IN  sd-IN  ks-IN  doi-IN  mni-IN  brx-IN  kok-IN  sat-IN
+     -> "Please request beta access to <code> by contacting our support team."
+```
+
+So there is no code to map them to. **This is why the `en-IN` default is not simply
+a bug to correct**: changing `as` to `as-IN` would return 400 and leave Assamese with
+**no audio at all**, where today it gets a voice that reads the script.
+
+### What the user actually hears
+
+The Assamese audio from that path round-tripped through the streaming recogniser at
+**79% bigram overlap** with the input (§23), which means it is recognisably Assamese
+rather than English. So the practical harm is not established — the label is wrong,
+the sound is broadly right — and that is the honest extent of it.
+
+### The recommendation
+
+**Request beta access for these seven as well as the three in row 41.** They are one
+email, and until then seven of the app's languages are spoken by a voice the request
+describes as English while claiming a provider that is not configured.
