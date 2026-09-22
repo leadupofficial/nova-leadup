@@ -1557,6 +1557,35 @@ export async function getRealtime(): Promise<Record<string, unknown>> {
 	return unwrap<Record<string, unknown>>(await request<unknown>('/control/realtime'));
 }
 
+/**
+ * `GET /control/users/:userId/conversations/:conversationId` — the actual message text.
+ *
+ * Gated on `conversations.content_read`, which is separate from `conversations.read` for a reason,
+ * and every call is audited individually by the API. This is the read the console could describe
+ * but never open: the conversations page listed sessions and no page could show what was said.
+ */
+export async function getConversationContent(
+	userId: string,
+	conversationId: string,
+): Promise<{
+	conversation: Record<string, unknown>;
+	messages: Array<{
+		id: string;
+		role: string;
+		content: string;
+		model: string | null;
+		tokenUsage: unknown;
+		toolCalls: unknown;
+		createdAt: string;
+	}>;
+}> {
+	return unwrap<{ conversation: Record<string, unknown>; messages: Array<{ id: string; role: string; content: string; model: string | null; tokenUsage: unknown; toolCalls: unknown; createdAt: string }> }>(
+		await request<unknown>(
+			`/control/users/${encodeURIComponent(userId)}/conversations/${encodeURIComponent(conversationId)}`,
+		),
+	);
+}
+
 /** `PATCH /control/tasks/:id` */
 export async function updateTask(
 	id: string,

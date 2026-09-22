@@ -73,7 +73,14 @@ export default async function ConversationsPage({
 			header: 'Conversation',
 			render: (row) => (
 				<>
-					<div style={{ fontWeight: 500, maxWidth: '280px' }}>{row.title ?? '(untitled)'}</div>
+					<div style={{ fontWeight: 500, maxWidth: '280px' }}>
+						{/* The link is always rendered, even for an operator without content permission:
+						    the destination explains the refusal by name, which is more useful than a
+						    hidden link they cannot account for. */}
+						<Link href={`/conversations/${row.id}?userId=${row.user_id}`} style={{ color: '#2563eb' }}>
+							{row.title ?? '(untitled)'}
+						</Link>
+					</div>
 					<div style={{ fontSize: '0.68rem', color: '#9ca3af', fontFamily: 'ui-monospace, Menlo, monospace' }}>
 						{shortId(row.id)}
 					</div>
