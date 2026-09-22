@@ -1467,3 +1467,58 @@ was not. The fire time is what settled it.
 ### Still open in this area
 
 Network interruption at the moment a reminder is due.
+
+---
+
+## 34. Addendum — microphone denied (§23) (2026-09-23)
+
+### How the permission was changed
+
+Not by the app — by the user's own Settings screen. This is worth recording
+because the two obvious routes **do not work on this handset**:
+
+```
+adb shell pm revoke com.leadup.nova android.permission.RECORD_AUDIO
+  -> Exception occurred while executing 'revoke'
+adb shell appops set com.leadup.nova RECORD_AUDIO deny
+  -> Exception occurred while executing 'set'
+adb shell cmd appops set com.leadup.nova RECORD_AUDIO deny
+  -> Exception occurred while executing 'set'
+```
+
+ColorOS refuses all three to `shell`. The permission was changed through
+**Settings → Apps → NOVA → Permissions → Microphone → "Don't allow"**, and
+confirmed from `dumpsys package` after each tap — the first attempt missed the
+radio button and `granted` was still `true`, so the "test" would have proved
+nothing.
+
+### What happened
+
+| Step | Observed |
+|---|---|
+| Mic revoked, mic tapped | Android's own dialog: **"Allow NOVA to record audio?"** — *While using the app / Only this time / Don't allow*. The app asks properly on first use. |
+| **"Don't allow"** chosen | `RECORD_AUDIO: granted=false, flags=[… USER_FIXED …]` — permanently denied |
+| On screen | a red banner: **"Microphone access is blocked. Turn it on for NOVA in Settings."**, with a dismiss |
+| State | back to **READY** — not stuck in *Listening* or *Connecting*, no crash, composer and mic still usable |
+| Granted again | **one tap, no restart**: the next mic tap showed **LISTENING** with the level meter and the banner gone |
+
+### Why this passes
+
+The failure is **named and actionable** ("blocked… turn it on in Settings"), the
+app **does not pretend to listen** — the level meter stops and the state leaves
+`listening` — and it recovers as soon as the permission returns. The banner also
+appears for the *blocked* case rather than the recoverable one, which is the
+distinction that matters: Android will not show its own dialog again once a
+permission is `USER_FIXED`, so pointing at Settings is the only useful thing to
+say.
+
+### The device is left as found
+
+The microphone is granted again and verified working, so later rounds are not
+testing around a revoked permission.
+
+### Also confirmed while in Settings
+
+The App info screen reports **"Alarms & reminders — Denied"**, which is the system
+UI's own statement of the finding in §32 from `dumpsys`. Two independent sources,
+same conclusion.
