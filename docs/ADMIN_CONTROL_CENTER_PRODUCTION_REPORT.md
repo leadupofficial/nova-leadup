@@ -2220,3 +2220,55 @@ build`) and the refusal (exit 1 with the reason, at a deliberately impossible fl
 the object store, the cache and every image. Either the deploy host gets more disk, or builds move off
 it — because the current arrangement means a routine deploy and the production database are competing
 for the same 38 GB.
+
+## 15. Two more "looks complete" failures, and the conversation viewer
+
+### 15.1 The legacy `/admin` mutations wrote no audit rows at all
+
+The legacy router gates on a role claim through `requireAdmin` and never runs `resolveAdmin`, so it
+wrote nothing to `admin_audit_logs`. Six mutations changed production state with no record of who did
+it: feature-flag create, update and delete, incident create and resolve, and the user patch.
+
+The gap was invisible from the console, because the audit page reads exactly the table these routes
+never wrote to — so the panel that exists to prove administrator actions are audited could not show
+that they were not. `actorFromRequest` builds its actor from the authenticated user rather than from
+`req.adminActor`, which is why this could be fixed without restructuring the router or changing what
+the mobile app sees; the app calls `/api/v1/admin/incidents` from its own admin panel.
+
+Verified against the running API: creating an incident through the legacy route now writes
+`incident.create | probe@nova.test | success | incident`. Attempting to delete that verification row
+was refused — *"admin_audit_logs is append-only: DELETE is not permitted"* — which is the
+tamper-resistance the audit requirement asks for, working.
+
+The remaining legacy gap is unchanged: this router does not run the admin-session liveness check, so
+revoking a console session does not end access to it until the 15-minute access token expires.
+
+### 15.2 A page that passed the sweep while rendering empty
+
+The Conversation Control Center asks for user messages and NOVA responses. The console could list
+conversations, describe their shape, and open nothing — while the API has exposed an audited,
+separately-permissioned route for exactly that all along
+(`GET /control/users/:id/conversations/:conversationId`, `conversations.content_read`). That viewer
+now exists, refuses by name when the role lacks the permission rather than rendering a blank page
+(a blank page reads as "this conversation is empty", a different and misleading fact), announces that
+the read is audited, and truncates nothing.
+
+**Following the link it added exposed a second failure.** The href it produced was:
+
+```
+/conversations/844ed6e6-…?userId=undefined
+```
+
+The endpoint maps its response field by field to camelCase (`userId`, `userEmail`, `userMessages`,
+`createdAt`, `lastMessageAt`), while the page's `ConversationRow` type declared snake_case. TypeScript
+therefore approved every `row.user_id` and every one of them evaluated to `undefined` at runtime — so
+the User column, the user/NOVA message split and both timestamps had been rendering empty on a page
+the browser sweep reported as healthy, because "has an `<h1>` and no error card" is exactly what the
+sweep was checking for. The type and the page now use the API's names.
+
+The other list pages are **not** affected: tasks, reminders, memory, jobs and proactive return raw SQL
+rows, so their snake_case usage matches their responses. This endpoint is the one that maps, which is
+what made the mismatch possible — and what made it invisible.
+
+Verified in a browser against production: the list shows account emails, the link carries a real
+`userId`, and the content view renders the messages.
