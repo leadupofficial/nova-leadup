@@ -2136,3 +2136,43 @@ that already contained the new name. The assertion now retries.
 - The remaining unwired capabilities from §11.4: job retry, incident create, and the gated
   conversation-content view.
 - The findings in §11.3 (the legacy `/api/v1/admin/*` bypass above all) are unchanged.
+
+## 13. Provider checks: fixed, and what they were hiding
+
+Both faults in §11.5 were in the **checks**, which is the worse place for a fault to live: a console
+that cries wolf on every scheduled run trains an operator to ignore the provider panel altogether.
+
+**Sarvam** was probed with `bulbul:v2`, a model Sarvam has retired, while `realtime/tts.ts` had already
+moved to `bulbul:v3`. The probe therefore failed every five minutes against a voice path that worked.
+It now imports `DEFAULT_SPEAKER` and `DEFAULT_TTS_MODEL` from the module that actually synthesises
+speech, so the two cannot drift apart again — the duplicated literal *was* the bug.
+
+**Object storage** sent `HEAD` to the endpoint root. Measured on the live MinIO: `HEAD /` answers
+**400**, while `HEAD /<bucket>` answers **403** — reachable and correctly refusing an unsigned request,
+which is the healthy signal for a check that does not sign. It now HeadBuckets the configured bucket.
+
+Verified on production after deploying:
+
+```
+object-storage: pass — Bucket "nova-assets" reachable (HEAD /nova-assets answered 403, i.e. refusing
+                       an unsigned request). Credentials present.
+sarvam:         fail — Sarvam answered 402. {"error":{"message":"No credits available.",
+                       "code":"insufficient_quota_error"}}
+```
+
+### The blocker the false alarm was covering
+
+With the deprecated-model error gone, the Sarvam check reports its **real** state: the production
+Sarvam account is **out of credits** (`402 insufficient_quota_error`). The model is accepted now; the
+account cannot synthesise.
+
+This matters because `realtime/tts.ts` sets `PRIMARY_STREAM_PROVIDER = 'sarvam'` — Sarvam is the
+primary realtime TTS provider and the routed TTS for Indic languages, with ElevenLabs as the fallback.
+So either the Sarvam balance is topped up, or every Indic-language and realtime synthesis request
+pays a failed primary call before falling back. Note the local development key *does* synthesise
+successfully (the same check returns "Authenticated successfully; synthesis accepted"), so the two
+keys have different balances and the production key is the one that is spent.
+
+This is exactly the failure the earlier check could not report: an operator looking at the provider
+panel before this fix saw "Sarvam: FAIL, model deprecated" and had no way to see that the actual
+problem was quota.
