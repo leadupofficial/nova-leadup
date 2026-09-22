@@ -861,20 +861,28 @@ export async function transcribeAudio(audioBuffer: Buffer, language: string = 'e
 	try {
 		// **Deepgram was never told the language.** The URL carried no language
 		// parameter at all, so every request ran Deepgram's English default while
-		// this function's `language` argument was accepted and silently ignored.
-		// Measured 2026-09-23 on one Urdu clip through this exact path:
+		// this function's `language` argument was accepted and silently ignored: an
+		// Urdu clip through this path returned an **empty** transcript.
 		//
-		//   as shipped (?punctuate&smart_format)        -> transcript: ''   (empty)
-		//   with detect_language=true                   -> "कल सौ दस बजे client को call करें."
+		// Detection alone was the first fix and was not enough. Measured on one clip
+		// per language, `2026-09-23`:
 		//
-		// So a language that falls through to Deepgram — Urdu and Nepali both do,
-		// because Sarvam's STT model refuses them — was transcribed for nothing: the
-		// user spoke and NOVA heard an empty string. English keeps the plain URL,
-		// which is already correct for it.
-		const listenUrl = language && language !== 'en'
-			? 'https://api.deepgram.com/v1/listen?punctuate=true&smart_format=true&detect_language=true'
-			: 'https://api.deepgram.com/v1/listen?punctuate=true&smart_format=true';
-		const response = await fetch(listenUrl, {
+		//   ne  detect_language  -> "Hana das Bagegra Hacklai Phone Gardnose."  (gibberish)
+		//   ne  nova-3 + ne      -> "भोलि बिहान १० बजे ग्राहकलाई फोन गर्नुहोस्"   (correct)
+		//   ur  nova-3 + ur      -> "کل صبح 10 بجے کلائنٹ کو کال کرے۔"            (correct)
+		//   ur  nova-2 + ur      -> HTTP 400, no such model/language combination
+		//
+		// So the model matters as much as the code: `nova-2` knows no Indic language
+		// and `nova-3` does, and being *told* the language beats asking Deepgram to
+		// guess it. English keeps `nova-2`, which is already right for it.
+		//
+		// A code Deepgram does not know is refused rather than ignored, so the
+		// explicit attempt falls back to detection instead of failing the turn.
+		const base = 'https://api.deepgram.com/v1/listen?punctuate=true&smart_format=true';
+		const explicitUrl = `${base}&model=nova-3&language=${encodeURIComponent(language)}`;
+		const detectUrl = `${base}&model=nova-3&detect_language=true`;
+		const listenUrl = language && language !== 'en' ? explicitUrl : base;
+		let response = await fetch(listenUrl, {
 			method: 'POST',
 			signal: controller.signal,
 			headers: {
@@ -883,6 +891,26 @@ export async function transcribeAudio(audioBuffer: Buffer, language: string = 'e
 			},
 			body: new Uint8Array(audioBuffer),
 		});
+
+		if (!response.ok && listenUrl === explicitUrl) {
+			// Deepgram rejects a language it does not carry ("No such model/language
+			// combination") rather than ignoring it. Detection is a worse transcript
+			// but a real one, so it is the fallback for the codes nova-3 lacks.
+			const reason = await response.text();
+			logger.warn(
+				{ language, reason: reason.slice(0, 160) },
+				'Deepgram rejected the explicit language; retrying with detection'
+			);
+			response = await fetch(detectUrl, {
+				method: 'POST',
+				signal: controller.signal,
+				headers: {
+					Authorization: `Token ${env.DEEPGRAM_API_KEY}`,
+					'Content-Type': 'audio/wav',
+				},
+				body: new Uint8Array(audioBuffer),
+			});
+		}
 
 		if (!response.ok) {
 			const text = await response.text();
