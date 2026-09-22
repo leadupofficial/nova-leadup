@@ -912,3 +912,56 @@ My first two attempts at this test were wrong and said so: I sent each turn as a
 **fresh single-message request**, so "that" had nothing to refer to and every
 follow-up asked for clarification. That was the harness, not the product. The
 runs above carry the accumulated conversation, the way the app does.
+
+---
+
+## 23. Addendum — the task lifecycle, working end to end (2026-09-23)
+
+Last round left the reopen step open: `reopen_task:ok` was logged while the named
+task stayed completed and a *different* task was silently reopened. That is now
+fixed, and the lifecycle runs clean.
+
+### The two causes
+
+**1. Completed tasks were invisible to the assistant.** The context query read
+`WHERE status IN ('pending','in_progress')`, and the assistant is given task ids
+in that context. So a completed task had **no id the model could send**:
+
+> *"I don't have the task ID for the library card in my list. Which task did you
+> mean — is it one of the proposal tasks, or the gym membership, or something
+> else?"*
+
+and on another run it bound a *pending* task's id instead, which is how the wrong
+record got mutated. Recently-completed tasks are now read on a second bounded
+query (five, ordered by completion time) and rendered under their own heading.
+The renderer also had to learn the state: it labelled anything not in progress as
+"pending", which would have described a finished task as outstanding.
+
+This is the same lesson the reminder section of that file already documents — a
+24-hour window once made overdue reminders invisible and the assistant answered
+"none of your reminders are overdue".
+
+**2. A status change that reverses nothing was reported as a success.**
+`setTaskStatus` wrote unconditionally, so reopening an already-pending task
+returned `ok` for whatever row it was handed. It now refuses and **names the task
+it actually received**, so a wrong target is visible rather than silent.
+
+### Verified against the live model
+
+| Turn | Reply | Stored state |
+|---|---|---|
+| "Create a task to file the bus pass on Thursday" | *"Done. I've added \"File the bus pass\" to your task list for Thursday."* | `pending` |
+| "Move that to Friday" | *"Moved \"File the bus pass\" to Friday, twenty-fifth of September."* | due **Friday 00:00 IST** |
+| "Mark it complete" | *"Done. I've marked \"File the bus pass\" as complete."* | `completed` |
+| "Actually reopen it, I have not done it yet" | *"Got it. \"File the bus pass\" is back on your list as pending for Friday."* | **`pending`** |
+
+This closes §13's create → modify → reschedule → complete → reopen, with the
+conversation carrying its own history and every transition confirmed in the
+database rather than taken from the reply.
+
+### Still untested
+
+- **Snooze** (there is no snooze tool for tasks; `update_reminder` carries
+  `in_minutes` for reminders) and **recurring reminders** — recorded as row 19c.
+- **History**: the `audit_logs` rows for these transitions were added in round 8
+  and were not re-checked on this run.
