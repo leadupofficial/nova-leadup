@@ -1570,3 +1570,51 @@ change whose effect needs its own verification.
 The read-back reply opened with *"You're right — I apologize. I didn't call any
 tool."* in response to a plain question, which reads as a wobble even though the
 information that followed was correct. Noted as a coherence defect, not chased.
+
+---
+
+## 36. Addendum — notifications denied (§23) (2026-09-23)
+
+Changed the way the microphone case had to be changed: through **Settings → Apps →
+NOVA → Permissions → Notifications**, because `pm revoke` and both `appops set`
+forms are refused to `shell` on this handset (§34). Confirmed from `dumpsys package`
+after the tap: `POST_NOTIFICATIONS: granted=false`.
+
+### What happened
+
+| Step | Observed |
+|---|---|
+| Toggled off, app launched | the app asks at once: **"Allow NOVA to send you notifications?"** — *Allow / Don't allow* |
+| **"Don't allow"** | `granted=false, flags=[… USER_FIXED …]` |
+| Home, after the reconcile pass | a warning card appears under **Status**: **"Reminders cannot reach you"** — *"Android is blocking NOVA's notifications, so a reminder is armed but never shown. Nothing is lost — …"* |
+| Notifications granted again | the card is gone; Status shows only Wake word and Connected |
+
+So the failure is **named and its consequence stated**, in the one place a user
+would look, and the app does not silently keep arming reminders that can never be
+seen. `r33_status3.png` is the capture.
+
+### Two things I could not settle, and will not claim
+
+**Whether that card persists while notifications stay denied.** One later capture
+of the *same* denied session showed Status with only Wake word and Connected —
+no card. I tried to re-check by relaunching and sampling twice, but **the swipes
+did not scroll** (both captures came back at the top of Home), so those samples
+prove nothing and the question is open. Either the card is transient, or the first
+capture caught a reconcile that later reversed; I do not know which.
+
+**Whether the card appears immediately after denying at the in-app prompt.** It
+was not present in the capture taken right after denial (`r33_denied.png`) and was
+present one reconcile later. That is consistent with a delay rather than a bug,
+but one sample either way is not enough to say.
+
+Both are recorded as open rather than guessed at.
+
+### Corroboration of §16, from the system UI
+
+The NOVA notification page lists **Categories → Reminders: "Notification drawer,
+Banner, Lock screen, Ringtone, Vibrate"** — the system's own view of the channel
+the §16 work created. A second, independent source for the sounding-channel fix.
+
+### The device is left as found
+
+Notifications are granted again and verified, and Home shows no warning card.
