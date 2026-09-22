@@ -222,3 +222,58 @@ plainly because it means the pin outranks the language the user is speaking.
 The switch was tested through the pipeline with typed turns, not spoken ones. The
 spoken path was verified for single-language turns (§4) and for one full lifecycle
 (§28), not for a mid-conversation switch.
+
+## 10. The required-language sweep, run in full (2026-09-23)
+
+Every language §6 names, exercised in one pass through the real pipeline: one
+natural request **written in that language**, `language` set to that code, real
+model, real database. The reply's dominant script was counted rather than eyeballed.
+
+| Language | Expected script | Reply script | Task created |
+|---|---|---|---|
+| Hindi `hi` | Devanagari | **Devanagari** ✓ | no — asked a question |
+| Marathi `mr` | Devanagari | **Devanagari** ✓ | **yes** |
+| Bengali `bn` | Bengali | **Bengali** ✓ | **yes** |
+| Assamese `as` | Bengali | **Bengali** ✓ | **yes** |
+| Punjabi `pa` | Gurmukhi | **Gurmukhi** ✓ | no — stated intent only |
+| Gujarati `gu` | Gujarati | **Gujarati** ✓ | no — asked a question |
+| Odia `or` | Odia | **Odia** ✓ | no — asked a question |
+| Tamil `ta` | Tamil | **Tamil** ✓ | **yes** |
+| Telugu `te` | Telugu | **Telugu** ✓ | **yes** |
+| Kannada `kn` | Kannada | **Kannada** ✓ | **yes** |
+| Malayalam `ml` | Malayalam | **Malayalam** ✓ | **yes** |
+| Urdu `ur` | Arabic | **Arabic** ✓ | **yes** |
+| English `en` | Latin | **Latin** ✓ | **yes** |
+
+**Same-language replies: 13 / 13.** Every language answered in its own script,
+including Urdu in Perso-Arabic and Odia in Odia script — the two most likely to fall
+back to Latin or Devanagari.
+
+### The inconsistency this surfaced
+
+The *same* request — "create a task to call the client tomorrow" — produced an
+action in **9** languages and a **clarifying question** in **4** (`hi`, `gu`, `or`),
+with Punjabi replying *"I'll create the task, but…"* and creating nothing.
+
+That matters for two reasons:
+
+1. **It contradicts the app's own instruction.** The prompt tells the model that for
+   a day given without a time it should *send the date and not ask for an hour*
+   (added in the round that fixed an invented 6 pm). Four languages ask anyway.
+2. **Punjabi's reply reads like a confirmation and is not one.** No tool ran, so
+   "I'll create the task" leaves the user believing something was filed. It is
+   future-tense intent rather than a completed claim, so the false-confirmation
+   guard correctly does not fire — but the user-visible effect is the same.
+
+A user cannot tell which behaviour they will get, and it depends only on the
+language they spoke.
+
+### What the 9 that acted used for the time
+
+Midnight — `bn` said *"মধ্যরাত"*, `kn` *"ಮಧ್ಯರಾತ್ರಿ"*, `ur` *"بارہ بجے رات"* —
+which matches the documented rule for a day with no time.
+
+### Test data
+
+Nine tasks were created by the sweep and **all were deleted afterwards** (verified:
+0 remaining), so the account is not carrying test rows into later rounds.
