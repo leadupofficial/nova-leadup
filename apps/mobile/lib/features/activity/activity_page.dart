@@ -128,9 +128,16 @@ class ActivityPage extends ConsumerWidget {
                         'Account and privacy events are recorded here.',
                   )
                 : Column(
-                    children: list
-                        .map((item) => _ActivityTile(item: item))
-                        .toList(growable: false),
+                    children: [
+                      ...list.map((item) => _ActivityTile(item: item)),
+                      // Space for the floating orb, which is fixed above the nav
+                      // bar and overlapped the last row's text otherwise: measured
+                      // on the handset, a row behind it read "…via Pyth" with the
+                      // rest of the line hidden. The list scrolls, so the content
+                      // was reachable — this lets it come to rest clear of the orb
+                      // instead of stopping underneath it.
+                      const SizedBox(height: _kOrbClearance),
+                    ],
                   ),
           ),
         ],
@@ -138,6 +145,13 @@ class ActivityPage extends ConsumerWidget {
     );
   }
 }
+
+/// The vertical space the floating orb occupies over this list.
+///
+/// The orb sits 98 px above the screen bottom and is 80 px tall, and the page's
+/// own content ends above the summary line and the nav bar, so roughly 60 px of
+/// content area is under it.
+const double _kOrbClearance = 64;
 
 class _ActivityTile extends StatelessWidget {
   const _ActivityTile({required this.item});
