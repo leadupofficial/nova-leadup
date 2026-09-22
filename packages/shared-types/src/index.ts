@@ -130,6 +130,8 @@ export {
 	// accept exactly the languages the pipeline routes on rather than a hand-copied
 	// subset that drifts.
 	MIXED_LANGUAGE_CODES,
+	VOICE_FALLBACK_CODES,
+	isVoiceFallback,
 } from './languages.js';
 
 export type {

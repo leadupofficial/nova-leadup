@@ -13,6 +13,18 @@ export interface SupportedLanguage {
 	readonly native: string;
 	readonly voiceProvider: 'elevenlabs' | 'sarvam' | 'google' | 'azure';
 	readonly sttProvider: 'deepgram' | 'sarvam' | 'google' | 'azure';
+	/**
+	 * True when no configured provider actually serves this language's voice, so
+	 * the reply text is right and the *speech* is not.
+	 *
+	 * `voiceProvider` is the provider that is tried, not one that succeeds, and
+	 * the difference matters to a user. Measured against the live TTS route: the
+	 * four languages marked below fall through Sarvam, Deepgram and the Sarvam
+	 * fallback and are finally spoken by ElevenLabs' multilingual model — an
+	 * English voice reading the right script. Claiming Sarvam for them is the
+	 * thing the product must not do: a language is either spoken or it is not.
+	 */
+	readonly voiceFallback?: boolean;
 }
 
 export const SUPPORTED_LANGUAGES: readonly SupportedLanguage[] = [
@@ -26,18 +38,18 @@ export const SUPPORTED_LANGUAGES: readonly SupportedLanguage[] = [
 	{ code: 'bn', name: 'Bengali', native: 'বাংলা', voiceProvider: 'sarvam', sttProvider: 'sarvam' },
 	{ code: 'gu', name: 'Gujarati', native: 'ગુજરાતી', voiceProvider: 'sarvam', sttProvider: 'sarvam' },
 	{ code: 'pa', name: 'Punjabi', native: 'ਪੰਜਾਬੀ', voiceProvider: 'sarvam', sttProvider: 'sarvam' },
-	{ code: 'ur', name: 'Urdu', native: 'اردو', voiceProvider: 'sarvam', sttProvider: 'sarvam' },
+	{ code: 'ur', name: 'Urdu', native: 'اردو', voiceProvider: 'sarvam', sttProvider: 'sarvam' , voiceFallback: true },
 	{ code: 'or', name: 'Odia', native: 'ଓଡ଼ିଆ', voiceProvider: 'sarvam', sttProvider: 'sarvam' },
 	{ code: 'as', name: 'Assamese', native: 'অসমীয়া', voiceProvider: 'google', sttProvider: 'google' },
 	{ code: 'mai', name: 'Maithili', native: 'मैथिली', voiceProvider: 'google', sttProvider: 'google' },
 	{ code: 'sa', name: 'Sanskrit', native: 'संस्कृतम्', voiceProvider: 'google', sttProvider: 'google' },
-	{ code: 'ne', name: 'Nepali', native: 'नेपाली', voiceProvider: 'sarvam', sttProvider: 'sarvam' },
+	{ code: 'ne', name: 'Nepali', native: 'नेपाली', voiceProvider: 'sarvam', sttProvider: 'sarvam' , voiceFallback: true },
 	{ code: 'sd', name: 'Sindhi', native: 'سنڌي', voiceProvider: 'google', sttProvider: 'google' },
 	{ code: 'ks', name: 'Kashmiri', native: 'कॉशुर', voiceProvider: 'google', sttProvider: 'google' },
 	{ code: 'doi', name: 'Dogri', native: 'डोगरी', voiceProvider: 'google', sttProvider: 'google' },
 	{ code: 'mni', name: 'Manipuri', native: 'মৈতৈলোন্', voiceProvider: 'google', sttProvider: 'google' },
-	{ code: 'bho', name: 'Bhojpuri', native: 'भोजपुरी', voiceProvider: 'sarvam', sttProvider: 'sarvam' },
-	{ code: 'awa', name: 'Awadhi', native: 'अवधी', voiceProvider: 'sarvam', sttProvider: 'sarvam' },
+	{ code: 'bho', name: 'Bhojpuri', native: 'भोजपुरी', voiceProvider: 'sarvam', sttProvider: 'sarvam' , voiceFallback: true },
+	{ code: 'awa', name: 'Awadhi', native: 'अवधी', voiceProvider: 'sarvam', sttProvider: 'sarvam' , voiceFallback: true },
 ] as const;
 
 export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number]['code'];
@@ -194,6 +206,23 @@ export const MIXED_LANGUAGE_CODES = ['hinglish', 'tanglish', 'benglish', 'gujlis
 
 function isMixedLanguage(language: string): language is MixedLanguageCode {
 	return (MIXED_LANGUAGE_CODES as readonly string[]).includes(language);
+}
+
+/**
+ * Languages whose speech is a stand-in rather than a native voice.
+ *
+ * Pinned to what the live TTS route actually does, not to what is configured:
+ * measured 2026-09-23 by reading the `provider` field of `/voice/tts` for each
+ * language. A test asserts this list so a provider gaining or losing a voice is
+ * noticed rather than silently mislabelled.
+ */
+export const VOICE_FALLBACK_CODES: readonly string[] = SUPPORTED_LANGUAGES.filter(
+	(l) => l.voiceFallback === true,
+).map((l) => l.code);
+
+/** Whether this language's spoken reply is a fallback voice. */
+export function isVoiceFallback(code: string): boolean {
+	return VOICE_FALLBACK_CODES.includes(code);
 }
 
 export function getVoiceProviderForLanguage(

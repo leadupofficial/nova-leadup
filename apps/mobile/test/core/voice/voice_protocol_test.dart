@@ -376,4 +376,33 @@ void main() {
       }
     });
   });
+
+  group('the picker labels a fallback voice', () {
+    test('marks exactly the languages measured as English-voiced', () {
+      final labels = {
+        for (final (code, label) in languagePolicyOptions()) code: label,
+      };
+      for (final code in ['ur', 'ne', 'bho', 'awa']) {
+        expect(labels[code], contains('basic voice'), reason: code);
+      }
+    });
+
+    test('does not mark a language a provider genuinely speaks', () {
+      final labels = {
+        for (final (code, label) in languagePolicyOptions()) code: label,
+      };
+      for (final code in ['hi', 'ta', 'te', 'kn', 'bn', 'ml', 'mr', 'gu', 'pa', 'en', 'ur']) {
+        if (code == 'ur') continue;
+        expect(labels[code], isNot(contains('basic voice')), reason: code);
+      }
+    });
+
+    test('keeps the bare name for the languages that are spoken', () {
+      final labels = {
+        for (final (code, label) in languagePolicyOptions()) code: label,
+      };
+      expect(labels['ta'], 'Tamil');
+      expect(labels['ur'], 'Urdu (basic voice)');
+    });
+  });
 }

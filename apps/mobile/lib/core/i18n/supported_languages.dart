@@ -17,12 +17,22 @@ class SupportedLanguage {
  final VoiceProvider voiceProvider;
  final SttProvider sttProvider;
 
+ /// True when no configured provider actually speaks this language, so the
+ /// reply text is right and the voice is not.
+ ///
+ /// Mirrors `voiceFallback` in `@nova/shared-types`. Measured against the live
+ /// TTS route: `ur`, `ne`, `bho` and `awa` fall through every Indic provider and
+ /// are finally read by ElevenLabs' multilingual model — an English voice. The
+ /// picker must say so rather than present them as spoken languages.
+ final bool voiceFallback;
+
  const SupportedLanguage({
  required this.code,
  required this.name,
  required this.nativeName,
  required this.voiceProvider,
  required this.sttProvider,
+ this.voiceFallback = false,
   });
 }
 
@@ -105,6 +115,7 @@ const List<SupportedLanguage> kSupportedLanguages = <SupportedLanguage>[
  nativeName: 'اردو',
  voiceProvider: VoiceProvider.sarvam,
  sttProvider: SttProvider.sarvam,
+ voiceFallback: true,
   ),
  SupportedLanguage(
  code: 'or',
@@ -140,6 +151,7 @@ const List<SupportedLanguage> kSupportedLanguages = <SupportedLanguage>[
  nativeName: 'नेपाली',
  voiceProvider: VoiceProvider.sarvam,
  sttProvider: SttProvider.sarvam,
+ voiceFallback: true,
   ),
  SupportedLanguage(
  code: 'sd',
@@ -175,6 +187,7 @@ const List<SupportedLanguage> kSupportedLanguages = <SupportedLanguage>[
  nativeName: 'भोजपुरी',
  voiceProvider: VoiceProvider.sarvam,
  sttProvider: SttProvider.sarvam,
+ voiceFallback: true,
  ),
  SupportedLanguage(
  code: 'awa',
@@ -182,6 +195,7 @@ const List<SupportedLanguage> kSupportedLanguages = <SupportedLanguage>[
  nativeName: 'अवधी',
  voiceProvider: VoiceProvider.sarvam,
  sttProvider: SttProvider.sarvam,
+ voiceFallback: true,
  ),
 ];
 
@@ -380,7 +394,15 @@ LanguageDetectionResult detectLanguage(String text) {
 /// language the user can actually pin.
 List<(String, String)> languagePolicyOptions() => <(String, String)>[
   ('auto', 'Auto (detect)'),
-  for (final language in kSupportedLanguages) (language.code, language.name),
+  for (final language in kSupportedLanguages)
+    (
+      language.code,
+      // A language whose voice is a stand-in is labelled as one. Measured
+      // against the live TTS route rather than assumed: `ur`, `ne`, `bho` and
+      // `awa` are finally read by an English voice, and a picker that lists them
+      // as plain languages misleads the person choosing.
+      language.voiceFallback ? '${language.name} (basic voice)' : language.name,
+    ),
   for (final mixed in MixedLanguageCode.values)
     (mixed.name, mixed.name[0].toUpperCase() + mixed.name.substring(1)),
 ];
