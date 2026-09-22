@@ -1949,3 +1949,64 @@ is written down rather than guessed at.
 The grant does **not** currently produce exact alarms. This is not an inference
 from code: it is 30 armed alarms with non-zero windows, against 32 exact alarms
 belonging to other apps on the same device.
+
+---
+
+## 43. Addendum — the exact-alarm experiment, run properly (2026-09-23)
+
+§42 named the experiment that would settle whether the try-exact fix works: force a
+re-arm and read *that* alarm's window. Done, and the answer is no.
+
+### The method that made it decisive
+
+`dumpsys alarm` prints each alarm's `origWhen` as epoch milliseconds. That means a
+specific reminder can be matched to its own alarm instead of reading the whole list:
+
+```
+set a reminder at a distinctive instant  ->  origWhen 1790119221000
+dumpsys alarm | grep "origWhen 1790119221000"  ->  windowLength ...
+```
+
+This removes the ambiguity that made §41 and §42 inconclusive — whether the
+reconciler had re-armed anything at all. Each probe used a *newly created* reminder,
+so its alarm can only have been armed by the build under test.
+
+### The two measurements
+
+| Build | Reminder | Alarm window |
+|---|---|---|
+| **unpatched** (probe-gated mode) | new, `origWhen 1790119221000` | **`windowLength 2109634`** (~35 min) |
+| **patched** (attempt exact, fall back on refusal) | new, `origWhen 1790119685000` | **`windowLength 2379570`** (~40 min) |
+
+**The fix changes nothing.** And no refusal was logged either — so the platform did
+not reject the exact request. The plugin was asked for `exactAllowWhileIdle` and the
+alarm still came out windowed.
+
+### What this establishes
+
+1. A freshly armed reminder on current code is **definitely inexact** —
+   `windowLength 2109634` is 35 minutes of slop on a reminder whose whole purpose is
+   a specific time. This is no longer inference from code; it is one alarm matched
+   to one reminder by its own epoch.
+2. **The permission probe is not the cause**, or at least not the only one.
+   Bypassing it entirely — asking for the exact mode unconditionally — produced the
+   same windowed alarm and no refusal. Whatever selects the windowed path happens
+   below the Dart-side mode selection.
+3. The Reminders screen's promise — *"To fire them at the exact time you set, NOVA
+   needs Android's special 'Alarms & reminders' access"* — is **not deliverable as
+   written** on this device and plugin version. The user can grant exactly what it
+   asks for and still get a 35-minute window.
+
+### Reverted again, deliberately
+
+The patch was reverted a second time. It was written to fix a false-negative probe,
+and the experiment shows the probe is not what is at fault; keeping it would leave
+scheduling code changed on a theory the evidence contradicts.
+
+### Where the next attempt should look
+
+Below the Dart layer: `flutter_local_notifications` 22.3.1 chooses between
+`setAlarmClock` and `setAndAllowWhileIdle` from the mode integer it receives. The
+question is whether the Dart enum being sent for `exactAllowWhileIdle` maps to the
+value that Java branch expects — a mismatch there would explain both symptoms: no
+exception, and a windowed alarm.
