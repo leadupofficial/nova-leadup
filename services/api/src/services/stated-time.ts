@@ -48,6 +48,85 @@ const NOT_AN_HOUR =
 const HOUR_WORDS = 'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve';
 
 /**
+ * The word for "o'clock" in the Indian languages NOVA can actually transcribe.
+ *
+ * This list is load-bearing, not decoration. Sarvam returns a Hindi turn as
+ * "कल सुबह 8 बजे का रिमाइंडर लगा दो", and while "बजे" was absent the hour was
+ * invisible to `statedTimeIn`: the user *had* named a time, the guard read the
+ * turn as naming none, and it refused the model's correct `trigger_at` as an
+ * invention. Measured on a real handset on 2026-09-22, `create_reminder` failed
+ * on every Hindi, Telugu, Kannada and Bengali turn for exactly this reason —
+ * three times each, to the iteration cap — while Tamil succeeded. A guard that
+ * reads only English and Tamil does not protect other-language users from
+ * invented times; it stops them setting reminders at all, and the reminder they
+ * asked for is the one thing they came for.
+ */
+const CLOCK_MARKERS_INDIC = [
+	// Hindi / Urdu
+	'बजे', 'बजकर', 'بجے',
+	// Bengali / Assamese
+	'টায়', 'টার', 'টা', 'বজে', 'বাজে',
+	// Tamil
+	'மணிக்கு', 'மணி',
+	// Telugu
+	'గంటలకు', 'గంటకు', 'గంటలకి',
+	// Kannada
+	'ಗಂಟೆಗೆ', 'ಗಂಟೆಗೂ', 'ಗಂಟೆ',
+	// Malayalam
+	'മണിക്ക്', 'മണി',
+	// Marathi
+	'वाजता', 'वाजून',
+	// Gujarati
+	'વાગ્યે', 'વાગ્યા',
+	// Punjabi
+	'ਵਜੇ', 'ਵਜਕੇ',
+	// Odia
+	'ଟାରେ', 'ଟା',
+];
+
+/** The same marker in Latin script, which is how Hinglish/Tanglish is typed. */
+const CLOCK_MARKERS_LATIN = [
+	'baje', 'bajey', 'bajkar', 'vaje', 'vagye', 'vajata', 'manikku', 'mani',
+];
+
+/**
+ * A part of the day, in the same languages.
+ *
+ * English and the Latin transliterations are separated from the Indic scripts
+ * because the ASCII half wants `\b` and the other half must not have it: `\b` is
+ * defined over ASCII word characters, so it anchors on nothing inside Devanagari
+ * or Tamil and would quietly disable the whole alternation.
+ */
+const PART_OF_DAY_ASCII = [
+	'morning', 'afternoon', 'evening', 'night', 'tonight',
+	'subah', 'dopahar', 'shaam', 'sham', 'raat', 'raathiri', 'rathiri',
+	'kaalai', 'maalai', 'iravu', 'madhiyam',
+];
+
+const PART_OF_DAY_INDIC = [
+	// Hindi / Urdu
+	'सुबह', 'दोपहर', 'शाम', 'रात', 'صبح', 'شام', 'رات',
+	// Bengali / Assamese
+	'সকাল', 'দুপুর', 'বিকাল', 'বিকেল', 'সন্ধ্যা', 'রাত',
+	// Tamil
+	'காலை', 'மாலை', 'இரவு', 'மதியம்', 'அதிகாலை', 'நண்பகல்',
+	// Telugu
+	'ఉదయం', 'మధ్యాహ్నం', 'సాయంత్రం', 'రాత్రి',
+	// Kannada
+	'ಬೆಳಿಗ್ಗೆ', 'ಮಧ್ಯಾಹ್ನ', 'ಸಂಜೆ', 'ರಾತ್ರಿ',
+	// Malayalam
+	'രാവിലെ', 'ഉച്ചയ്ക്ക്', 'വൈകുന്നേരം', 'രാത്രി',
+	// Marathi
+	'सकाळ', 'दुपार', 'संध्याकाळ', 'रात्र', 'पहाट',
+	// Gujarati
+	'સવારે', 'બપોરે', 'સાંજે', 'રાત્રે',
+	// Punjabi
+	'ਸਵੇਰੇ', 'ਦੁਪਹਿਰ', 'ਸ਼ਾਮ', 'ਰਾਤ',
+	// Odia
+	'ସକାଳ', 'ଅପରାହ୍ନ', 'ସନ୍ଧ୍ୟା', 'ରାତି',
+];
+
+/**
  * The ways a turn states a clock time. Group 1 is the evidence, so a refusal can
  * quote it.
  *
@@ -70,6 +149,24 @@ const CLOCK_TIME_PATTERNS: RegExp[] = [
 	/((?:\d{1,2}|ஒரு|இரண்டு|ரெண்டு|மூன்று|மூணு|நான்கு|நாலு|ஐந்து|அஞ்சு|ஆறு|ஏழு|எட்டு|ஒன்பது|ஒம்பது|பத்து|பதினொரு|பன்னிரண்டு)\s*மணி[\p{L}\p{M}]*)/u,
 	// Tanglish: "9 manikku", "7 mani".
 	/\b(\d{1,2}\s*mani(?:kku|ku)?)\b/i,
+	// Every other Indian language's "o'clock": an hour — a digit, or a number
+	// word such as Telugu "ఎనిమిది" — followed by that language's marker. No
+	// `\b`, for the reason given on the Tamil pattern above. The hour may be a
+	// word rather than a digit because Sarvam returns "ఎనిమిది గంటలకు" for
+	// "eight o'clock" and "8 ಗಂಟೆಗೆ" for the same thing in Kannada.
+	new RegExp(
+		`((?:\\d{1,2}|[\\p{L}\\p{M}]{2,})\\s*(?:${CLOCK_MARKERS_INDIC.join('|')}))`,
+		'u',
+	),
+	// The same markers typed in Latin script — "8 baje", "saat vaje".
+	new RegExp(
+		`\\b((?:\\d{1,2}|${HOUR_WORDS})\\s*(?:${CLOCK_MARKERS_LATIN.join('|')}))\\b`,
+		'i',
+	),
+	// Tamil writes the English word phonetically, so a Tamil transcript of
+	// "eight o'clock" arrives as "8 ஓ கிளாக்" and matches neither "மணி" nor
+	// "manikku". Refusing that turn is refusing a time the user did state.
+	/((?:\d{1,2}|[\p{L}\p{M}]{2,})\s*(?:ஓ\s*கிளாக்|ஓ['’]?\s*க்ளாக்|ஓ\s*க்ளாக்))/u,
 	// A bare hour anchored by a time preposition — "at 6", "by 7", "around 8" —
 	// which is how "remind me at 7" is actually spoken. The lookahead is what
 	// keeps "at 3 days" a duration and "add 2 tasks" a count.
@@ -88,11 +185,9 @@ const CLOCK_TIME_PATTERNS: RegExp[] = [
  * of these is as invented as an hour supplied against a bare day.
  */
 const PART_OF_DAY_PATTERNS: RegExp[] = [
-	/\b(morning|afternoon|evening|night|tonight)\b/i,
-	// Tamil, again without `\b` for the reasons above.
-	/(காலை|மாலை|இரவு|மதியம்|அதிகாலை)/u,
-	// The same in Latin script, which is how Tanglish is typed.
-	/\b(kaalai|maalai|iravu|raathiri|rathiri|madhiyam)\b/i,
+	new RegExp(`\\b(${PART_OF_DAY_ASCII.join('|')})\\b`, 'i'),
+	// Every other language's part of the day, again without `\b`.
+	new RegExp(`(${PART_OF_DAY_INDIC.join('|')})`, 'u'),
 ];
 
 /** The evidence of the first pattern that matches, or null. */

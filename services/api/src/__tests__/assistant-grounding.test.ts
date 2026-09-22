@@ -131,6 +131,18 @@ describe('claimsStateChange — narration that reads as a completed action', () 
 		'Set pannitten, naalai kaalai.',
 		'Andha reminder-ai evening ku maathiten.',
 		'Task ah complete panniten.',
+		// The completive stems the list above did not cover, measured on a real
+		// handset on 2026-09-22: asked in Tanglish for a reminder, the model
+		// called no tool and answered "நாளைக்கு மார்னிங் 8 ஓ க்ளாக்குக்கு
+		// ரிமைண்டர் வெச்சுடுச்சு" — "the reminder is set" — and every pattern
+		// needed a different suffix, so the guard saw no claim and the false
+		// confirmation reached the user with the reminder list unchanged.
+		'நாளைக்கு மார்னிங் 8 ஓ க்ளாக்குக்கு ரிமைண்டர் வெச்சுடுச்சு.',
+		'செஞ்சுடுச்சு.',
+		'அந்த task-ஐ முடிச்சுட்டேன்.',
+		'ரிமைண்டர் சேர்த்துடுச்சு.',
+		'Reminder vechuduchu.',
+		'Andha task ah senjuduchu.',
 	])('flags the Tamil/Tanglish completed action %j', (text) => {
 		expect(claimsStateChange(text)).toBe(true);
 	});
@@ -144,6 +156,11 @@ describe('claimsStateChange — narration that reads as a completed action', () 
 		'Plumber reminder இன்னைக்கு இரவு எட்டு மணிக்கு இருக்கு.',
 		'என்ன pending இருக்கு?',
 		'Evening-க்கு எந்த time-ல remind பண்ணனும்?',
+		// Guards against the widening above over-reaching: a completive stem is
+		// required, and "இருக்கு" (is) is not one.
+		'நாளைக்கு reminder இருக்கு.',
+		'Naalai reminder irukku.',
+		'காலை 8 மணிக்கு reminder வைக்கணுமா?',
 	])('does not flag the Tamil state description %j', (text) => {
 		expect(claimsStateChange(text)).toBe(false);
 	});

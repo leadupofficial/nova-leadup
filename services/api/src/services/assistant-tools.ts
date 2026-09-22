@@ -716,6 +716,20 @@ const STATE_CHANGE_CLAIM_PATTERNS: RegExp[] = [
 	// "nothing has been changed" would be the guard lying in the other direction.
 	// `இருக்கு` (is) and the other copulas are therefore absent.
 	/(?:ி|ு)ட்டேன்|(?:ி|ு)ட்டே(?![\u0B80-\u0BFF])|(?:ஆ|ா)யிடுச்சு|(?:ஆ|ா)ச்சு|விட்டது|முடிஞ்சுடுச்சு|முடிந்தது/,
+	// The same completed aspect carried on the "-ச்சு / -ட்டு / -ஞ்சு" stems,
+	// which is how "set it" and "did it" are actually spoken: வெச்சுடுச்சு
+	// ("I've put it down"), செஞ்சுடுச்சு ("I've done it"), சேர்த்துடுச்சு ("I've
+	// added it"), வச்சுட்டேன் ("I've kept it"). Measured on a real handset on
+	// 2026-09-22: asked in Tanglish to set a reminder, the model called no tool
+	// and answered "…ரிமைண்டர் வெச்சுடுச்சு" — "the reminder is set" — and the
+	// guard read it as no claim at all, because every alternative above needs a
+	// different suffix, so the false confirmation went out verbatim and the
+	// reminder list was unchanged. The stems are listed rather than the suffixes
+	// alone so that a present-tense statement about state, which has no
+	// completive stem, still does not match.
+	/(?:ச்சு|ட்டு|ஞ்சு|த்து|ந்து|ண்டு)(?:டுச்சு|ட்டேன்|ட்டா)/,
+	// The same in Latin script, which is how Tanglish is typed.
+	/\b(?:vech(?:u|i)?d?uch(?:u|a)?|vaich(?:u)?d?uch(?:u|a)?|senj(?:u)?d?uch(?:u|a)?|serth(?:u)?d?uch(?:u|a)?|pann(?:i)?yach(?:u)?|maath(?:i)?yach(?:u)?)\b/i,
 	// The same completed aspect written in Latin script, which is how Tanglish is
 	// actually typed and how the STT returns it most of the time.
 	/\b(?:pann?i(?:tt|t)(?:en|an|om|aan|een)|pannitten|panniten|pannitaen|maath?i(?:tt|t)(?:en|an|een)|maathiten|vech(?:i)?rukk?(?:en|an)|aayid(?:u)?ch(?:u|i)|aayiduchu|mudinjuduchu|mudinjiduchu|mudinjiruchu)\b/i,

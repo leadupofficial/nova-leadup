@@ -107,6 +107,25 @@ describe('statedTimeIn — a clock time the user actually stated', () => {
 		'by 7',
 		'noon',
 		'midnight',
+		// Every Indian language NOVA can transcribe, not just Tamil. Measured on
+		// a real handset: with only the Tamil patterns present, `create_reminder`
+		// failed on every Hindi, Telugu, Kannada and Bengali turn — the user had
+		// named an hour, the guard read the turn as naming none, and it refused
+		// the model's correct answer as an invention, three times, to the cap.
+		'कल सुबह 8 बजे का रिमाइंडर लगा दो',
+		'రేపు ఉదయం ఎనిమిది గంటలకు రిమైండర్ పెట్టు',
+		'ನಾಳೆ ಬೆಳಿಗ್ಗೆ 8 ಗಂಟೆಗೆ ರಿಮೈಂಡರ್ ಹಾಕು',
+		'আগামীকাল সকাল আটটায় একটা রিমাইন্ডার সেট করো',
+		'उद्या सकाळी 8 वाजता रिमाइंडर लाव',
+		'നാളെ രാവിലെ 8 മണിക്ക് ഒരു റിമൈൻഡർ വെക്കൂ',
+		'કાલે સવારે 8 વાગ્યે રિમાઇન્ડર મૂકો',
+		'ਕੱਲ੍ਹ ਸਵੇਰੇ 8 ਵਜੇ ਰਿਮਾਈਂਡਰ ਲਗਾਓ',
+		'ଆସନ୍ତାକାଲି ସକାଳ 8 ଟାରେ ରିମାଇଣ୍ଡର',
+		// Tamil writing the English word phonetically, which is what Sarvam
+		// returns for a Tanglish "eight o'clock".
+		'நாளைக்கு மார்னிங் 8 ஓ கிளாக் ஒரு ரிமைண்டர்',
+		// Hinglish, typed the way a person types it.
+		'Kal subah 8 baje ka reminder lagao',
 	])('reads %j as a clock time', (turn) => {
 		expect(statedTimeIn(turn).kind).toBe('clock_time');
 	});
@@ -126,6 +145,15 @@ describe('statedTimeIn — a part of the day, which is not an hour', () => {
 		'நாளைக்கு காலை',
 		'நாளை மாலை',
 		'naalai kaalai',
+		// The same part of the day in the other languages Sarvam transcribes.
+		'कल सुबह',
+		'రేపు ఉదయం',
+		'ನಾಳೆ ಬೆಳಿಗ್ಗೆ',
+		'আগামীকাল সকাল',
+		'നാളെ രാവിലെ',
+		'उद्या सकाळी',
+		'કાલે સવારે',
+		'kal subah',
 	])('reads %j as a part of the day', (turn) => {
 		expect(statedTimeIn(turn).kind).toBe('part_of_day');
 	});
@@ -154,6 +182,12 @@ describe('statedTimeIn — numbers that are not times', () => {
 		// A phone number has no hour in it.
 		'call 9876543210',
 		'call +91 98765 43210',
+		// The guard has to keep refusing in the new scripts too, or widening it
+		// would just have replaced one failure with the other: a day and a task,
+		// still no hour.
+		'कल वेबसाइट प्रोपोजल पूरा करना है',
+		'రేపు వెబ్‌సైట్ ప్రపోజల్ పూర్తి చేయాలి',
+		'ನಾಳೆ ವೆಬ್‌ಸೈಟ್ ಪ್ರಸ್ತಾವನೆ ಮುಗಿಸಬೇಕು',
 	])('reads %j as no stated time', (turn) => {
 		expect(statedTimeIn(turn).kind).toBe('none');
 	});

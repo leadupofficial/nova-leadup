@@ -177,10 +177,29 @@ export function getLanguageByCode(code: string): SupportedLanguage | undefined {
 	return SUPPORTED_LANGUAGES.find((l) => l.code === code);
 }
 
+/**
+ * Every code-mixed variety NOVA declares.
+ *
+ * All four are the same problem for provider routing, so they are handled
+ * together rather than one at a time. A mixed turn is *mostly* an Indian
+ * language carrying English loanwords, and the only provider here that
+ * transcribes that is Sarvam. Routing Hinglish to Deepgram — which is what
+ * happened while only `tanglish` was special-cased — sends a Hindi sentence to
+ * an English-only recogniser: measured on a real handset on 2026-09-22,
+ * "Kal subah aath baje ka reminder laga do yaar" came back as "Reminder lag",
+ * with three quarters of the sentence gone. ElevenLabs would voice the reply
+ * with an English speaker for the same reason, so the pair is fixed together.
+ */
+export const MIXED_LANGUAGE_CODES = ['hinglish', 'tanglish', 'benglish', 'gujlish'] as const;
+
+function isMixedLanguage(language: string): language is MixedLanguageCode {
+	return (MIXED_LANGUAGE_CODES as readonly string[]).includes(language);
+}
+
 export function getVoiceProviderForLanguage(
 	language: LanguageCode | MixedLanguageCode,
 ): SupportedLanguage['voiceProvider'] {
-	if (language === 'tanglish') return 'sarvam';
+	if (isMixedLanguage(language)) return 'sarvam';
 	const lang = SUPPORTED_LANGUAGES.find((l) => l.code === language);
 	return lang?.voiceProvider ?? 'elevenlabs';
 }
@@ -188,7 +207,7 @@ export function getVoiceProviderForLanguage(
 export function getSttProviderForLanguage(
 	language: LanguageCode | MixedLanguageCode,
 ): SupportedLanguage['sttProvider'] {
-	if (language === 'tanglish') return 'sarvam';
+	if (isMixedLanguage(language)) return 'sarvam';
 	const lang = SUPPORTED_LANGUAGES.find((l) => l.code === language);
 	return lang?.sttProvider ?? 'deepgram';
 }
