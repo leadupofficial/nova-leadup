@@ -853,3 +853,38 @@ subah mera kya schedule hai"*. The assistant recovered the meaning and answered
 correctly, so the outcome is right, but the words are not. Recognising romanised
 Hindi spoken by an English voice is a genuinely hard case and this is recorded as a
 **quality** limitation, not a pass.
+
+## 22. Tamil on the handset, and the previous round's fix holding (2026-09-23)
+
+§21 fixed the pinned language never reaching the microphone. This round verifies that
+fix on a **second** language and completes the Tamil loop on the physical phone.
+
+### The prompt was real Tamil speech from a real provider
+
+macOS has no Tamil voice installed, so the "human" was the app's own TTS: Sarvam
+synthesised *"நாளை எனக்கு என்ன வேலை இருக்கு?"* and the MacBook played it at the
+phone's microphone with `afplay`. (Sarvam returns **WAV** regardless of the `.mp3`
+name the code implies — `afplay` refused it until it was converted.)
+
+### What the session did
+
+| Check | Evidence |
+|---|---|
+| The pinned language reached the microphone | server log: **`"language":"ta"`** — the same log said `auto` before §21 |
+| The transcript | **`நாளை எனக்கு என்ன வேலை இருக்கு?`** — **exact**, word for word |
+| The reply | Tamil, in Tamil script, **grounded**: *"5 மணிக்கு மருந்து கடை ஆர்டர் எடுக்க வேண்டும்… 5 மணிக்கு வங்கிக்கு போன் செய்ய வேண்டும்… 5 மணிக்கு பல்லியல் மருத்துவரை கால் செய்ய வேண்டும்… 6 மணிக்கு பால் வாங்க வேண்டும். நிறைய இருக்கு தான்! வேற ஏதாவது உதவி வேண்டுமா?"* |
+| The register | colloquial — *"நிறைய இருக்கு தான்!"* — not textbook Tamil |
+| The return path | MacBook's mic: floor ~133, peak **1618**, **17.8 s** of speech |
+
+The pharmacy order, the bank call, the dentist and the milk are this account's real
+reminders, so the answer is grounded rather than plausible.
+
+### A correction about my own method
+
+My first Tamil run showed a **truncated reply** — one line, cut mid-word: *"நாளை
+(வியாழன் 24 செப்"*. I had tapped **Stop** while NOVA was still speaking, and the
+MacBook's recording confirms it: **2 s** of phone audio in that run against **17.8 s**
+in the uninterrupted one. The truncation was mine, not the product's, and the second
+run — which let the VAD end the turn — produced the complete answer above.
+
+Recorded because a single interrupted run would have been reported as a defect.
