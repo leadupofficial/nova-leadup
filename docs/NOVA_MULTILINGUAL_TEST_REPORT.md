@@ -499,3 +499,44 @@ an unsupported code rather than ignoring it:
    cost reduction, and it is an email rather than an engineering task.
 2. **Bhojpuri and Awadhi have no path through any configured provider.** They should
    either be sourced from a provider that has them, or offered as text-only.
+
+## 15. The label now matches the evidence, per language (2026-09-23)
+
+§13 fixed the voice for Urdu and Nepali, which made the picker's **"(basic voice)"**
+label out of date for `ur`. Removing it for both would have over-claimed, because
+the two languages do not have the same evidence behind them.
+
+| Language | Model declares it | Audio verified by STT | Label |
+|---|---|---|---|
+| Urdu `ur` | ✓ `eleven_v3` | ✓ intelligible transcript | **"Urdu"** — label removed |
+| Nepali `ne` | ✓ `eleven_v3` | **✗ no STT could transcribe it** | **"Nepali (basic voice)"** — kept |
+| Bhojpuri `bho` | ✗ neither model | — | "(basic voice)" — kept |
+| Awadhi `awa` | ✗ neither model | — | "(basic voice)" — kept |
+
+The Nepali audio was produced and the API accepted the code, but **no available
+speech recogniser could read it back**: Deepgram returned an empty transcript
+through `detect_language`, and Sarvam's `saarika:v2.5` rejects the language outright:
+
+```
+400  "Language 'ne-IN' is not supported by saarika:v2.5 model."
+```
+
+With no way to hear the result, the label stays. It is the same rule the label was
+introduced under — do not present a voice as speaking a language until it has been
+shown to.
+
+### Verified on the handset
+
+The speech-style picker now reads **"Urdu"** with no suffix, while **"Nepali (basic
+voice)"**, **"Bhojpuri (basic voice)"** and **"Awadhi (basic voice)"** are unchanged.
+
+### Two more catalogue claims that do not match the providers
+
+Found while checking this, and recorded rather than silently left:
+
+- **`sttProvider: 'sarvam'` for `ur` and `ne` is wrong.** Sarvam's STT model refuses
+  both languages, so both silently fall back to Deepgram. This is not aspirational —
+  it is a different model (`saarika:v2.5`) that has no such language.
+- **`voiceProvider: 'sarvam'` for `ur` and `ne` is aspirational.** It would be right
+  if the operator obtains the beta access from §14; today the call fails every time
+  before ElevenLabs serves it.
