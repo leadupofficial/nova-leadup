@@ -382,9 +382,14 @@ void main() {
       final labels = {
         for (final (code, label) in languagePolicyOptions()) code: label,
       };
-      for (final code in ['ur', 'ne', 'bho', 'awa']) {
+      // `ur` left this set on 2026-09-23: `eleven_v3` declares Urdu and the audio
+      // round-tripped through Deepgram intelligibly where Flash had mangled a word
+      // into nonsense. `ne` stays — v3 declares Nepali, but no available STT could
+      // transcribe the result, so it is not yet verified.
+      for (final code in ['ne', 'bho', 'awa']) {
         expect(labels[code], contains('basic voice'), reason: code);
       }
+      expect(labels['ur'], isNot(contains('basic voice')));
     });
 
     test('does not mark a language a provider genuinely speaks', () {
@@ -392,7 +397,6 @@ void main() {
         for (final (code, label) in languagePolicyOptions()) code: label,
       };
       for (final code in ['hi', 'ta', 'te', 'kn', 'bn', 'ml', 'mr', 'gu', 'pa', 'en', 'ur']) {
-        if (code == 'ur') continue;
         expect(labels[code], isNot(contains('basic voice')), reason: code);
       }
     });
@@ -402,7 +406,7 @@ void main() {
         for (final (code, label) in languagePolicyOptions()) code: label,
       };
       expect(labels['ta'], 'Tamil');
-      expect(labels['ur'], 'Urdu (basic voice)');
+      expect(labels['ur'], 'Urdu');
     });
   });
 }

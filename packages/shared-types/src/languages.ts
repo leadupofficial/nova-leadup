@@ -38,7 +38,7 @@ export const SUPPORTED_LANGUAGES: readonly SupportedLanguage[] = [
 	{ code: 'bn', name: 'Bengali', native: 'বাংলা', voiceProvider: 'sarvam', sttProvider: 'sarvam' },
 	{ code: 'gu', name: 'Gujarati', native: 'ગુજરાતી', voiceProvider: 'sarvam', sttProvider: 'sarvam' },
 	{ code: 'pa', name: 'Punjabi', native: 'ਪੰਜਾਬੀ', voiceProvider: 'sarvam', sttProvider: 'sarvam' },
-	{ code: 'ur', name: 'Urdu', native: 'اردو', voiceProvider: 'sarvam', sttProvider: 'sarvam' , voiceFallback: true },
+	{ code: 'ur', name: 'Urdu', native: 'اردو', voiceProvider: 'sarvam', sttProvider: 'sarvam' },
 	{ code: 'or', name: 'Odia', native: 'ଓଡ଼ିଆ', voiceProvider: 'sarvam', sttProvider: 'sarvam' },
 	{ code: 'as', name: 'Assamese', native: 'অসমীয়া', voiceProvider: 'google', sttProvider: 'google' },
 	{ code: 'mai', name: 'Maithili', native: 'मैथिली', voiceProvider: 'google', sttProvider: 'google' },

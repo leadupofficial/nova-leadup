@@ -115,7 +115,6 @@ const List<SupportedLanguage> kSupportedLanguages = <SupportedLanguage>[
  nativeName: 'اردو',
  voiceProvider: VoiceProvider.sarvam,
  sttProvider: SttProvider.sarvam,
- voiceFallback: true,
   ),
  SupportedLanguage(
  code: 'or',

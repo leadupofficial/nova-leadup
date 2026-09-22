@@ -27,7 +27,7 @@ import { SUPPORTED_LANGUAGES, VOICE_FALLBACK_CODES, isVoiceFallback } from '@nov
 
 describe('languages whose voice is a fallback', () => {
 	it('flags exactly the languages measured as English-voiced', () => {
-		expect([...VOICE_FALLBACK_CODES].sort()).toEqual(['awa', 'bho', 'ne', 'ur']);
+		expect([...VOICE_FALLBACK_CODES].sort()).toEqual(['awa', 'bho', 'ne']);
 	});
 
 	it('does not flag a language that a provider genuinely serves', () => {
