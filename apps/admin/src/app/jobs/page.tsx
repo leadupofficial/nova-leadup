@@ -18,6 +18,7 @@
 import { getOperations } from '../../lib/api';
 import { loadPage } from '../../lib/page-data';
 import { ListView, positiveInt, shortId, singleParam, type Column } from '../../components/operations-list';
+import { retryJobAction } from './actions';
 import { Card, Notes, StatusBadge, formatDateTime, formatDuration, formatNumber, formatRelative } from '../../components/ui';
 
 export const dynamic = 'force-dynamic';
@@ -169,7 +170,34 @@ export default async function JobsPage({
 				),
 		},
 		{ header: 'Started', render: (row) => <span style={{ fontSize: '0.78rem' }}>{formatDateTime(row.started_at ?? row.created_at)}</span> },
+		{
+			header: 'Retry',
+			render: (row) =>
+				// Only the states the queue will actually accept. Offering it on a running job would
+				// produce a refusal the operator cannot act on, and the API refuses for a reason:
+				// waiting for a job to finish is not a retry.
+				['failed', 'dead_letter', 'cancelled'].includes(row.status) ? (
+					<form action={retryJobAction}>
+						<input type="hidden" name="id" value={row.id} />
+						<button type="submit" style={retryButton}>
+							Requeue
+						</button>
+					</form>
+				) : (
+					<span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>—</span>
+				),
+		},
 	];
+
+	const retryButton: React.CSSProperties = {
+		fontSize: '0.72rem',
+		padding: '0.25rem 0.5rem',
+		borderRadius: '4px',
+		border: '1px solid #c7d2fe',
+		background: '#eef2ff',
+		color: '#4338ca',
+		cursor: 'pointer',
+	};
 
 	const scheduledCards = (
 		<Card

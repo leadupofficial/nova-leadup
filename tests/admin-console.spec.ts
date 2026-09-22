@@ -27,6 +27,7 @@
 import { execFileSync } from 'node:child_process';
 import { test, expect, type Page } from '@playwright/test';
 import { NAV_GROUPS } from '../apps/admin/src/lib/nav';
+import { describeLoadError } from '../apps/admin/src/lib/page-data';
 
 const BASE = process.env.ADMIN_BASE_URL ?? 'http://127.0.0.1:3000';
 // The API is called directly by a few tests that need to put the system into a specific state — a
@@ -62,6 +63,26 @@ const FAILURE_MARKERS = [
 	'Unhandled Runtime Error',
 	'This page could not be found',
 	'Internal Server Error',
+
+	/**
+	 * The console's own load-failure text, from `describeLoadError` in `apps/admin/src/lib/page-data.ts`.
+	 *
+	 * These were missing, and their absence let a completely broken page pass. `GET /control/memory`
+	 * answered **500 on every request in production**, and the memory page rendered its `<h1>` plus the
+	 * "The admin API reported an internal error." card — which none of the markers above match, so the
+	 * sweep reported the destination as healthy. A page that failed to load its data is not "rendered
+	 * real content", whatever its heading says, so the sweep now treats the console's own failure copy
+	 * as a failure.
+	 */
+	'The admin API reported an internal error',
+	'Your session has expired',
+	'Your account does not have permission to view this page',
+	'The admin API does not expose this endpoint',
+	'Too many requests',
+	'The admin API could not be reached',
+	'The admin API is not ready',
+	// And the generic variants the shared list component uses.
+	'Could not reach the admin API',
 ];
 
 async function seedSession(page: Page): Promise<void> {
@@ -78,6 +99,27 @@ async function seedSession(page: Page): Promise<void> {
 		}
 	}, TOKEN);
 }
+
+/**
+ * Keeps `FAILURE_MARKERS` honest.
+ *
+ * The markers are string literals; the error cards are string literals in another file. When the
+ * memory endpoint answered 500 on every request, the page rendered its own failure copy and the
+ * sweep passed it. Widening the markers fixed that instance; this test stops the same drift
+ * recurring, by deriving the copy from the function that produces it and failing if no marker
+ * matches. Reword the card without updating the sweep and this test says so, instead of the sweep
+ * quietly going blind.
+ */
+test('the sweep recognises every load-failure card the console can render', async () => {
+	for (const status of [401, 403, 404, 429, 500, 502, 503]) {
+		const { message } = describeLoadError({ status });
+		expect(
+			FAILURE_MARKERS.some((marker) => message.includes(marker)),
+			`no FAILURE_MARKER matches the ${status} card (${JSON.stringify(message)}), so a page ` +
+				'rendering it would be reported as passing',
+		).toBe(true);
+	}
+});
 
 test.describe('Admin Control Center — destinations render', () => {
 	test.skip(TOKEN === '', 'ADMIN_TOKEN is required; mint one with services/api/scripts/mint-dev-admin-token.mjs');

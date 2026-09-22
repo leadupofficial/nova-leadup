@@ -1570,6 +1570,23 @@ export async function updateTask(
 	);
 }
 
+/**
+ * `POST /control/jobs/:id/retry` — requeue a failed job.
+ *
+ * The route has existed with `jobs.manage`, a refusal for a job that is still in flight, and an
+ * audit record, and the console never called it: a failed background job could only be retried by
+ * hand against the database. It refuses a `queued` or `running` job on purpose — waiting for one to
+ * finish is not a retry, it is a duplicate.
+ */
+export async function retryJob(id: string): Promise<{ id?: string; jobName?: string; status?: string; attempt?: number; maxAttempts?: number; note?: string }> {
+	return unwrap<{ id?: string; jobName?: string; status?: string; attempt?: number; maxAttempts?: number; note?: string }>(
+		await request<unknown>(`/control/jobs/${encodeURIComponent(id)}/retry`, {
+			method: 'POST',
+			body: JSON.stringify({ reason: 'retried from the Control Center' }),
+		}),
+	);
+}
+
 /** `PATCH /control/reminders/:id` */
 export async function updateReminder(
 	id: string,
