@@ -379,3 +379,59 @@ the only version of this test that means anything.
 ### Test data
 
 Every task created across these runs was deleted — verified: **0** remaining.
+
+## 13. Urdu and Nepali now speak Urdu and Nepali (2026-09-23)
+
+The four languages listed as spoken by an English voice are down to two. The cause
+was not the permission, the voice id, or the routing metadata — it was the model.
+
+### What was wrong
+
+`synthesizeSpeech` hardcoded `eleven_flash_v2_5` and sent **no `language_code`**, so
+the model auto-detected the language from the text and, given Urdu script, read it
+as English phonetics. The account's own `/v1/models` says why:
+
+| Model | Languages | `ur` | `ne` |
+|---|---|---|---|
+| `eleven_flash_v2_5` (was hardcoded) | 32 | ✗ | ✗ |
+| `eleven_v3` | 74 | **✓** | **✓** |
+
+Flash does not merely lack the voice — it **rejects the language code**:
+
+```
+{"message":"Model 'eleven_flash_v2_5' does not support language_code 'ur'."}
+```
+
+### The fix
+
+Only languages Flash has no voice for are routed to `eleven_v3` **with**
+`language_code`. The 32 it already serves keep it, because v3 is the costlier model
+and those languages were verified working; a test pins both halves, since a table
+that grew by accident would raise the bill silently.
+
+### Evidence
+
+Round-tripped through Deepgram `detect_language`, same Urdu sentence:
+
+| | Transcript |
+|---|---|
+| before | कल सुबह **ten** बजे कल **आईंड** को call करें — *کلائنٹ* mangled into nonsense |
+| **after** | कल सुबह **ten** बजे **client** को call करें — the word is intelligible |
+
+And the audio the route serves is **byte-identical to a direct `eleven_v3` call** —
+36 824 bytes, against Flash's 39 750 — so the route is genuinely using v3, not
+merely claiming to.
+
+### What is left
+
+**Bhojpuri `bho` and Awadhi `awa` are in neither model.** They stay as they are:
+still spoken by a voice that is not theirs, still labelled "(basic voice)" in the
+picker. Kashmiri `ks` remains on the Sarvam fallback, whose Indic voice does read
+it, so it was never in this group.
+
+### A follow-up this creates
+
+The picker still labels Urdu and Nepali **"(basic voice)"**. That label was honest
+when it was added and is now inaccurate for these two. It is left in place until a
+listening check confirms the improvement by ear — an STT round-trip shows the
+mangled word is fixed, not that the prosody is good.
