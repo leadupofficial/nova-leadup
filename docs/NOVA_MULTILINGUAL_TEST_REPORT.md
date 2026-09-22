@@ -435,3 +435,67 @@ The picker still labels Urdu and Nepali **"(basic voice)"**. That label was hone
 when it was added and is now inaccurate for these two. It is left in place until a
 listening check confirms the improvement by ear — an STT round-trip shows the
 mangled word is fixed, not that the prosody is good.
+
+## 14. Why the chain falls through, in the providers' own words (2026-09-23)
+
+The four "English-voiced" languages were never a routing mistake in NOVA. Asking
+each configured provider directly, rather than inferring from the app's behaviour,
+gives the answer in their own error messages.
+
+### Sarvam `bulbul:v3` — 23 languages, three of them gated
+
+`target_language_code` is validated against a fixed list, and the list is printed
+back on a rejection:
+
+```
+Input should be 'as-IN', 'bn-IN', 'brx-IN', 'doi-IN', 'en-IN', 'gu-IN', 'hi-IN',
+'kn-IN', 'kok-IN', 'ks-IN', 'mai-IN', 'ml-IN', 'mni-IN', 'mr-IN', 'ne-IN',
+'od-IN', 'pa-IN', 'sa-IN', 'sat-IN', 'sd-IN', 'ta-IN', 'te-IN' or 'ur-IN'
+```
+
+`ur-IN`, `ne-IN` and `ks-IN` are **in that list and still refused**:
+
+```
+400  "Please request beta access to ur-IN by contacting our support team."
+400  "Please request beta access to ne-IN by contacting our support team."
+400  "Please request beta access to ks-IN by contacting our support team."
+```
+
+So the app's Sarvam-primary call fails for Urdu and Nepali not because the code is
+wrong but because **this account has no access to them**. That is the whole reason
+an ElevenLabs fallback ever served them — and it retroactively confirms the §13
+routing: with Sarvam unavailable, `eleven_v3` was the only voice either of them
+could get.
+
+**`bho-IN` and `awa-IN` are not in the list at all.** They are not gated; they do
+not exist.
+
+### ElevenLabs — 32 languages on Flash, 74 on v3, neither has Bhojpuri or Awadhi
+
+The account's `/v1/models` reports both models' language sets, and the API rejects
+an unsupported code rather than ignoring it:
+
+```
+"Model 'eleven_flash_v2_5' does not support language_code 'ur'."
+```
+
+`bho` and `awa` are absent from both.
+
+### What that means for the four languages
+
+| Language | Sarvam bulbul:v3 | ElevenLabs Flash | ElevenLabs v3 | Outcome |
+|---|---|---|---|---|
+| Urdu `ur` | beta-gated | ✗ | **✓** | **spoken correctly** (§13) |
+| Nepali `ne` | beta-gated | ✗ | **✓** | **spoken correctly** (§13) |
+| Kashmiri `ks` | beta-gated | ✗ | ✗ | still on the Sarvam fallback voice |
+| Bhojpuri `bho` | **not offered** | ✗ | ✗ | **no voice anywhere** |
+| Awadhi `awa` | **not offered** | ✗ | ✗ | **no voice anywhere** |
+
+### The two operator actions this identifies
+
+1. **Request beta access to `ur-IN`, `ne-IN` and `ks-IN` from Sarvam.** Those are
+   *native Indic* voices for three languages, two of which currently depend on
+   ElevenLabs' generic multilingual model. This is a quality upgrade and probably a
+   cost reduction, and it is an email rather than an engineering task.
+2. **Bhojpuri and Awadhi have no path through any configured provider.** They should
+   either be sourced from a provider that has them, or offered as text-only.
