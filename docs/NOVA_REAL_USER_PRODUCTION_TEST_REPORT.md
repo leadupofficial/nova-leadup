@@ -1676,3 +1676,54 @@ its own verification — which is how this was caught.
 | `SCHEDULE_EXACT_ALARM` | `granted=false` — as documented in §32 and row 4f |
 
 The reminder channel is sounding again, and Home carries no warning card.
+
+---
+
+## 38. Addendum — the reschedule confirmation (row 31) (2026-09-23)
+
+### Where the wrong time came from
+
+§35 measured a reschedule confirmed as *"twenty to four"* (03:40) against a row
+written for **03:54**. The tool had already returned the right answer, twice over:
+
+```
+summary: Reminder "Take the medicine" snoozed: it will now go off
+         3:54 am (Asia/Kolkata), 30 minutes from now.
+data:    trigger_at_local: "3:54 am"
+```
+
+and the prompt merely said *"repeat the resolved date and time when there is one"*
+— which permits re-deriving it. The model converted a digital time into a
+colloquial phrase and got the arithmetic wrong.
+
+The instruction now says to **copy the time from the tool result exactly** and not
+to convert, round or recompute it.
+
+### What the change is supported by
+
+| | Stored | Stated | Match |
+|---|---|---|---|
+| before | 03:54 | 03:40 (*"twenty to four"*) | **no** |
+| after, run 1 | 04:04 | 04:04 (*"four oh four"*) | yes |
+| after, run 2 | 04:04 | 04:04 (*"four oh four"*) | yes |
+
+Both post-change runs also **moved the row**, so the action and the sentence
+agreed in each.
+
+### What that evidence is not
+
+**2 of 2 is supporting evidence, not proof.** I did not run a controlled
+before/after under matched conditions, and prompt behaviour is stochastic; two runs
+of a failure that appeared once cannot establish a rate. The honest statement is
+that the instruction now asks for the behaviour we want, and the two runs since
+agree with it.
+
+### Two measurements I threw away
+
+- One harness sent *"remind me again in 30 minutes"* with no antecedent, and the
+  assistant **correctly asked which reminder to snooze** instead of acting. That
+  was my bug, not a product failure — and the reply was the right one.
+- One run's parser could not read spoken digits (*"four oh three"*), reporting a
+  mismatch that was actually a match.
+
+Neither is counted in the table above.
