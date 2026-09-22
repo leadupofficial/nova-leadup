@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -6,6 +8,7 @@ import '../../app/providers.dart';
 import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
 import '../notifications/nova_notifications_sheet.dart';
+import '../../core/voice/voice_protocol.dart';
 import '../../core/voice/voice_realtime_controller.dart';
 import '../../core/voice/wake_word_controller.dart';
 import '../../services/health_service.dart';
@@ -116,7 +119,16 @@ class HomePage extends ConsumerWidget {
           NovaPrimaryButton(
             label: 'Tap to talk',
             icon: Icons.mic_none_rounded,
-            onPressed: () => context.go('/converse'),
+            // The label promises talking, so the button has to start talking.
+            // It only navigated before: the user landed on Converse in the READY
+            // state with nothing listening, and had to press the mic again — and
+            // measured on the handset, saying "Done" after a reminder produced no
+            // turn at all. The wake word path already did this correctly; this
+            // reuses it.
+            onPressed: () {
+              context.go('/converse');
+              unawaited(_startTurn(ref));
+            },
           ),
           const SizedBox(height: 14),
           Center(
@@ -230,6 +242,20 @@ class HomePage extends ConsumerWidget {
   /// The rig state for the hero card: the shared [avatarStateProvider], lifted
   /// to the wake-word "listening" face while the wake word is armed, and
   /// `warning` when that provider itself failed.
+  /// Opens a real voice turn in the language the user pinned.
+  ///
+  /// Mirrors `_NovaAppState._openWakeWordSession` so the two "talk to NOVA"
+  /// affordances cannot drift apart again.
+  static Future<void> _startTurn(WidgetRef ref) {
+    return ref
+        .read(voiceRealtimeProvider.notifier)
+        .startTurn(
+          language: normalizeVoiceLanguage(
+            ref.read(personaProvider).asData?.value.languagePolicy,
+          ),
+        );
+  }
+
   /// The badge is hidden at zero rather than drawn as `0`, which is what the
   /// hardcoded value read as — a count of nothing that looked like a count.
   String? _unreadBadge(AsyncValue<int> count) {

@@ -477,7 +477,12 @@ describe("the assistant's save_memory tool", () => {
 		expect(call.ok).toBe(true);
 		expect(call.summary).toBe('Saved to memory (preference).');
 		expect(call.data).toEqual({ memory_id: 'memories-new', category: 'preference' });
-		expect(recorder.inserts).toEqual(['memories']);
+		// The stored memory, and the history row that makes the action visible in
+		// `/activity`. Asserted as a set rather than an exact list so a future
+		// side-effect table does not fail a test that is about the memory itself —
+		// but `memories` must be there, and so must the audit row.
+		expect(recorder.inserts).toContain('memories');
+		expect(recorder.inserts).toContain('audit_logs');
 
 		await vi.waitFor(() => {
 			expect(warnSpy).toHaveBeenCalledWith(

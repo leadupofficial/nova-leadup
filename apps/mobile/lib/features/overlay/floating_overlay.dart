@@ -8,6 +8,8 @@ import 'package:go_router/go_router.dart';
 import '../../core/api/providers.dart';
 import '../../core/design/widgets/index.dart';
 import '../../core/voice/voice_provider.dart';
+import '../../core/voice/voice_protocol.dart';
+import '../../core/voice/voice_realtime_controller.dart';
 import '../../core/voice/wake_word_controller.dart';
 
 /// Floating NOVA orb + status panel — port of `overlay/floating.html`.
@@ -127,8 +129,13 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
     super.dispose();
   }
 
-  /// The real voice path that already exists: the shared voice/avatar state plus
-  /// the Converse screen (mirrors `HomePage`'s "Tap to talk").
+  /// Opens a real voice turn: the shared voice/avatar state, the Converse screen,
+  /// and the session itself.
+  ///
+  /// The last part was missing. `_summon` set the avatar to "listening" and
+  /// navigated, which *looked* like a session had started — the orb animated and
+  /// Converse appeared — but no turn was ever opened, so the mic button on
+  /// Converse was still the only thing that actually listened.
   Future<void> _startVoice() async {
     await ref.read(voiceProvider.notifier).setState(VoiceState.listening);
     await ref.read(avatarStateProvider.notifier).setState(AvatarState.listening);
@@ -140,6 +147,18 @@ class _FloatingOverlayState extends ConsumerState<FloatingOverlay>
     }
     // Null when hosted outside a GoRouter (e.g. a widget test).
     GoRouter.maybeOf(context)?.go('/converse');
+    // The session itself, in the language the user pinned — the same call the
+    // wake word path makes. Skipped outside a router so a widget test does not
+    // open a socket.
+    if (GoRouter.maybeOf(context) != null) {
+      await ref
+          .read(voiceRealtimeProvider.notifier)
+          .startTurn(
+            language: normalizeVoiceLanguage(
+              ref.read(personaProvider).asData?.value.languagePolicy,
+            ),
+          );
+    }
   }
 
   void _summon() {

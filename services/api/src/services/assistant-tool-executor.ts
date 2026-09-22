@@ -16,7 +16,7 @@ import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
 import { getPrivacyPreferences } from './privacy-preferences.js';
 import { getDb } from '../db/connection.js';
-import { reminders, tasks } from '@nova/database';
+import { auditLogs, reminders, tasks } from '@nova/database';
 import { logger } from '../utils/logger.js';
 import { HttpError } from '../middleware/error-handler.js';
 import { createMemory, forgetMatchingMemories, archiveSupersededMemories } from './memory.js';
@@ -506,7 +506,7 @@ async function setTaskStatus(
  * Runs one tool call as `userId`. The id comes from the authenticated request;
  * nothing in `toolUse.input` can influence whose data is written.
  */
-export async function executeAssistantTool(
+async function runAssistantTool(
 	userId: string,
 	toolUse: ToolUseBlock,
 	options: ExecuteToolOptions = {},
@@ -1124,6 +1124,82 @@ async function executeAssistantToolAs(
  * `is_error`, which is the only way the model can honestly tell the user that
  * the reminder was not saved.
  */
+/**
+ * The tools whose success changes stored state, and so belongs in the user's
+ * history.
+ *
+ * The `/activity` surface reads `audit_logs`, and nothing on this path wrote to
+ * it: measured on the device, cancelling a reminder by voice set
+ * `reminders.dismissed = true` and left **no** history row at all, so the
+ * interaction the mandate requires to be recorded was invisible. Recording it
+ * here rather than in each tool keeps a newly added write tool from being the
+ * one that silently forgets.
+ */
+const HISTORY_ACTIONS: Record<string, { action: string; targetType: string }> = {
+	create_reminder: { action: 'reminder.create', targetType: 'reminder' },
+	update_reminder: { action: 'reminder.update', targetType: 'reminder' },
+	cancel_reminder: { action: 'reminder.cancel', targetType: 'reminder' },
+	create_task: { action: 'task.create', targetType: 'task' },
+	complete_task: { action: 'task.complete', targetType: 'task' },
+	reopen_task: { action: 'task.reopen', targetType: 'task' },
+	save_memory: { action: 'memory.save', targetType: 'memory' },
+	forget_memory: { action: 'memory.delete', targetType: 'memory' },
+	resolve_follow_up: { action: 'follow_up.resolve', targetType: 'follow_up' },
+};
+
+/**
+ * Writes the history row for one successful tool call.
+ *
+ * Never throws: the action has already happened, and losing the log must not turn
+ * a completed reminder into a reported failure.
+ */
+async function recordHistory(userId: string, call: ExecutedToolCall): Promise<void> {
+	const entry = HISTORY_ACTIONS[call.name];
+	if (!entry) return;
+	try {
+		const data = (call.data ?? {}) as Record<string, unknown>;
+		const targetId =
+			(data.reminder_id ?? data.task_id ?? data.memory_id ?? data.id ?? null) as
+				| string
+				| null;
+		await getDb()
+			.insert(auditLogs)
+			.values({
+				userId,
+				// The assistant acted on the user's behalf, and the log should say so
+				// rather than implying they operated a screen.
+				actorType: 'agent',
+				actorId: 'nova',
+				action: entry.action,
+				targetType: entry.targetType,
+				targetId: targetId ? String(targetId) : null,
+				outcome: 'success',
+				details: { tool: call.name, summary: call.summary },
+			});
+	} catch (error) {
+		logger.warn({ err: error, tool: call.name }, 'could not record assistant action in history');
+	}
+}
+
+/**
+ * Runs one tool and records it in the user's history when it succeeded.
+ *
+ * The recording lives here rather than in [executeToolUses] because this is the
+ * only funnel every path shares: the realtime voice loop
+ * (`realtime/tool-loop.ts`) calls this directly, so a hook on the batch function
+ * never fired for a spoken command. Measured on the device: "Remind me to buy
+ * milk" created the reminder and left no history row.
+ */
+export async function executeAssistantTool(
+	userId: string,
+	toolUse: ToolUseBlock,
+	options: ExecuteToolOptions = {},
+): Promise<ExecutedToolCall> {
+	const call = await runAssistantTool(userId, toolUse, options);
+	if (call.ok) await recordHistory(userId, call);
+	return call;
+}
+
 export async function executeToolUses(
 	userId: string,
 	toolUses: ToolUseBlock[],
