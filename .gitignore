@@ -7,6 +7,14 @@ coverage/
 .env.local
 .env.*.local
 .env.production
+# Any other `.env.<something>` is a real environment file. `.env.test` was the
+# one that slipped through: it holds only placeholders today, but it carries the
+# key names and was one edit away from being committed with real credentials.
+# The tracked templates are re-included below.
+.env.*
+!.env.example
+!*.env.example
+!.env.production.template
 *.log
 .DS_Store
 .cache

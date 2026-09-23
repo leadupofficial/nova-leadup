@@ -2218,3 +2218,33 @@ The empty Converse screen says **"NOVA answers out loud as it thinks."** For a t
 message that is not true: the reply appears as text and nothing is spoken. The
 sentence is accurate for the microphone path and false for the keyboard one. **P3**,
 recorded as row 53.
+
+## §TTS failure, part two — the device voice does take over (2026-09-23)
+
+The previous section left this untested and named the blocker: cloud TTS could not be
+failed without also failing STT, so no spoken turn could be produced. STT and TTS are
+**separate modules** (`realtime/stt/*` and `realtime/tts.ts`), which is the way in — a
+temporary stub at the top of `openSpeechStream`, gated by an env var, fails every cloud
+voice while leaving recognition and the model untouched.
+
+**No production change**: the stub was reverted immediately, and `git diff` for
+`services/api/` is empty afterwards.
+
+### What happened on the handset
+
+The MacBook asked *"What is my schedule tomorrow?"* through the phone's microphone with
+the persona pinned to Tamil.
+
+| Layer | Evidence |
+|---|---|
+| Server | logged **`TTS_ERROR`** for the turn |
+| Screen | status pill **"SPEAKING · ON-DEVICE"** |
+| Screen | amber notice: **"Cloud voice is unavailable — NOVA is speaking with the on-device voice."** |
+| Avatar | **Speaking** (mouth open) |
+| Speaker | MacBook mic: floor ~137, peak **1352 (9.9×)**, and a **17 s speech burst from 16.8 s → 33.5 s** — well after the MacBook's own prompt had stopped |
+
+So the degraded path is **verified working, and it is honest about itself**: the reply
+is still produced, still spoken, and the user is told which voice they are hearing
+rather than being left to wonder. The reply came back in **Tamil**, the pinned
+language, though the question was spoken in English — which is the pinned-language
+policy of §21 doing what it says, not a language-routing fault.
