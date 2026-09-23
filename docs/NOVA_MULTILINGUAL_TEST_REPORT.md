@@ -995,3 +995,53 @@ the sound is broadly right — and that is the honest extent of it.
 **Request beta access for these seven as well as the three in row 41.** They are one
 email, and until then seven of the app's languages are spoken by a voice the request
 describes as English while claiming a provider that is not configured.
+
+## 25. Auto mode: Hindi in, Hindi out (2026-09-23)
+
+§9 requires the response language to match the input. Rounds 54 and 56 verified that
+with a *pinned* language; this checks the other mode, where the policy is `auto` and
+the server is expected to follow the speaker.
+
+The persona was set to `auto` (it had been left pinned to Tamil from §22, which is
+itself worth noting: a pinned language means an English question gets a Tamil answer,
+as §23's TTS-failure run showed).
+
+The MacBook spoke *"कल सुबह मुझे क्या करना है?"* through the phone's microphone:
+
+| | |
+|---|---|
+| Transcript | **"Kal subah mujhe kya karna hai?"** |
+| Reply | **"कल सुबह आपके पास ये काम हैं: कल सुबह नौ बजे क्लायंट को कॉल करना है। और भी कई काम कल को करने हैं — दोपहर पाँच बजे फार्मेसी से दवाई लेनी है, बैंक को कॉल करना है, दंत चिकित्सक को कॉल करना है। शाम छह बजे दूध लेना है।"** |
+| Language | **Hindi, in Devanagari, matching the input** |
+| Grounding | the client call at nine, the pharmacy, the bank, the dentist and the milk are this account's real reminders |
+
+**§9 is satisfied for Hindi in auto mode.**
+
+### The register varies between runs — an observation, not a defect
+
+An earlier auto-mode turn, with the same policy and the same kind of input, produced a
+**Hinglish** reply: an English task list closed by *"Kal subah kaunsa kaam sabse pehle
+karna chahte ho?"* The reply here is pure Devanagari. Both are Hindi to an Indian
+reader and both are grounded; the script the model chooses varies. Recorded because it
+is real, and not raised to a defect because neither run answered in a *different*
+language.
+
+## 26. An unexplained "Thinking…" state — one observation, not reproduced (2026-09-23)
+
+During the language-switch attempt the app sat on **"Thinking…"** for over fifty
+seconds while the server had already finished the turn — `Realtime voice turn complete`
+was in the log with `firstTokenMs 2470`, `modelMs 4128`, and the reply was rendered on
+screen with an idle composer. Two screenshots taken ~25 s apart differed only in the
+clock.
+
+**It did not reproduce.** A deliberate attempt — speak, then tap the microphone
+mid-reply — ended normally in `listening` with a completed reply. So this is recorded
+as **one unexplained observation**, not a defect, and nothing is claimed about its
+frequency or trigger.
+
+What the code does say is that the state *can* be reached: `thinking` is left only by a
+`done` frame (→ `listening`/`idle`), by a server error, or by `_bargeIn` when the turn
+is still active. A turn that stops delivering frames after `speaking: false` leaves
+`thinking` with no exit and no deadline — the same shape as the connect hang this
+controller already bounds with `_connectDeadline`. If it is seen again, that is the
+place to look, and bounding `thinking` the way `connect` is bounded is the fix.
