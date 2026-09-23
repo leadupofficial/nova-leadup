@@ -2169,3 +2169,52 @@ Two seconds on one reminder is a measurement, not a distribution. The change is
 deterministic — the alarm is now exact rather than windowed, which is a property of
 the alarm, not of the sample — but the *number* 2 s is one observation and is
 reported as such.
+
+## §TTS failure — what the failure path actually does (2026-09-23)
+
+§23 lists TTS failure as something to test deliberately. It is the one failure that
+turns a working assistant into a silent one, so it was measured rather than reasoned
+about.
+
+### The REST path degrades honestly — verified
+
+The API was started with **all three TTS credentials invalid** (`ELEVENLABS_API_KEY`,
+`DEEPGRAM_API_KEY`, `SARVAM_API_KEY`), leaving the model key real. A synthesis
+request then returned:
+
+```
+TTS en: HTTP 200 -> {"contentType": "audio/mpeg", "provider": "fallback"}
+TTS hi: HTTP 200 -> {"contentType": "audio/mpeg", "provider": "fallback"}
+```
+
+and the body carried `"audioData": null` with `"error": "TTS provider '<x>'
+unavailable"`, while the server logged:
+
+```
+No cloud TTS voice available; the client must use its device voice
+```
+
+So the surface is **200 with an explicit null and a reason**, not a fake success and
+not a 500. That is the right shape for a client that has a device voice.
+
+### The device-voice fallback is NOT verified — my test was invalid
+
+The obvious follow-up is to check that the phone then speaks with its own voice. I
+tried to reach it by **typing** a message instead of speaking, so that breaking the
+TTS keys would not also break STT.
+
+The phone produced no audio (MacBook mic: floor ~152, peak ~242, **1.6×**). But the
+**control run — with every credential valid — also produced no audio** (floor ~144,
+peak ~236, **1.6×**), and the server log recorded **no TTS request at all**.
+
+Typed messages are simply not spoken. The typed path never reaches TTS, so this
+experiment could not exercise the device-voice fallback in either direction. **The
+fallback remains untested**, and the reason is recorded here rather than the failed
+run being written up as a defect.
+
+### A copy/behaviour mismatch this did surface
+
+The empty Converse screen says **"NOVA answers out loud as it thinks."** For a typed
+message that is not true: the reply appears as text and nothing is spoken. The
+sentence is accurate for the microphone path and false for the keyboard one. **P3**,
+recorded as row 53.
