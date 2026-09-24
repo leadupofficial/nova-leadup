@@ -453,10 +453,19 @@ export class RealtimeVoiceSession {
 		if (this.phase !== 'thinking' && this.phase !== 'speaking') return;
 		if (!this.activeTurn) return;
 		logger.info({ userId: this.user.id, source }, 'Barge-in — cancelling the reply in flight');
+		const partial = this.activeTurn.reply ?? '';
 		this.abortActiveTurn();
 		this.endSpeaking();
 		this.phase = 'listening';
 		this.energy.reset();
+		// The turn is over, so it needs the same terminal frame the client's
+		// `cancel` gets. `endSpeaking()` alone sends `speaking:false`, which the
+		// client reads as "the reply stopped — now thinking": with no `done` after
+		// it, a barge-in that turns out to carry no new utterance (a door, a
+		// cough, a clip that ends) left the handset showing "Thinking…" with the
+		// reply already on screen, until the user spoke again. Committing the
+		// partial is what `cancel` already does, so the two paths agree.
+		this.send({ type: 'done', text: partial });
 	}
 
 	private async beginTurn(rawText: string): Promise<void> {
