@@ -28,6 +28,22 @@ jobs:
       run:
         working-directory: services/${{ matrix.service }}
 
+    # Test suites run the API's boot-time env validation; the repo's .env
+    # files are gitignored, so without these obviously-dummy values every
+    # suite aborts at collection with "JWT_SECRET must be set to a strong
+    # value". Same set as ci.yml's test job.
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://test:test@localhost:5432/test
+      JWT_SECRET: ci-test-jwt-secret-not-a-real-key-0123456789
+      JWT_REFRESH_TOKEN_SECRET: ci-test-refresh-token-not-a-real-key-0123456789
+      JWT_REFRESH_SECRET: ci-test-refresh-secret-not-a-real-key-0123456789
+      PORT: '3001'
+      ANTHROPIC_API_KEY: ci-test-not-a-real-key
+      BROCODE_API_KEY: ci-test-not-a-real-key
+      SARVAM_API_KEY: ci-test-not-a-real-key
+      DEEPGRAM_API_KEY: ci-test-not-a-real-key
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
