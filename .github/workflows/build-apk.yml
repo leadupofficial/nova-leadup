@@ -80,11 +80,17 @@ jobs:
       - name: Resolve build type
         id: mode
         run: |
+          mode="${{ github.event.inputs.build_type || 'release' }}"
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "mode=debug" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=${{ github.event.inputs.build_type || 'release' }}" >> "$GITHUB_OUTPUT"
+            mode=debug
+          elif [ "$mode" = "release" ] && [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            # Without signing secrets a signed release is impossible; fall back to an
+            # unsigned debug APK so the pipeline still produces a usable artifact
+            # instead of failing.
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set; building an unsigned debug APK instead of a signed release."
+            mode=debug
           fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
 
       - name: Decode release keystore
         if: steps.mode.outputs.mode == 'release'
@@ -102,6 +108,7 @@ jobs:
         run: |
           flutter build apk \
             --${{ steps.mode.outputs.mode }} \
+            --target-platform android-arm64 \
             --dart-define=API_URL="$API_URL"
 
       - name: Upload APK

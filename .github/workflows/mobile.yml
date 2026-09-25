@@ -1,236 +1,44 @@
 name: Mobile CI
 
+# Flutter CI for apps/mobile. The previous revision was a dead Expo/React Native
+# pipeline (`expo/expo-github-action`, `npx expo lint`, `expo run:android`, EAS
+# builds) — apps/mobile is a Flutter app now, so none of those steps could ever run.
+# Build artifacts are produced by `.github/workflows/build-apk.yml`; this workflow
+# owns static analysis and tests only.
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  tags:
-    - 'v*'
   workflow_dispatch:
 
 jobs:
-  build-and-test:
-    name: Expo Build & Test
+  lint-and-test:
+    name: Flutter Analyze & Test
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/mobile
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      # The app's pubspec requires Dart ^3.13.2 (apps/mobile/pubspec.yaml), which is
+      # newer than the Dart shipped with Flutter stable 3.29 — the beta channel
+      # (Flutter 3.48 / Dart 3.14) satisfies it.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
         with:
-          node-version: 22.x
-          cache: 'npm'
-          cache-dependency-path: 'apps/mobile/package-lock.json'
-
-      - name: Setup Expo
-        uses: expo/expo-github-action@v8
-        with:
-          expo-version: latest
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+          channel: beta
+          cache: true
 
       - name: Install dependencies
-        run: npm install
+        run: flutter pub get
 
-      - name: Run tests
-        run: npm test
+      - name: Analyze
+        run: flutter analyze
 
-      - name: Type check
-        run: npx tsc --noEmit
-
-      - name: Lint
-        run: npx expo lint
-
-      - name: Build Android APK (development)
-        run: npx expo run:android --variant release --no-wait
-
-      - name: Upload Android APK
-        uses: actions/upload-artifact@v4
-        if: github.event_name == 'push'
-        with:
-          name: android-debug-apk
-          path: apps/mobile/android/app/build/outputs/apk/release/*.apk
-          retention-days: 7
-
-      - name: Run EAS build (preview)
-        if: github.event_name == 'pull_request'
-        run: eas build --platform android --profile preview --non-interactive
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-
-  release-build:
-    name: Release Build
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/mobile
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.x
-          cache: 'npm'
-          cache-dependency-path: 'apps/mobile/package-lock.json'
-
-      - name: Setup Expo
-        uses: expo/expo-github-action@v8
-        with:
-          expo-version: latest
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run tests
-        run: npm test
-
-      - name: Type check
-        run: npx tsc --noEmit
-
-      - name: Lint
-        run: npx expo lint
-
-      - name: Decode Android keystore
-        run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/keystore.jks
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-
-      - name: Build signed Android APK
-        run: |
-          npx expo run:android --variant release \
-            --build-version=${{ github.ref_name }} \
-            --build-number=${{ github.run_number }}
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          ANDROID_KEYSTORE: android/app/keystore.jks
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEYSTORE_KEY_ALIAS: ${{ secrets.ANDROID_KEYSTORE_KEY_ALIAS }}
-          ANDROID_KEYSTORE_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_KEY_PASSWORD }}
-          ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
-          ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
-          ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
-
-      - name: Upload Android APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-release-apk-${{ github.ref_name }}
-          path: apps/mobile/android/app/build/outputs/apk/release/*.apk
-          retention-days: 30
-
-      - name: EAS build (Android release)
-        run: eas build --platform android --profile production --non-interactive
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEYSTORE_KEY_ALIAS: ${{ secrets.ANDROID_KEYSTORE_KEY_ALIAS }}
-          ANDROID_KEYSTORE_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_KEY_PASSWORD }}
-          ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
-          ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
-          ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
-
-      - name: EAS build (iOS release)
-        run: eas build --platform ios --profile production --non-interactive
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
-          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
-          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
-          IOS_CODE_SIGN_IDENTITY: ${{ secrets.IOS_CODE_SIGN_IDENTITY }}
-          IOS_PROVISIONING_PROFILE_SPECIFIER: ${{ secrets.IOS_PROVISIONING_PROFILE_SPECIFIER }}
-          IOS_DEVELOPMENT_TEAM: ${{ secrets.IOS_DEVELOPMENT_TEAM }}
-
-  # ──────────────────────────────────────────────────────────────────────
-  # Store deployment
-  # ──────────────────────────────────────────────────────────────────────
-  deploy-android:
-    name: Deploy Android to Play Store (Internal)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/mobile
-    needs: release-build
-    if: startsWith(github.ref, 'refs/tags/v')
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.2"
-          bundler-cache: true
-          cache-version: "fastlane-${{ runner.os }}"
-          working-directory: apps/mobile/android
-
-      - name: Download Android AAB
-        uses: actions/download-artifact@v4
-        with:
-          name: android-release-aab-${{ github.ref_name }}
-          path: apps/mobile/android/app/build/outputs/bundle/release
-
-      - name: Decode Google Play service account
-        env:
-          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
-        run: |
-          if [ -n "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" ]; then
-            echo "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" | base64 -d > android/fastlane/gcp_service_account.json
-          else
-            echo "Warning: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON not set, skipping Play Store upload"
-            exit 0
-          fi
-
-      - name: Upload to Google Play Store (internal track)
-        run: bundle exec fastlane android deploy_internal
-        env:
-          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
-        working-directory: apps/mobile/android
-
-  deploy-ios:
-    name: Deploy iOS to TestFlight (Internal)
-    runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: apps/mobile
-    needs: release-build
-    if: startsWith(github.ref, 'refs/tags/v')
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.2"
-          bundler-cache: true
-          cache-version: "fastlane-${{ runner.os }}"
-          working-directory: apps/mobile/ios
-
-      - name: Download iOS IPA
-        uses: actions/download-artifact@v4
-        with:
-          name: ios-release-ipa-${{ github.ref_name }}
-          path: apps/mobile/build/ios/ipa
-
-      - name: Upload to TestFlight (internal testing)
-        env:
-          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
-          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY }}
-        run: bundle exec fastlane ios deploy_testflight
-        working-directory: apps/mobile/ios
+      - name: Tests
+        run: flutter test

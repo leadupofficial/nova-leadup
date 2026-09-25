@@ -24,8 +24,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9.15.0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -40,8 +38,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9.15.0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -53,11 +49,23 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     needs: lint
+    # services/api's vitest.config.ts loads .env / .env.test, but both are gitignored,
+    # so the API suites abort at collection with "JWT_SECRET must be set to a strong
+    # value" without these. All values are obviously-dummy test placeholders.
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://test:test@localhost:5432/test
+      JWT_SECRET: ci-test-jwt-secret-not-a-real-key-0123456789
+      JWT_REFRESH_TOKEN_SECRET: ci-test-refresh-token-not-a-real-key-0123456789
+      JWT_REFRESH_SECRET: ci-test-refresh-secret-not-a-real-key-0123456789
+      PORT: '3001'
+      ANTHROPIC_API_KEY: sk-test-fake-key
+      BROCODE_API_KEY: test-brocode-fake
+      SARVAM_API_KEY: test-sarvam-fake
+      DEEPGRAM_API_KEY: test-deepgram-fake
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9.15.0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -75,8 +83,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9.15.0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -100,10 +106,11 @@ jobs:
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
-      # Dependency vulnerability scanning with osv-scanner
-      - uses: google/osv-scanner-action@v1
-        with:
-          scan-path: '.'
+      # High-severity advisory reporting (was google/osv-scanner-action@v1 — that ref
+      # is not published, so the job failed at action resolution). Advisory output is
+      # informational only: the hard gate is `pnpm audit --audit-level=critical` above,
+      # and `|| true` keeps transitive dev-dependency advisories from failing the job.
+      - run: pnpm audit --audit-level=high || true
       # Upload SARIF results to GitHub Security tab
       - uses: github/codeql-action/upload-sarif@v3
         with:
@@ -148,8 +155,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9.15.0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -165,7 +170,7 @@ jobs:
       - run: |
           DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 S3_ENDPOINT=http://localhost:9001 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=minioadmin PORT=3001 pnpm --filter @nova/api run dev &
           DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-jwt-secret-do-not-use-prod REFRESH_TOKEN_SECRET=e2e-refresh-secret-do-not-use-prod AUTH_ENCRYPTION_KEY=e2lwZW50b2tlcmtleXdlbGx0aGluZzMyYnl0ZXNmb3J0ZXNl API_KEY_SECRET=e2e-api-key-secret-do-not-use-prod PORT=3003 pnpm --filter @nova/auth run dev &
-          DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-jwt-secret-do-not-use-prod PORT=3004 CORS_ORIGIN=http://localhost:3000 pnpm --filter @nova/admin run dev &
+          DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-jwt-secret-do-not-use-prod PORT=3004 CORS_ORIGIN=http://localhost:3000 pnpm --filter nova-admin run dev &
           sleep 8
       # Run E2E tests
       - run: pnpm exec playwright test
@@ -189,8 +194,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9.15.0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
