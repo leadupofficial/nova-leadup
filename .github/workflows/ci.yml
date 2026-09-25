@@ -190,11 +190,15 @@ jobs:
             sleep 2
           done
       # Run E2E tests
+      # 127.0.0.1, not localhost: on the runner `localhost` resolves to ::1
+      # (IPv6) first and the services listen on IPv4, so Playwright's request
+      # context got ECONNREFUSED ::1:3001 while curl's IPv4 fallback let the
+      # boot-wait loop pass.
       - run: pnpm exec playwright test
         env:
-          API_URL: http://localhost:3001
-          AUTH_URL: http://localhost:3003
-          ADMIN_URL: http://localhost:3004
+          API_URL: http://127.0.0.1:3001
+          AUTH_URL: http://127.0.0.1:3003
+          ADMIN_URL: http://127.0.0.1:3004
       # Upload Playwright report
       - uses: actions/upload-artifact@v4
         if: always()
