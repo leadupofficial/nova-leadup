@@ -149,21 +149,13 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
-      minio:
-        # minio/minio on Docker Hub now refuses anonymous pulls ("pull access
-        # denied"); the project's own compose files pin the same broken image
-        # and only work because the prod host has it cached. Quay is the
-        # upstream registry for current MinIO releases.
-        image: quay.io/minio/minio:latest
-        ports: ['9001:9000']
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 5
+      # NOTE: no MinIO container. minio/minio (Docker Hub) and quay.io/minio/minio
+      # both refuse anonymous pulls now, and the E2E specs (auth, conversations,
+      # onboarding, dashboard, notifications) never touch object storage —
+      # services/api creates its S3 client lazily (audio-storage.ts getClient),
+      # so the server boots fine against the unreachable dummy endpoint below.
+      # The compose files still reference minio/minio and will break on any host
+      # without the image cached; that is a separate (infra) fix.
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
