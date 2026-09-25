@@ -305,10 +305,14 @@ class OnboardingService {
 
   /// Stores the companion the user configured before they had an account.
   ///
-  /// `/settings/persona` is authenticated, and onboarding runs before sign-in,
-  /// so on a fresh install the save always failed with "Missing or invalid
-  /// authorization header" and the companion was silently lost. Keeping it here
-  /// means the choice survives and can be pushed once the user signs in.
+  /// Historical note: this predates the auth-first router — gate 1 in
+  /// `app/router.dart` now sends every unauthenticated visitor to login, so
+  /// onboarding always runs with a session. Before that, onboarding ran
+  /// pre-auth and the `/settings/persona` save failed with "Missing or invalid
+  /// authorization header", losing the choice; this stash plus the flush in
+  /// `pending_persona_flush.dart` recovered it. The mechanism is now vestigial
+  /// but harmless; removing a write path is a product decision, not a comment
+  /// fix.
   Future<void> savePendingPersona(Map<String, dynamic> persona) async {
     await _prefs.setString(_personaKey, jsonEncode(persona));
   }

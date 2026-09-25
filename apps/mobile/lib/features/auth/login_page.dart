@@ -15,14 +15,16 @@ import 'auth_controller.dart';
 /// `.top-bar` back button + title, the gradient `.heading`, uppercase `.label`
 /// fields, the gradient `.btn-primary` and a `.footer`.
 ///
-/// Two places the export cannot be honoured literally, for the reason the whole
-/// auth flow is email-first:
+/// How this page diverges from the `auth.html` export today:
 ///
-/// 1. `auth.html` is phone-first and its only action is "Continue with OTP".
-///    `services/api` mounts `/api/v1/auth` with login/register/refresh/logout
-///    only — there is no OTP route and `ApiConfig` carries no OTP path — so the
-///    design's OTP button is rendered **disabled** with the reason stated, and
-///    email + password stays the primary, fully working form.
+/// 1. Phone + OTP is the primary path and is fully wired: [_startPhoneSignIn]
+///    sends the code through Firebase Phone Auth, `/onboarding/otp` verifies
+///    it, and the Firebase ID token is exchanged with
+///    `POST /api/v1/auth/firebase/exchange`. Email + password remains behind
+///    an explicit switch. An earlier revision of this comment claimed the OTP
+///    button was "rendered disabled" because no OTP route existed — that was
+///    true then and is false now; the claim survived the fix and misled at
+///    least one subsequent audit.
 /// 2. The design's `.social-row` (Google / Apple) has no implementation behind
 ///    it, so it is not drawn at all rather than drawn dead. The `.sso-notice`
 ///    ("Enterprise SSO available for org domains") is removed for the same reason:

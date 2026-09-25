@@ -37,15 +37,16 @@ typedef ConsentOutcome = Map<String, bool>;
 /// [_ConsentPageState._bootstrap] resolves `.future` from `initState`, before
 /// `build` installs the `ref.watch` subscription.
 final consentHistoryProvider = FutureProvider<List<NovaConsentRecord>>((ref) {
-  // Onboarding runs **before** sign-in, so on a fresh install there is no token and
-  // `GET /consent` answers 401. That surfaced as the very first screen a user sees
-  // reading "Could not load your saved choices. Pull to retry." — and, because
-  // [_ConsentPageState._bootstrap] resolves `.future` from `initState`, it retried in a
-  // loop against the API. Found by running the app on a physical device rather than an
-  // emulator that had already been signed in.
+  // The router gates auth first nowadays (gate 1 in `app/router.dart`), so this
+  // provider normally runs with a live token. The guard stays because edge
+  // states still happen mid-onboarding — an expired 15-minute access token that
+  // has not refreshed yet, for instance. It dates from the earlier pre-auth
+  // onboarding flow, when `GET /consent` answered 401 for every fresh install
+  // and the very first screen read "Could not load your saved choices" while
+  // [_ConsentPageState._bootstrap] retried it in a loop.
   //
-  // With no session there are no prior records to fetch, so this is not a fallback that
-  // hides a failure: it is the correct answer.
+  // With no session there are no prior records to fetch, so this is not a
+  // fallback that hides a failure: it is the correct answer for that state.
   if (!ref.watch(authStateProvider).isAuthenticated) {
     return Future<List<NovaConsentRecord>>.value(const <NovaConsentRecord>[]);
   }

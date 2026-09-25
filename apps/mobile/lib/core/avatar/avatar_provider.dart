@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../theme/nova_theme.dart';
+
 enum AvatarState {
   idle,
   listening,
@@ -45,16 +47,19 @@ class NovaAvatar extends StatelessWidget {
         height: size,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
+          // Designed tokens, not the old Tailwind/indigo pair: the accent is
+          // #5778DF and the cyan is #3BCFCF (nova_tokens.dart — #6366F1 is
+          // explicitly the wrong accent).
           gradient: RadialGradient(
             colors: [
-              const Color(0xFF6366F1).withValues(alpha: 0.8),
-              const Color(0xFF06B6D4).withValues(alpha: 0.3),
+              NovaTheme.primary.withValues(alpha: 0.8),
+              NovaTheme.accent.withValues(alpha: 0.3),
               Colors.transparent,
             ],
           ),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF6366F1).withValues(alpha: 0.4),
+              color: NovaTheme.primary.withValues(alpha: 0.4),
               blurRadius: 24,
               spreadRadius: 4,
             ),
