@@ -133,15 +133,24 @@ export async function initDatabase() {
  `);
 
  // Create default admin user if not exists (password: admin123 - should be changed immediately)
+ // A default admin may only be seeded from explicit environment credentials.
+ // The previous version hardcoded 'admin@novaleadup.com' / 'admin123' and
+ // printed the pair to stdout — a known-password admin in a public repo.
  const [users] = await connection.query('SELECT COUNT(*) as count FROM users WHERE role = ?', ['admin']);
  if (users[0].count === 0) {
+ const seedEmail = process.env.ADMIN_SEED_EMAIL;
+ const seedPassword = process.env.ADMIN_SEED_PASSWORD;
+ if (!seedEmail || !seedPassword || seedPassword.length < 12) {
+ console.log('No admin user exists and ADMIN_SEED_EMAIL/ADMIN_SEED_PASSWORD (min 12 chars) are not set — skipping admin seed.');
+ } else {
  const bcrypt = await import('bcryptjs');
- const passwordHash = bcrypt.hashSync('admin123', 10);
+ const passwordHash = bcrypt.hashSync(seedPassword, 10);
  await connection.query(
  'INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)',
- ['admin@novaleadup.com', passwordHash, 'System Administrator', 'admin']
+ [seedEmail, passwordHash, 'System Administrator', 'admin']
  );
- console.log('Default admin user created: admin@novaleadup.com / admin123');
+ console.log(`Admin user seeded for ${seedEmail} (password not logged).`);
+ }
  }
 
  await connection.release();

@@ -84,6 +84,15 @@ import { getDb } from './db/connection.js';
 validateEnv();
 
 const app: ReturnType<typeof express> = express();
+
+// Threat model: the API is only ever reached via nginx on loopback
+// (127.0.0.1/::1), which appends the real client IP as the LAST X-Forwarded-For
+// entry. Trusting only the loopback hop means Express takes that last entry and
+// ignores any client-supplied (spoofable) XFF values. Without this, req.ip is
+// the proxy's socket address and every rate-limit bucket collapses into one
+// global bucket. If a second proxy hop is ever introduced, this MUST be
+// revisited.
+app.set('trust proxy', 'loopback');
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
 // Security

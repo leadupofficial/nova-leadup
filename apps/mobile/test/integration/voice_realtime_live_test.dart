@@ -27,9 +27,15 @@ import '../core/voice/voice_realtime_test_support.dart';
 /// The audio is a real 16 kHz mono PCM WAV whose path comes from
 /// `NOVA_VOICE_PCM`; generate one for the language you want to check:
 ///
+/// Live mode requires credentials for a real account, supplied via
+/// `NOVA_LIVE_EMAIL` and `NOVA_LIVE_PASSWORD`. There are no built-in defaults —
+/// this repository is public, so credentials must never be committed here.
+/// Without `NOVA_LIVE_API=1` the tests skip without needing any of these.
+///
 /// ```bash
 /// # any 16 kHz mono s16le WAV works
 /// NOVA_LIVE_API=1 NOVA_VOICE_PCM=/tmp/ta_16k.wav \
+///   NOVA_LIVE_EMAIL=you@example.com NOVA_LIVE_PASSWORD='your-password' \
 ///   flutter test --dart-define=API_URL=https://nova.leadup.in \
 ///   test/integration/voice_realtime_live_test.dart
 /// ```
@@ -37,11 +43,16 @@ void main() {
   final live = Platform.environment['NOVA_LIVE_API'] == '1';
   final pcmPath = Platform.environment['NOVA_VOICE_PCM'];
   final language = Platform.environment['NOVA_VOICE_LANG'] ?? 'ta';
-  final email =
-      Platform.environment['NOVA_LIVE_EMAIL'] ?? 'admin@nova.leadup.in';
-  final password =
-      Platform.environment['NOVA_LIVE_PASSWORD'] ??
-      'NovaOwner-eea269bd943c7a5e';
+  final email = Platform.environment['NOVA_LIVE_EMAIL'];
+  final password = Platform.environment['NOVA_LIVE_PASSWORD'];
+
+  if (live && (email == null || password == null)) {
+    throw StateError(
+      'NOVA_LIVE_API=1 was requested but credentials are missing: '
+      'set NOVA_LIVE_EMAIL and NOVA_LIVE_PASSWORD. No credentials are '
+      'hardcoded — this repository is public.',
+    );
+  }
 
   test(
     'a spoken turn streams partials, a final and audio back to the client',
@@ -49,7 +60,7 @@ void main() {
       final pcm = _readPcm16kMono(pcmPath!);
       expect(pcm.length, greaterThan(16000), reason: 'need at least ~0.5s');
 
-      final token = await _login(email, password);
+      final token = await _login(email!, password!);
       final capture = FakeStreamCapture();
       final playback = FakeStreamPlayback();
       // The device voice is a speaker substitute, like the fake capture is a
@@ -143,7 +154,7 @@ void main() {
     'a second utterance is understood without pressing anything again',
     () async {
       final pcm = _readPcm16kMono(pcmPath!);
-      final token = await _login(email, password);
+      final token = await _login(email!, password!);
       final capture = FakeStreamCapture();
       final playback = FakeStreamPlayback();
       final deviceTts = FakeDeviceTts();
@@ -225,7 +236,7 @@ void main() {
     'speaking while NOVA talks cuts it off (barge-in)',
     () async {
       final pcm = _readPcm16kMono(pcmPath!);
-      final token = await _login(email, password);
+      final token = await _login(email!, password!);
       final capture = FakeStreamCapture();
       final playback = FakeStreamPlayback();
       final deviceTts = FakeDeviceTts();

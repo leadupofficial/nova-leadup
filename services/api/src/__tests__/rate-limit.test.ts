@@ -121,6 +121,54 @@ describe('rate limiting', () => {
  });
  });
 
+ /**
+  * Behind the loopback nginx proxy the limiter's default key generator reads
+  * `req.ip`, which is only the real client when `trust proxy` is set to the
+  * loopback preset. These tests pin that behaviour: distinct right-most
+  * X-Forwarded-For entries through the trusted proxy get independent buckets,
+  * earlier client-supplied XFF entries are ignored as spoofable, and a request
+  * with no XFF header still keys on the socket address.
+  */
+ describe('default key generator behind the trusted proxy (trust proxy = loopback)', () => {
+  function createProxyApp(max: number): express.Express {
+   const app: express.Express = express();
+   app.set('trust proxy', 'loopback');
+   app.use(rateLimit({ windowMs: 60_000, max }));
+   app.get('/test', (_req, res) => res.status(200).json({ ok: true }));
+   app.use(errorHandler);
+   return app;
+  }
+
+  it('gives two clients distinct buckets via their right-most XFF entries', async () => {
+   const app = createProxyApp(1);
+
+   // Client A exhausts its bucket through the proxy.
+   expect((await request(app).get('/test').set('X-Forwarded-For', '203.0.113.10')).status).toBe(200);
+   expect((await request(app).get('/test').set('X-Forwarded-For', '203.0.113.10')).status).toBe(429);
+
+   // Client B is unaffected: without trust proxy both would share the
+   // loopback socket bucket and B would already be limited.
+   expect((await request(app).get('/test').set('X-Forwarded-For', '203.0.113.11')).status).toBe(200);
+  });
+
+  it('ignores earlier client-supplied XFF entries', async () => {
+   const app = createProxyApp(1);
+
+   // The spoofed front entry must not become the key; the right-most entry is.
+   expect((await request(app).get('/test').set('X-Forwarded-For', '198.51.100.99, 203.0.113.20')).status).toBe(200);
+   expect((await request(app).get('/test').set('X-Forwarded-For', '203.0.113.20')).status).toBe(429);
+   // And the spoofed address keeps its own untouched bucket.
+   expect((await request(app).get('/test').set('X-Forwarded-For', '198.51.100.99')).status).toBe(200);
+  });
+
+  it('keys on the socket address when no XFF header is present', async () => {
+   const app = createProxyApp(1);
+
+   expect((await request(app).get('/test')).status).toBe(200);
+   expect((await request(app).get('/test')).status).toBe(429);
+  });
+ });
+
  describe('different clients are rate-limited independently', () => {
  it('applies separate limits per key generator result', async () => {
  const windowMs = 60_000;
