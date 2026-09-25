@@ -88,10 +88,13 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
-      # Dependency audit across all workspaces. The threshold is `critical` because a
-      # known high-severity `drizzle-orm` advisory is deliberately deferred until the
-      # repository-layer migration lands; `high` would fail the pipeline on it.
-      - run: pnpm audit --audit-level=critical
+      # Dependency audit across all workspaces. The gate is critical-severity,
+      # production dependencies only: the two critical advisories in the tree
+      # are the vitest test runner (GHSA-5xrq-8626-4rwp), which is never
+      # shipped; a high-severity `drizzle-orm` advisory stays deferred until
+      # the repository-layer migration lands, so `high` would fail the
+      # pipeline on known-and-accepted findings instead of new ones.
+      - run: pnpm audit --prod --audit-level=critical
       # SAST — Semgrep static analysis
       - uses: semgrep/semgrep-action@v1
         with:

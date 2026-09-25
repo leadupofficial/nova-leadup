@@ -55,7 +55,11 @@ jobs:
         run: pnpm run lint
 
       - name: Build ${{ matrix.service }}
-        run: pnpm run build
+        # `foo...` = the package plus its workspace dependencies. A bare
+        # `pnpm run build` here compiles the service against @nova/* packages
+        # whose dist/ types do not exist on a fresh CI checkout, which is how
+        # integration-service failed with TS2307 Cannot find module '@nova/auth'.
+        run: pnpm --filter "@nova/${{ matrix.service }}..." run build
 
       - name: Run tests — ${{ matrix.service }}
         run: pnpm run test
