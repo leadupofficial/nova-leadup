@@ -80,6 +80,11 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    # upload-sarif writes to the Security tab; without this the job fails with
+    # "Resource not accessible by integration".
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -145,7 +150,11 @@ jobs:
           --health-timeout 3s
           --health-retries 5
       minio:
-        image: minio/minio:latest
+        # minio/minio on Docker Hub now refuses anonymous pulls ("pull access
+        # denied"); the project's own compose files pin the same broken image
+        # and only work because the prod host has it cached. Quay is the
+        # upstream registry for current MinIO releases.
+        image: quay.io/minio/minio:latest
         ports: ['9001:9000']
         env:
           MINIO_ROOT_USER: minioadmin
@@ -171,7 +180,7 @@ jobs:
       - run: DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 pnpm run db:migrate
       # Start the services in the background
       - run: |
-          DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 S3_ENDPOINT=http://localhost:9001 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=minioadmin PORT=3001 pnpm --filter @nova/api run dev &
+          DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 S3_ENDPOINT=http://localhost:9001 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=minioadmin JWT_SECRET=e2e-jwt-secret-do-not-use-prod REFRESH_TOKEN_SECRET=e2e-refresh-secret-do-not-use-prod PORT=3001 pnpm --filter @nova/api run dev &
           DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-jwt-secret-do-not-use-prod REFRESH_TOKEN_SECRET=e2e-refresh-secret-do-not-use-prod AUTH_ENCRYPTION_KEY=e2lwZW50b2tlcmtleXdlbGx0aGluZzMyYnl0ZXNmb3J0ZXNl API_KEY_SECRET=e2e-api-key-secret-do-not-use-prod PORT=3003 pnpm --filter @nova/auth run dev &
           DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-jwt-secret-do-not-use-prod PORT=3004 CORS_ORIGIN=http://localhost:3000 pnpm --filter nova-admin run dev &
           sleep 8
