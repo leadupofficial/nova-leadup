@@ -172,10 +172,23 @@ jobs:
       - run: DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 pnpm run db:migrate
       # Start the services in the background
       - run: |
-          DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 S3_ENDPOINT=http://localhost:9001 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=minioadmin JWT_SECRET=e2e-jwt-secret-do-not-use-prod REFRESH_TOKEN_SECRET=e2e-refresh-secret-do-not-use-prod PORT=3001 pnpm --filter @nova/api run dev &
-          DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-jwt-secret-do-not-use-prod REFRESH_TOKEN_SECRET=e2e-refresh-secret-do-not-use-prod AUTH_ENCRYPTION_KEY=e2lwZW50b2tlcmtleXdlbGx0aGluZzMyYnl0ZXNmb3J0ZXNl API_KEY_SECRET=e2e-api-key-secret-do-not-use-prod PORT=3003 pnpm --filter @nova/auth run dev &
-          DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-jwt-secret-do-not-use-prod PORT=3004 CORS_ORIGIN=http://localhost:3000 pnpm --filter nova-admin run dev &
-          sleep 8
+          # JWT_SECRET must be ≥32 chars (services/api and services/auth refuse to
+          # boot otherwise) and identical for all three services so tokens @nova/auth
+          # signs are accepted by @nova/api and @nova/admin; services/auth reads the
+          # refresh secret as JWT_REFRESH_SECRET, not REFRESH_TOKEN_SECRET.
+          DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 S3_ENDPOINT=http://localhost:9001 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=minioadmin JWT_SECRET=e2e-ci-jwt-secret-not-a-real-key-0123456789abcdef PORT=3001 pnpm --filter @nova/api run dev &
+          DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-ci-jwt-secret-not-a-real-key-0123456789abcdef JWT_REFRESH_SECRET=e2e-ci-refresh-secret-not-a-real-key-0123456789abcdef AUTH_ENCRYPTION_KEY=e2lwZW50b2tlcmtleXdlbGx0aGluZzMyYnl0ZXNmb3J0ZXNl API_KEY_SECRET=e2e-api-key-secret-do-not-use-prod PORT=3003 pnpm --filter @nova/auth run dev &
+          # @nova/admin is services/admin (the Express admin service the tests probe
+          # on /health), NOT apps/admin (`nova-admin`, the Next.js console).
+          DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-ci-jwt-secret-not-a-real-key-0123456789abcdef PORT=3004 CORS_ORIGIN=http://localhost:3000 pnpm --filter @nova/admin run dev &
+          # Wait for all three services instead of a bare sleep, which raced the
+          # postgres health gate and the tsx startup.
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/healthz >/dev/null && curl -sf http://localhost:3003/health/live >/dev/null && curl -sf http://localhost:3004/health >/dev/null; then
+              echo "all services healthy"; break
+            fi
+            sleep 2
+          done
       # Run E2E tests
       - run: pnpm exec playwright test
         env:

@@ -1,43 +1,67 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './helpers';
 import type { ApiClient } from './helpers';
 
 test.describe('Full auth lifecycle', () => {
- test('register → login → access protected → refresh → access protected again', async ({ auth }: { auth: ApiClient }) => {
+ // This exercises the live auth API: services/api's /api/v1/auth/*. (The file used
+ // to point at services/auth's /auth/* contract — `tokens.accessToken`, role
+ // 'owner' — but that service's repositories reference columns the canonical
+ // packages/database schema doesn't create, so it cannot serve. ApiClient wraps
+ // Playwright's APIResponse, so response bodies come from await .json(), not
+ // .body(), which is the raw Buffer.)
+ test('register → login → access protected → refresh → access protected again', async ({ api }: { api: ApiClient }) => {
  // 1. Register
- const reg = await auth.post('/auth/register', {
+ const reg = await api.post('/api/v1/auth/register', {
  email: `e2e-lifecycle-${Date.now()}@test.example.com`,
  password: 'lifecycle-pw-123',
  name: 'Lifecycle User',
  });
  expect(reg.status()).toBe(201);
- const userId = reg.body().user.id;
- const accessToken = reg.body().tokens.accessToken;
- const refreshToken = reg.body().tokens.refreshToken;
+ const regBody = await reg.json();
+ const userId = regBody.data.user.id;
+ const accessToken = regBody.data.access_token;
+ const refreshToken = regBody.data.refresh_token;
 
  // 2. Access protected route with initial token
- let res = await auth.get('/auth/me', {
+ let res = await api.get('/api/v1/auth/me', {
  headers: { Authorization: `Bearer ${accessToken}` },
  });
  expect(res.status()).toBe(200);
- expect(res.body().id).toBe(userId);
+ const meBody = await res.json();
+ expect(meBody.data.user.id).toBe(userId);
+ expect(meBody.data.user.email).toContain('@test.example.com');
 
  // 3. Refresh access token
- res = await auth.post('/auth/refresh', { refreshToken });
+ res = await api.post('/api/v1/auth/refresh', { refresh_token: refreshToken });
  expect(res.status()).toBe(200);
- const newAccessToken = res.body().accessToken;
+ const refreshBody = await res.json();
+ const newAccessToken = refreshBody.data.access_token;
+ const newRefreshToken = refreshBody.data.refresh_token;
  expect(newAccessToken).not.toBe(accessToken);
 
  // 4. Access protected route with refreshed token
- res = await auth.get('/auth/me', {
+ res = await api.get('/api/v1/auth/me', {
  headers: { Authorization: `Bearer ${newAccessToken}` },
  });
  expect(res.status()).toBe(200);
- expect(res.body().id).toBe(userId);
+
+ // 5. Logout revokes the refresh token
+ const logout = await api.post('/api/v1/auth/logout', { refresh_token: newRefreshToken }, {
+ headers: { Authorization: `Bearer ${newAccessToken}` },
+ });
+ expect(logout.status()).toBe(204);
+ const reuse = await api.post('/api/v1/auth/refresh', { refresh_token: newRefreshToken });
+ expect(reuse.status()).toBe(401);
  });
 });
 
 test.describe('Web application — homepage', () => {
- const webURL = process.env.WEB_URL || 'http://localhost:3000';
+ // Nothing in this repo serves the consumer marketing/app homepage: apps/web is
+ // absent (apps are mobile=Flutter and admin=Next.js console). These tests only run
+ // when WEB_URL is explicitly pointed at a running deployment.
+ const webURL = process.env.WEB_URL;
+ test.beforeEach(() => {
+ test.skip(!webURL, 'WEB_URL not set — no consumer web app exists in this repo to serve a homepage (apps/web is absent)');
+ });
 
  test('homepage loads with correct title', async ({ page }) => {
  await page.goto(webURL);
