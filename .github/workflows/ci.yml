@@ -170,6 +170,12 @@ jobs:
       - run: sleep 5
       # Run migrations against the service containers
       - run: DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 pnpm run db:migrate
+      # Build the three services AND their @nova/* workspace dependencies. The
+      # `dev` (tsx) entrypoints resolve workspace packages to their dist/
+      # entrypoints, which do not exist on a fresh checkout — the admin boot
+      # died in CI with "Cannot find module @nova/auth/dist/index.js" while
+      # the bare wait loop silently let the job continue to failure.
+      - run: pnpm --filter @nova/api... --filter @nova/auth... --filter @nova/admin... run build
       # Start the services in the background
       - run: |
           # JWT_SECRET must be ≥32 chars (services/api and services/auth refuse to
@@ -182,13 +188,17 @@ jobs:
           # on /health), NOT apps/admin (`nova-admin`, the Next.js console).
           DATABASE_URL=postgres://postgres:postgres@localhost:5433/nova_test REDIS_URL=redis://localhost:6380 JWT_SECRET=e2e-ci-jwt-secret-not-a-real-key-0123456789abcdef PORT=3004 CORS_ORIGIN=http://localhost:3000 pnpm --filter @nova/admin run dev &
           # Wait for all three services instead of a bare sleep, which raced the
-          # postgres health gate and the tsx startup.
+          # postgres health gate and the tsx startup. Fail the job if they never
+          # come up — otherwise Playwright "fails" against dead ports and the
+          # real boot error is lost.
+          healthy=
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:3001/healthz >/dev/null && curl -sf http://localhost:3003/health/live >/dev/null && curl -sf http://localhost:3004/health >/dev/null; then
-              echo "all services healthy"; break
+            if curl -sf http://127.0.0.1:3001/healthz >/dev/null && curl -sf http://127.0.0.1:3003/health/live >/dev/null && curl -sf http://127.0.0.1:3004/health >/dev/null; then
+              echo "all services healthy"; healthy=1; break
             fi
             sleep 2
           done
+          [ -n "$healthy" ] || { echo "services never became healthy in 60s"; exit 1; }
       # Run E2E tests
       # 127.0.0.1, not localhost: on the runner `localhost` resolves to ::1
       # (IPv6) first and the services listen on IPv4, so Playwright's request
