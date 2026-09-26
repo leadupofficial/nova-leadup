@@ -81,6 +81,10 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3001"
+      # Build identity for /metrics (nova_build_info). Without it the gauge reads
+      # "unknown" and "is this deploy actually live?" needs a grep inside the
+      # running container. The deploy sets it to the commit being shipped.
+      GIT_COMMIT: ${GIT_COMMIT:-unknown}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       S3_ENDPOINT: http://minio:9000
