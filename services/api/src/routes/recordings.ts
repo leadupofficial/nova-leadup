@@ -47,7 +47,12 @@ import {
 	parseCursorPagination,
 } from '../schemas/index.js';
 import { recordingCaptureRoutes } from './recordings-capture.js';
-import { parseCursor, parseRecordingId as parseId, RECORDING_COLUMNS } from './recordings-shared.js';
+import {
+	parseCursor,
+	parseRecordingId as parseId,
+	RECORDING_COLUMNS,
+	toClientRecording,
+} from './recordings-shared.js';
 import { decodeKeysetCursor, encodeKeysetCursor, keysetWhere } from '../utils/pagination.js';
 
 
@@ -184,7 +189,11 @@ router.post(
 		}
 
 		logger.info({ recordingId: recording.id, userId }, 'Recording created');
-		res.status(201).json({ success: true, data: recording });
+		// Create was the one path still returning the whole row, so it published
+		// `storageKey` (the object-store address) and `tenantId` while list, detail
+		// and upload already went through the documented projection. No client
+		// reads either field — the Dart model parses only the public set.
+		res.status(201).json({ success: true, data: toClientRecording(recording) });
 	} catch (err) { next(err); }
 	},
 );

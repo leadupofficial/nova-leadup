@@ -34,6 +34,8 @@ import {
 	audioExists,
 	audioStorageCapabilities,
 	buildAudioKey,
+	contentTypeForKey,
+	getAudio,
 	isSupportedAudioType,
 	normaliseContentType,
 	putAudio,
@@ -194,6 +196,64 @@ router.post(
 		} catch (err) { next(err); }
 	},
 );
+
+// ─── Audio download ──────────────────────────────────────────────────────────
+
+/**
+ * Returns one recording's stored audio as raw bytes.
+ *
+ * The read half of [POST /:id/audio]. The mobile client's `readRecordingAudio`
+ * (apps/mobile/lib/core/api/nova_api.dart) has always pointed at this path, but
+ * no handler was ever registered — the route resolved to the 404 fallback, so
+ * every download of audio the server demonstrably held failed. This is that
+ * handler: it fetches the object with [getAudio] and returns exactly the bytes
+ * that were stored, with the container type recovered from the key.
+ *
+ * Ownership is checked through the row, and a row that is missing, soft-deleted
+ * or another user's is a 404 rather than a 403, so the endpoint never confirms
+ * that someone else's recording exists. An object that the row points at but
+ * the store does not hold is also a 404: the honest answer is that there is no
+ * audio to return, not that the recording is forbidden.
+ */
+router.get('/:id/audio', authenticate, async (req: AuthenticatedRequest, res, next) => {
+	try {
+		const id = parseRecordingId(req.params.id);
+		const db = getDb();
+
+		const [recording] = await db.select({ storageKey: audioRecordings.storageKey })
+			.from(audioRecordings)
+			.where(and(
+				eq(audioRecordings.id, id),
+				eq(audioRecordings.userId, req.user!.id),
+				isNull(audioRecordings.deletedAt),
+			))
+			.limit(1);
+		if (!recording) {
+			throw new HttpError(404, 'Recording not found', 'NOT_FOUND');
+		}
+
+		const key = recording.storageKey;
+		let audio: Buffer;
+		try {
+			audio = await getAudio(key);
+		} catch (err) {
+			if (err instanceof AudioStorageError) {
+				if (err.code === 'not_found') {
+					throw new HttpError(404, 'The stored audio for this recording is missing.', 'NOT_FOUND');
+				}
+				throw new HttpError(503, err.message, 'STORAGE_UNAVAILABLE');
+			}
+			throw err;
+		}
+
+		res.status(200);
+		res.setHeader('Content-Type', contentTypeForKey(key));
+		res.setHeader('Content-Length', String(audio.length));
+		// The recording is the caller's own; a shared cache must not retain it.
+		res.setHeader('Cache-Control', 'private, no-store');
+		res.send(audio);
+	} catch (err) { next(err); }
+});
 
 // ─── Async processing ────────────────────────────────────────────────────────
 

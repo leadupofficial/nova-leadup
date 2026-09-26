@@ -12,6 +12,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import request from 'supertest';
+import { createHash } from 'node:crypto';
 import { getTableName } from 'drizzle-orm';
 import './setup.js';
 
@@ -303,6 +304,84 @@ describe('POST /api/v1/recordings/:id/audio', () => {
 		// Nothing may claim the audio was stored.
 		expect(store.audio_recordings[0].status).toBe(RECORDING_STATUS.recording);
 		expect(store.audio_recordings[0].storageChecksum).toBeUndefined();
+	});
+});
+
+/**
+ * superagent has no parser for `audio/*`, so the raw response is buffered here.
+ * A download test must compare the exact bytes, not a decoded approximation.
+ */
+function binaryParser(
+	res: request.Response,
+	callback: (err: Error | null, body?: Buffer) => void,
+): void {
+	const chunks: Buffer[] = [];
+	res.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+	res.on('end', () => callback(null, Buffer.concat(chunks)));
+}
+
+describe('GET /api/v1/recordings/:id/audio', () => {
+	it('returns 401 without a token', async () => {
+		const res = await request(app).get(`/api/v1/recordings/${RECORDING_ID}/audio`);
+		expect(res.status).toBe(401);
+	});
+
+	it('returns 404 for a recording that is not the caller’s', async () => {
+		vi.mocked(getDb).mockReturnValueOnce(emptyDb());
+
+		const res = await request(app)
+			.get(`/api/v1/recordings/${RECORDING_ID}/audio`)
+			.set(auth(OTHER_USER_ID));
+		expect(res.status).toBe(404);
+	});
+
+	it('returns the stored bytes with the container type recovered from the key', async () => {
+		// The read half of the upload route. It was never registered, so this
+		// download answered 404 even when the object was demonstrably in storage.
+		const payload = Buffer.from('RIFF....exact-audio-bytes');
+		const store = { audio_recordings: [recordingRow({ status: RECORDING_STATUS.uploaded })] };
+		objects.set(AUDIO_KEY, payload);
+		vi.mocked(getDb).mockReturnValue(makeDb(store));
+
+		const res = await request(app)
+			.get(`/api/v1/recordings/${RECORDING_ID}/audio`)
+			.set(auth())
+			.buffer(true)
+			.parse(binaryParser);
+
+		expect(res.status).toBe(200);
+		expect(res.headers['content-type']).toContain('audio/wav');
+		expect(res.headers['content-length']).toBe(String(payload.length));
+		const body = res.body as Buffer;
+		expect(body.length).toBe(payload.length);
+		// The bytes must come back byte-for-byte, which the checksum states in one go.
+		expect(createHash('sha256').update(body).digest('hex'))
+			.toBe(createHash('sha256').update(payload).digest('hex'));
+	});
+
+	it('answers 404 when the row exists but the object does not', async () => {
+		// A placeholder key is not an object, so the download must not invent audio.
+		const store = { audio_recordings: [recordingRow()] };
+		vi.mocked(getDb).mockReturnValue(makeDb(store));
+
+		const res = await request(app)
+			.get(`/api/v1/recordings/${RECORDING_ID}/audio`)
+			.set(auth());
+		expect(res.status).toBe(404);
+		expect(res.body.code).toBe('NOT_FOUND');
+	});
+
+	it('answers 503 when the object store is unreachable', async () => {
+		const store = { audio_recordings: [recordingRow({ status: RECORDING_STATUS.uploaded })] };
+		objects.set(AUDIO_KEY, Buffer.from('audio'));
+		storageFlags.rejectReads = true;
+		vi.mocked(getDb).mockReturnValue(makeDb(store));
+
+		const res = await request(app)
+			.get(`/api/v1/recordings/${RECORDING_ID}/audio`)
+			.set(auth());
+		expect(res.status).toBe(503);
+		expect(res.body.code).toBe('STORAGE_UNAVAILABLE');
 	});
 });
 

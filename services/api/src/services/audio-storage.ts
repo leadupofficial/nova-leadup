@@ -197,6 +197,35 @@ export function isSupportedAudioType(contentType: string): boolean {
 	return normaliseContentType(contentType) in AUDIO_CONTENT_TYPES;
 }
 
+/**
+ * Extension → content type, the inverse of [AUDIO_CONTENT_TYPES].
+ *
+ * Built from the same map on purpose: a key's extension is chosen by
+ * [buildAudioKey] from this table, so a download can recover the type it was
+ * stored under without a second `HEAD` against the object store, and the two
+ * directions cannot drift. Where several aliases share an extension the first
+ * canonical type wins (`audio/wav` for `.wav`, `audio/mp4` for `.m4a`).
+ */
+const EXTENSION_CONTENT_TYPES: Readonly<Record<string, string>> = Object.freeze(
+	Object.entries(AUDIO_CONTENT_TYPES).reduce<Record<string, string>>((byExtension, [type, extension]) => {
+		byExtension[extension] ??= type;
+		return byExtension;
+	}, {}),
+);
+
+/**
+ * The content type to serve a stored key with.
+ *
+ * Falls back to `application/octet-stream` for a key this service did not build
+ * (for example the placeholder `POST /recordings` writes, which has no
+ * extension) rather than guessing an audio type the bytes may not be.
+ */
+export function contentTypeForKey(key: string): string {
+	const dot = key.lastIndexOf('.');
+	const extension = dot === -1 ? '' : key.slice(dot).toLowerCase();
+	return EXTENSION_CONTENT_TYPES[extension] ?? 'application/octet-stream';
+}
+
 export interface StoredAudio {
 	key: string;
 	bytes: number;
