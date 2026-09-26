@@ -70,6 +70,7 @@ import { startJobWorker } from './jobs/worker.js';
 import adminPermissionsRoutes from './routes/admin/permissions.js';
 import deviceBootstrapRoutes from './routes/device-bootstrap.js';
 import { requireCapability } from './admin/enforcement.js';
+import { metricsHandler, metricsMiddleware, startDefaultMetrics } from './metrics/registry.js';
 import { primeRuntimeOverlay } from './admin/runtime-config.js';
 import subscriptionsRoutes from './routes/subscriptions.js';
 import { errorHandler } from './middleware/error-handler.js';
@@ -109,8 +110,20 @@ app.use((req, res, next) => {
  next();
 });
 
+// Prometheus scrape endpoint. Registered before the routers mounted at `/` so
+// nothing can shadow it, and outside the `/api/v1` rate limiter: a scrape must
+// not be throttled, and must not consume a client's request budget.
+app.get('/metrics', metricsHandler);
+
 // Health endpoints (no rate limit — must always respond)
 app.use('/', healthRoutes);
+
+// Request metrics. Registered before the API routes so a request is counted
+// whatever it ends up doing, including the 401s and 404s that never reach a
+// handler and so have no route pattern to be labelled by. Health checks are
+// deliberately left out — the container probe hits them every few seconds and
+// they would dominate every series.
+app.use(metricsMiddleware);
 
 // Rate limiting on API routes only
 app.use('/api/v1', rateLimitMiddleware());
@@ -274,6 +287,14 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 if (process.env.NODE_ENV !== 'test') {
+	// Process-level collectors (CPU, heap, GC, event-loop lag) and the build
+	// identity gauge. Started here rather than at module import, because
+	// prom-client's default collectors hold a timer and importing the app in a
+	// test run would leave that handle open.
+	startDefaultMetrics(
+		process.env.npm_package_version ?? '0.1.0',
+		process.env.GIT_COMMIT ?? 'unknown',
+	);
  server.listen(PORT, () => {
 	console.log(`[API] Listening on :${PORT}`);
 	// A voice provider the catalogue routes to but that has no credential is

@@ -4,36 +4,62 @@
 ## 1. Prometheus Metrics
 
 ### Available Endpoints
-| Service | Endpoint | Port |
-|---------|----------|------|
-| API | `/metrics` | 3001 |
-| Auth | (via admin) | 3003 |
-| Admin | `/metrics` | 3004 |
 
-### Key Metrics
+| Service | Endpoint | Port | Status |
+|---------|----------|------|--------|
+| API | `/metrics` | 3001 | **Implemented** (Prometheus text format; see "What is actually exported" below) |
+| Auth | — | 3003 | **Not implemented** — no exporter in `services/auth` |
+| Admin | — | 3004 | **Not implemented** — the admin console has JSON endpoints under `/api/v1/admin/*`, not a Prometheus scrape target |
+
+The API endpoint is reachable only from a private address, or with
+`METRICS_TOKEN` set (then `Authorization: Bearer <token>`). In production the
+container publishes `127.0.0.1:3001` only, so an on-host Prometheus scrapes
+`http://127.0.0.1:3001/metrics`.
+
+### What is actually exported
+
+Served by `services/api/src/metrics/registry.ts`:
+
 ```
-# HTTP metrics
-http_requests_total{method, path, status}
-http_request_duration_seconds{method, path}
+# HTTP — recorded for every request, labelled by route pattern (never by raw URL)
+http_requests_total{method,path,status}
+http_request_duration_seconds{method,path}          # histogram, buckets 5ms … 10s
 
-# Database metrics
-db_query_duration_seconds{query_type}
+# Database connection pool — read at scrape time from the live pg Pool
 db_connection_pool_active
 db_connection_pool_idle
+db_connection_pool_waiting
 
-# Redis metrics
-redis_operations_total{operation}
-redis_hits_total
-redis_misses_total
+# Build identity — answers "is the deploy actually live?" without grepping a container
+nova_build_info{version,commit}
 
-# Auth metrics
-auth_login_attempts_total{status}
-auth_token_refreshes_total
-
-# Business metrics
-voice_transcriptions_total{status}
-ai_requests_total{model, status}
+# Process/runtime defaults from prom-client
+process_cpu_seconds_total, process_resident_memory_bytes, nodejs_heap_size_used_bytes,
+nodejs_eventloop_lag_seconds, nodejs_gc_duration_seconds, …
 ```
+
+`path` is the Express route pattern (`/api/v1/recordings/:id`), and requests that
+never match a route are normalised the same way. Labelling by raw URL would
+create one time series per recording id.
+
+### Documented but NOT instrumented
+
+These appear in earlier versions of this file and in the alerting rules below.
+They do **not** exist yet — a scrape of `/api/v1/admin/*` JSON is the closest
+substitute, and the admin metrics endpoint reports an explicit
+`unavailableReason` where a signal is missing rather than a `0`:
+
+| Metric | Missing instrumentation |
+|--------|------------------------|
+| `db_query_duration_seconds` | no query-level timing; only pool state |
+| `redis_operations_total`, `redis_hits_total`, `redis_misses_total` | no Redis instrumentation anywhere |
+| `auth_login_attempts_total`, `auth_token_refreshes_total` | auth routes increment no counters |
+| `voice_transcriptions_total`, `ai_requests_total{model,status}` | provider calls are logged, not counted |
+| Cost metrics | `services/api/src/admin/pricing.ts` computes cost on demand; not exported |
+
+Alerting rules written against the missing series will never fire. Either
+instrument them or delete the rules — a rule over a non-existent metric is a
+silent hole in monitoring, not coverage.
 
 ## 2. Alerting Rules (Prometheus)
 
@@ -135,5 +161,5 @@ All services use `pino` for structured logging:
 
 ## 5. Access
 - Monitoring dashboard: `/admin/monitoring` (authenticated)
-- Metrics endpoint: `/metrics` (authenticated in production)
+- Metrics endpoint: `/metrics` — private addresses only, or `Authorization: Bearer $METRICS_TOKEN` when that variable is set
 - Log access: Admin console audit log
